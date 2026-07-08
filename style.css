@@ -117,14 +117,15 @@ body {
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.hd-gear {
+.hd-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.hd-gear, .hd-install {
   font-size: 20px;
   color: var(--text-dim);
   cursor: pointer;
   flex: none;
   padding: 4px;
 }
-.hd-gear:hover { color: var(--accent); }
+.hd-gear:hover, .hd-install:hover { color: var(--accent); }
 
 .stat-line {
   margin-top: 16px;

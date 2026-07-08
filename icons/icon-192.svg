@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@800&amp;display=swap');</style>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d97742"/>
+      <stop offset="100%" stop-color="#e0935f"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="42" fill="#0b0b0c"/>
+  <circle cx="96" cy="96" r="76" fill="none" stroke="#1c1c1f" stroke-width="11"/>
+  <circle cx="96" cy="96" r="76" fill="none" stroke="url(#g)" stroke-width="11"
+          stroke-linecap="round" stroke-dasharray="358 120"
+          transform="rotate(-90 96 96)"/>
+  <text x="96" y="96"
+        text-anchor="middle"
+        dominant-baseline="central"
+        font-family="'Inter', system-ui, sans-serif"
+        font-weight="800"
+        font-size="80"
+        fill="url(#g)">H</text>
+</svg>

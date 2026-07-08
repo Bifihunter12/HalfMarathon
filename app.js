@@ -54,6 +54,19 @@
 
   var state = loadState();
   var didAutoScroll = false;
+  var deferredInstallPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    var btn = document.getElementById('installBtn');
+    if (btn) btn.style.display = 'inline-block';
+  });
+  window.addEventListener('appinstalled', function () {
+    deferredInstallPrompt = null;
+    var btn = document.getElementById('installBtn');
+    if (btn) btn.style.display = 'none';
+  });
 
   function effectiveLabel(wi, di) {
     var key = (wi + 1) + '-' + di;
@@ -162,7 +175,10 @@
             '<div class="hd-title">Half Marathon</div>' +
             '<div class="hd-sub">Novice 1 · Hal Higdon</div>' +
           '</div>' +
-          '<i class="ti ti-settings hd-gear" id="gearBtn"></i>' +
+          '<div class="hd-actions">' +
+            '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
+            '<i class="ti ti-settings hd-gear" id="gearBtn"></i>' +
+          '</div>' +
         '</div>' +
         '<div class="stat-line">' +
           '<span class="accent">WEEK ' + currentWeek + ' OF 12</span>' +
@@ -179,6 +195,16 @@
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
     document.getElementById('gearBtn').addEventListener('click', function () {
       renderOnboarding(state.raceDate);
+    });
+    var installBtn = document.getElementById('installBtn');
+    if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
+    installBtn.addEventListener('click', function () {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.then(function () {
+        deferredInstallPrompt = null;
+        installBtn.style.display = 'none';
+      });
     });
 
     var list = el('<div id="weekList"></div>');
@@ -300,6 +326,12 @@
         setTimeout(function () { todayRow.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 150);
       }
     }
+  }
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
   }
 
   renderMain();
