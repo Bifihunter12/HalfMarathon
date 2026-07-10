@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.07.09.1";
+const APP_VERSION = "2026.07.09.2";
 const CACHE_NAME = `halfmarathon-${APP_VERSION}`;
 const APP_FILES = [
   "/",
