@@ -124,6 +124,7 @@
       if (raw) s = JSON.parse(raw);
     } catch (e) {}
     if (!s) s = {};
+    if (!s.userName) s.userName = '';
     if (!s.raceGoal) s.raceGoal = null; // { event, raceDate, goal }
     if (!s.profile) s.profile = null;
     if (!s.planMeta) s.planMeta = null; // { level, weeksAvailable, planLengthWeeks, unsafe, warnings }
@@ -439,12 +440,21 @@
         '<div class="intro-title">Hi, I\'m Carolin.</div>' +
         '<div class="intro-body">I built this because I was training for my own half marathon and got tired of static PDF plans that didn\'t adapt to real life — a run moved to another day, a missed week, wanting to log how it actually went instead of just checking a box.</div>' +
         '<div class="intro-body">So this builds a real plan around wherever you\'re actually starting from — not just the race distance — and adjusts if life gets in the way. Works for anything from a 5K to a 100-miler.</div>' +
+        '<div class="ob-label">What\'s your name?</div>' +
+        '<input class="ob-input" type="text" id="introName" placeholder="e.g. Sarah" value="' + escapeHtml(state.userName || '') + '">' +
         '<button class="ob-btn" id="introStartBtn">Build My Plan</button>' +
         '<div class="intro-footer">No account, no ads — everything stays on your device.</div>' +
       '</div>'
     );
     app.appendChild(wrap);
-    document.getElementById('introStartBtn').addEventListener('click', function () { renderWizard(null); });
+    var nameInput = document.getElementById('introName');
+    document.getElementById('introStartBtn').addEventListener('click', function () {
+      var name = nameInput.value.trim();
+      if (!name) { nameInput.focus(); return; }
+      state.userName = name;
+      saveState(state);
+      renderWizard(null);
+    });
   }
 
   // ── Intake wizard ──────────────────────────────────────────────────────
@@ -452,7 +462,7 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceDate: '', goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrain: 'road', crossOptions: ['Bike'] };
+    var draft = prefill || { event: null, raceDate: '', goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrain: 'road', crossOptions: ['Bike'], userName: state.userName };
     var step = 0;
     var steps = ['event', 'race', 'fitness', 'logistics'];
 
@@ -496,7 +506,9 @@
           '<div class="ob-label">Cross-training available</div>' +
           '<div class="chip-grid">' + chipsHtml('crossOptions', CROSS_OPTIONS, null, draft.crossOptions, true) + '</div>' +
           '<div class="ob-label">Recent injury or pain (last 3 months)?</div>' +
-          '<div class="chip-grid">' + chipsHtml('recentInjury', ['no', 'yes'], { no: 'No', yes: 'Yes' }, draft.recentInjury ? 'yes' : 'no', false) + '</div>';
+          '<div class="chip-grid">' + chipsHtml('recentInjury', ['no', 'yes'], { no: 'No', yes: 'Yes' }, draft.recentInjury ? 'yes' : 'no', false) + '</div>' +
+          '<div class="ob-label">Your name</div>' +
+          '<input class="ob-input" type="text" id="f_userName" value="' + escapeHtml(draft.userName || '') + '">';
       }
       var nav =
         '<div class="step-nav">' +
@@ -520,6 +532,8 @@
         if (rdpw) draft.runDaysPerWeek = parseInt(rdpw.value, 10) || 0;
         var ad = document.getElementById('f_availableDays');
         if (ad) draft.availableDays = parseInt(ad.value, 10) || 4;
+        var un = document.getElementById('f_userName');
+        if (un) draft.userName = un.value;
       }
       wrap.querySelectorAll('.ob-input').forEach(function (input) {
         input.addEventListener('input', syncFieldsToDraft);
@@ -582,6 +596,7 @@
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var weeksAvailable = weeksBetween(today, parseDate(raceGoal.raceDate));
     var safety = evaluateSafety(raceGoal.event, weeksAvailable, level);
+    state.userName = (draft.userName || '').trim();
     state.profile = profile;
     state.raceGoal = raceGoal;
     if (raceUnchanged) {
@@ -638,7 +653,7 @@
       '<div>' +
         '<div class="hd">' +
           '<div>' +
-            '<div class="hd-title">' + EVENT_LABEL[state.raceGoal.event] + ' Training</div>' +
+            '<div class="hd-title">' + (state.userName ? escapeHtml(state.userName) + '&rsquo;s ' : '') + EVENT_LABEL[state.raceGoal.event] + ' Training</div>' +
             '<div class="hd-sub">' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal] + '</div>' +
           '</div>' +
           '<div class="hd-actions">' +
@@ -666,7 +681,7 @@
         event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
         experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, availableDays: state.profile.availableDays,
-        terrain: state.profile.terrain, crossOptions: state.profile.crossOptions.slice()
+        terrain: state.profile.terrain, crossOptions: state.profile.crossOptions.slice(), userName: state.userName
       });
     });
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
