@@ -166,6 +166,20 @@ body {
 .red-flag-list { margin-top: 16px; padding-left: 18px; }
 .red-flag-list li { font-size: 13.5px; line-height: 1.75; color: var(--text); }
 
+.glossary-list { margin-top: 10px; }
+.glossary-list dt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 14px;
+}
+.glossary-list dd {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+}
+
 /* ── Header ─────────────────────────────────────────────────────────── */
 .hd { display: flex; align-items: flex-start; justify-content: space-between; }
 .hd-title {

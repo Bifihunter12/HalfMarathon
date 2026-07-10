@@ -102,6 +102,31 @@
     'Eating-disorder behaviors'
   ];
 
+  var GLOSSARY_WORKOUTS = [
+    ['Easy run', 'Comfortable, conversational pace. Most of your weekly running should feel like this — it\'s not a warm-up, it\'s the actual point.'],
+    ['Long run', 'Your longest run of the week, done slower than race pace. Builds the endurance and mental toughness that shorter runs can\'t.'],
+    ['Easy + strides', 'An easy run finished with 4-6 short ~20 second pickups to a quick but controlled pace, with a full walk/jog recovery between each. Works on form and leg speed without adding real fatigue.'],
+    ['Tempo run', 'A sustained "comfortably hard" effort — faster than easy, but controlled, not all-out — usually bracketed by easy warm-up and cool-down miles.'],
+    ['Intervals (e.g. "6 x 400m")', 'Repeated fast segments at a specific pace, with recovery jogs or walks in between. Builds speed and running economy.'],
+    ['Fartlek', 'Swedish for "speed play" — unstructured bursts of faster running mixed into an easy run, by feel rather than exact distances or paces.'],
+    ['Hill repeats', 'Repeated hard efforts running uphill, with an easy jog or walk back down as recovery. Builds strength with less impact than flat sprinting.'],
+    ['Race-pace run (e.g. "4 mi @ half pace")', 'Miles run at the exact pace you\'re targeting for race day, so your body and mind learn what that effort actually feels like.'],
+    ['Medium-long run', 'Shorter than your weekly long run but longer than a typical easy run — extra time on your feet without the full long-run fatigue.'],
+    ['Back-to-back long runs', 'Two long-ish runs on consecutive days (e.g. Saturday and Sunday), used in ultra training to practice running on already-tired legs.'],
+    ['Cross-training', 'Non-running aerobic exercise (bike, swim, elliptical, etc.) that builds fitness while giving your running muscles a break.'],
+    ['Strength', 'Resistance training (squats, lunges, core work) to build durability and reduce injury risk — not meant to leave you sore for your next run.'],
+    ['Fueling practice', 'A reminder tag on long runs over about 90 minutes — practice eating and drinking exactly what you plan to use on race day.'],
+    ['Rest', 'A full day off running. Not optional — this is when your body actually adapts and gets stronger.']
+  ];
+  var GLOSSARY_PHASES = [
+    ['Base', 'Early weeks focused on easy aerobic mileage — building a foundation before anything harder.'],
+    ['Build', 'Weekly volume (and a little intensity) increases as your base solidifies.'],
+    ['Peak', 'Your hardest, highest-volume weeks — closest to what race day will actually demand.'],
+    ['Taper', 'The final weeks before race day, where mileage drops sharply so you arrive rested, not just fit.'],
+    ['Race', 'Race week itself — minimal, easy running to stay loose, then the race.'],
+    ['Cutback week', 'A deliberately lighter week built in every few weeks so your body can absorb the training instead of just accumulating fatigue.']
+  ];
+
   function isRest(label) { return label.trim().toLowerCase() === 'rest'; }
   function isLoggable(label) { return !isRest(label); }
   function isRace(label) { return !!RACE_LABEL_SET[label.trim().toLowerCase()]; }
@@ -657,6 +682,7 @@
             '<div class="hd-sub">' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal] + '</div>' +
           '</div>' +
           '<div class="hd-actions">' +
+            '<i class="ti ti-book-2 hd-install" id="glossaryBtn" title="What this all means"></i>' +
             '<i class="ti ti-shield-check hd-install" id="safetyBtn" title="Safety info"></i>' +
             '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
             '<i class="ti ti-settings hd-gear" id="gearBtn"></i>' +
@@ -685,6 +711,7 @@
       });
     });
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
+    document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
     var installBtn = document.getElementById('installBtn');
     if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
     installBtn.addEventListener('click', function () {
@@ -838,6 +865,28 @@
     );
     app.appendChild(wrap);
     document.getElementById('safetyBackBtn').addEventListener('click', renderMain);
+  }
+
+  function renderGlossaryPanel() {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    function defList(entries) {
+      return '<dl class="glossary-list">' + entries.map(function (e) {
+        return '<dt>' + escapeHtml(e[0]) + '</dt><dd>' + escapeHtml(e[1]) + '</dd>';
+      }).join('') + '</dl>';
+    }
+    var wrap = el(
+      '<div class="ob">' +
+        '<div class="ob-title">What this all means</div>' +
+        '<div class="ob-sub">Workout types</div>' +
+        defList(GLOSSARY_WORKOUTS) +
+        '<div class="ob-sub" style="margin-top:14px">Plan phases</div>' +
+        defList(GLOSSARY_PHASES) +
+        '<button class="ob-btn" id="glossaryBackBtn">Back to plan</button>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+    document.getElementById('glossaryBackBtn').addEventListener('click', renderMain);
   }
 
   if ('serviceWorker' in navigator) {
