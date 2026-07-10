@@ -437,7 +437,7 @@
     app.innerHTML = '';
     var wrap = el(
       '<div class="ob intro">' +
-        '<div class="intro-title">Hi, I\'m Carolin.</div>' +
+        '<div class="intro-title">Hi.</div>' +
         '<div class="intro-body">I built this because I was training for my own half marathon and got tired of static PDF plans that didn\'t adapt to real life — a run moved to another day, a missed week, wanting to log how it actually went instead of just checking a box.</div>' +
         '<div class="intro-body">So this builds a real plan around wherever you\'re actually starting from — not just the race distance — and adjusts if life gets in the way. Works for anything from a 5K to a 100-miler.</div>' +
         '<div class="ob-label">What\'s your name?</div>' +
