@@ -21,7 +21,7 @@
   var GOAL_FACTOR = { finish: 0.85, improve: 1.0, pr: 1.05, aggressive: 1.12 };
   var TERRAINS = ['road', 'trail', 'hills', 'mountain'];
   var TERRAIN_LABEL = { road: 'Road', trail: 'Trail', hills: 'Hills', mountain: 'Mountain' };
-  var CROSS_OPTIONS = ['Bike', 'Swim', 'Elliptical', 'Row', 'Hike', 'Strength', 'None'];
+  var CROSS_OPTIONS = ['Bike', 'Swim', 'Elliptical', 'Row', 'Hike', 'Strength', 'Yoga', 'Other', 'None'];
 
   var INCREASE_PCT = { beginner: 0.04, novice: 0.06, intermediate: 0.08, advanced: 0.10 };
   var CUTBACK_PCT = { beginner: 0.20, novice: 0.17, intermediate: 0.15, advanced: 0.12 };
@@ -111,11 +111,12 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function round5(n) { return Math.round(n * 2) / 2; }
+  function formatLongRunLabel(miles, terrain) {
+    return miles + ' mi long run' + (terrain && terrain !== 'road' ? ' (' + TERRAIN_LABEL[terrain] + ')' : '') + (miles * 11 >= 90 ? ' + fueling practice' : '');
+  }
+  function formatEasyRunLabel(miles) { return miles + ' mi easy run'; }
 
   // ── State ──────────────────────────────────────────────────────────────
-  function defaultProfile() {
-    return { weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrain: 'road', crossOptions: ['Bike'], recentRaceTime: '' };
-  }
   function loadState() {
     var s = null;
     try {
@@ -198,39 +199,30 @@
     var unsafe = weeksAvailable < cfg.minWeeks;
     var warnings = [];
     if (unsafe) {
-      warnings.push('You have ' + weeksAvailable + ' week' + (weeksAvailable === 1 ? '' : 's') + ' until race day, but a safe ' + EVENT_LABEL[event] + ' build at your current level needs at least ' + cfg.minWeeks + '. This plan uses reduced, run/walk-friendly volume to maximize your finish odds — consider a later race date or a shorter distance.');
+      warnings.push('You have ' + weeksAvailable + ' week' + (weeksAvailable === 1 ? '' : 's') + ' until race day, but a safe ' + EVENT_LABEL[event] + ' build at your current level needs at least ' + cfg.minWeeks + '. This plan scales volume and long runs down to reduce injury risk given the shorter runway — consider a later race date or a shorter distance for a safer build.');
     }
     return { unsafe: unsafe, warnings: warnings };
   }
 
-  function choosePlanLength(weeksAvailable) {
-    return Math.min(weeksAvailable, 40);
+  function choosePlanLength(weeksAvailable, event, level) {
+    var idealWeeks = EVENT_TABLE[event][level].idealWeeks;
+    return Math.min(weeksAvailable, Math.round(idealWeeks * 1.6), 40);
   }
 
   // ── Weekly template: which of the 7 slots are long/quality/easy/cross/rest ──
   var RUN_SLOT_PRIORITY = [1, 3, 5, 0, 2, 4]; // Tue, Thu, Sat, Mon, Wed, Fri (slot 6 = long, fixed)
   function assignWeekTemplate(runDays, wantCross) {
+    // capped at 5 (not 6) so one of the 6 non-long slots is always structurally
+    // left as 'rest' below, satisfying the "at least one rest day" rule without
+    // ever having to overwrite an already-assigned run day after the fact
+    var additional = Math.max(0, Math.min(5, runDays - 1));
     var slots = ['rest', 'rest', 'rest', 'rest', 'rest', 'rest', 'long'];
-    var additional = Math.max(0, Math.min(6, runDays - 1));
     var chosen = RUN_SLOT_PRIORITY.slice(0, additional);
     chosen.forEach(function (idx, i) { slots[idx] = i === 0 ? 'quality' : 'easy'; });
-    var restGuaranteed = false;
     var restPref = [4, 0, 2, 3, 5, 1];
-    for (var i = 0; i < restPref.length; i++) {
-      if (slots[restPref[i]] === 'rest') { restGuaranteed = true; break; }
-    }
-    if (!restGuaranteed) restPref.push(0);
-    for (var j = 0; j < 7; j++) {
-      if (j === 6) continue;
-      if (slots[j] === 'rest' && !(restGuaranteed && j === restPref[0])) {
-        if (wantCross) slots[j] = 'cross';
-      }
-    }
-    // guarantee at least one true rest slot
-    var hasRest = slots.indexOf('rest') !== -1;
-    if (!hasRest) {
-      var fallback = restPref.filter(function (i) { return i !== 6; })[0];
-      slots[fallback] = 'rest';
+    var restSlot = restPref.filter(function (i) { return slots[i] === 'rest'; })[0];
+    for (var j = 0; j < 6; j++) {
+      if (slots[j] === 'rest' && j !== restSlot && wantCross) slots[j] = 'cross';
     }
     return slots;
   }
@@ -266,16 +258,15 @@
   function computeWeeklyVolumes(planLengthWeeks, phases, startVolume, peakVolume, level, taperWeeks) {
     var vols = [];
     var blockPeak = startVolume;
-    var achievedPeak = startVolume;
     var cutbackInterval = CUTBACK_INTERVAL[level];
     var buildWeekCounter = 0;
     var taperIdx = 0;
     for (var i = 0; i < planLengthWeeks; i++) {
       var phase = phases[i];
       if (phase === 'race') {
-        vols.push(round5(achievedPeak * 0.15));
+        vols.push(round5(blockPeak * 0.15));
       } else if (phase === 'taper') {
-        vols.push(round5(achievedPeak * taperFraction(taperWeeks, taperIdx)));
+        vols.push(round5(blockPeak * taperFraction(taperWeeks, taperIdx)));
         taperIdx++;
       } else {
         buildWeekCounter++;
@@ -286,7 +277,6 @@
           var candidate = Math.min(blockPeak * (1 + INCREASE_PCT[level]), peakVolume);
           if (i === 0) candidate = startVolume;
           blockPeak = candidate;
-          achievedPeak = Math.max(achievedPeak, candidate);
           vols.push(round5(candidate));
         }
       }
@@ -314,6 +304,7 @@
     var wantCross = !(profile.crossOptions && profile.crossOptions.length === 1 && profile.crossOptions[0] === 'None');
     var qualityPool = QUALITY_POOL[event];
     var longShare = LONG_RUN_SHARE[event] + (runDays <= 3 ? 0.15 : runDays === 4 ? 0.05 : 0);
+    var longRunSafetyCap = Math.max(profile.longestRun * 1.15, 2);
 
     var weeks = [];
     for (var w = 1; w <= planLengthWeeks; w++) {
@@ -326,7 +317,8 @@
       var strengthBudget = STRENGTH_SESSIONS[phase] != null ? STRENGTH_SESSIONS[phase] : 1;
 
       var days = [];
-      var longRunMiles = phase === 'race' ? 0 : round5(Math.min(longRunPeak, targetVolume * longShare));
+      var longRunCap = phase === 'base' ? Math.min(longRunPeak, longRunSafetyCap) : longRunPeak;
+      var longRunMiles = phase === 'race' ? 0 : round5(Math.min(longRunCap, targetVolume * longShare));
       var qualityMiles = (phase === 'base' || phase === 'race') ? 0 : round5(Math.min(targetVolume * 0.18, 8));
       var remaining = Math.max(0, targetVolume - longRunMiles - qualityMiles);
       var easySlotCount = template.filter(function (t) { return t === 'easy'; }).length;
@@ -345,17 +337,17 @@
           day.type = 'rest'; day.label = 'Rest';
         } else if (tok === 'long') {
           day.type = 'long'; day.miles = longRunMiles;
-          day.label = longRunMiles + ' mi long run' + (longRunMiles * 11 >= 90 ? ' + fueling practice' : '');
+          day.label = formatLongRunLabel(longRunMiles, profile.terrain);
         } else if (tok === 'quality') {
           day.type = 'quality'; day.label = qualityText;
         } else if (tok === 'easy') {
           day.type = 'easy'; day.miles = easyEach;
-          day.label = easyEach + ' mi easy run';
+          day.label = formatEasyRunLabel(easyEach);
         } else if (tok === 'cross') {
           var addStrength = strengthAssigned < strengthBudget;
           if (addStrength) strengthAssigned++;
           day.type = 'cross';
-          day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (addStrength ? ' + strength' : '');
+          day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + strength' : '');
         } else {
           day.type = 'rest'; day.label = 'Rest';
         }
@@ -368,7 +360,7 @@
   }
 
   // ── Adaptive layer: dampen future weeks if recent training was mostly missed ──
-  function applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today) {
+  function applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrain) {
     var raceDate = parseDate(raceGoal.raceDate);
     var planLengthWeeks = planMeta.planLengthWeeks;
     var currentWeekIdx = -1;
@@ -399,8 +391,8 @@
         wk.days.forEach(function (day) {
           if (day.miles) {
             day.miles = round5(day.miles * dampen);
-            if (day.type === 'long') day.label = day.miles + ' mi long run' + (day.miles * 11 >= 90 ? ' + fueling practice' : '');
-            else if (day.type === 'easy') day.label = day.miles + ' mi easy run';
+            if (day.type === 'long') day.label = formatLongRunLabel(day.miles, terrain);
+            else if (day.type === 'easy') day.label = formatEasyRunLabel(day.miles);
           }
         });
       }
@@ -411,7 +403,7 @@
         wkNext.days.forEach(function (day) {
           if (day.type === 'long' && day.miles) {
             day.miles = round5(day.miles * 0.8);
-            day.label = day.miles + ' mi long run' + (day.miles * 11 >= 90 ? ' + fueling practice' : '');
+            day.label = formatLongRunLabel(day.miles, terrain);
           }
         });
       }
@@ -422,7 +414,7 @@
 
   function generateAll(profile, raceGoal, planMeta, logs, today) {
     var weeks = buildStructuredWeeks(profile, raceGoal, planMeta);
-    var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today);
+    var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, profile.terrain);
     return adjusted;
   }
 
@@ -442,6 +434,7 @@
   function renderWizard(prefill) {
     var app = document.getElementById('app');
     app.innerHTML = '';
+    var isEdit = !!prefill;
     var draft = prefill || { event: null, raceDate: '', goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrain: 'road', crossOptions: ['Bike'] };
     var step = 0;
     var steps = ['event', 'race', 'fitness', 'logistics'];
@@ -491,10 +484,13 @@
       var nav =
         '<div class="step-nav">' +
           (step > 0 ? '<button class="ob-btn ob-btn-secondary" id="backBtn">Back</button>' : '<div></div>') +
-          '<button class="ob-btn" id="nextBtn">' + (step === steps.length - 1 ? 'Generate Plan' : 'Next') + '</button>' +
-        '</div>';
+          '<button class="ob-btn" id="nextBtn">' + (step === steps.length - 1 ? (isEdit ? 'Save' : 'Generate Plan') : 'Next') + '</button>' +
+        '</div>' +
+        (isEdit ? '<div class="ob-cancel" id="cancelWizardBtn">Cancel</div>' : '');
       var wrap = el('<div class="ob">' + body + nav + '</div>');
       app.appendChild(wrap);
+      var cancelBtn = document.getElementById('cancelWizardBtn');
+      if (cancelBtn) cancelBtn.addEventListener('click', renderMain);
 
       function syncFieldsToDraft() {
         var dateInput = document.getElementById('f_raceDate');
@@ -547,7 +543,7 @@
         } else if (steps[step] === 'race') {
           if (!draft.raceDate) { document.getElementById('f_raceDate').focus(); return; }
         } else if (steps[step] === 'logistics') {
-          finishWizard(draft);
+          finishWizard(draft, isEdit);
           return;
         }
         step++;
@@ -557,22 +553,27 @@
     renderStep();
   }
 
-  function finishWizard(draft) {
+  function finishWizard(draft, isEdit) {
     var profile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
       experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, availableDays: draft.availableDays,
       terrain: draft.terrain, crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'], recentRaceTime: ''
     };
     var raceGoal = { event: draft.event, raceDate: draft.raceDate, goal: draft.goal };
+    var raceUnchanged = isEdit && state.raceGoal && state.raceGoal.event === raceGoal.event && state.raceGoal.raceDate === raceGoal.raceDate;
     var level = classifyUser(profile);
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var weeksAvailable = weeksBetween(today, parseDate(raceGoal.raceDate));
     var safety = evaluateSafety(raceGoal.event, weeksAvailable, level);
-    var planLengthWeeks = choosePlanLength(weeksAvailable);
     state.profile = profile;
     state.raceGoal = raceGoal;
-    state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: safety.unsafe, warnings: safety.warnings };
-    state.logs = {}; state.overrides = {}; state.crossType = {};
+    if (raceUnchanged) {
+      state.planMeta = { level: level, weeksAvailable: state.planMeta.weeksAvailable, planLengthWeeks: state.planMeta.planLengthWeeks, unsafe: safety.unsafe, warnings: safety.warnings };
+    } else {
+      var planLengthWeeks = choosePlanLength(weeksAvailable, raceGoal.event, level);
+      state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: safety.unsafe, warnings: safety.warnings };
+      state.logs = {}; state.overrides = {}; state.crossType = {};
+    }
     saveState(state);
     didAutoScroll = false;
     renderMain();
@@ -783,9 +784,8 @@
   }
 
   function crossOptionsHtml(selected) {
-    var opts = ['Bike', 'Swim', 'Elliptical', 'Row', 'Strength', 'Yoga', 'Hike', 'Other'];
     var html = '<option value=""' + (!selected ? ' selected' : '') + '>Cross-train</option>';
-    opts.forEach(function (t) {
+    CROSS_OPTIONS.filter(function (t) { return t !== 'None'; }).forEach(function (t) {
       html += '<option value="' + t + '"' + (selected === t ? ' selected' : '') + '>' + t + '</option>';
     });
     return html;
