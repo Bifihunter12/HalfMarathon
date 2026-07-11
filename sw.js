@@ -1,5 +1,5 @@
-const APP_VERSION = "2026.07.10.1";
-const CACHE_NAME = `halfmarathon-${APP_VERSION}`;
+const APP_VERSION = "2026.07.10.2";
+const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
   "/index.html",
@@ -23,7 +23,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE_NAME && k.startsWith("halfmarathon-")).map((k) => caches.delete(k)))
+        Promise.all(keys.filter((k) => k !== CACHE_NAME && (k.startsWith("halfmarathon-") || k.startsWith("runner-"))).map((k) => caches.delete(k)))
       )
       .then(() => self.clients.matchAll({ type: "window" }))
       .then((clients) => clients.forEach((client) => client.postMessage({ type: "APP_UPDATED", version: APP_VERSION })))

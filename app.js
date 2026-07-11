@@ -470,6 +470,7 @@
     app.innerHTML = '';
     var wrap = el(
       '<div class="ob intro">' +
+        '<div class="brand-mark">Runner</div>' +
         '<div class="intro-title">Hi.</div>' +
         '<div class="intro-body">I built this because I was training for my own half marathon and got tired of static PDF plans that didn\'t adapt to real life — a run moved to another day, a missed week, wanting to log how it actually went instead of just checking a box.</div>' +
         '<div class="intro-body">So this builds a real plan around wherever you\'re actually starting from — not just the race distance — and adjusts if life gets in the way. Works for anything from a 5K to a 100-miler.</div>' +
@@ -697,6 +698,7 @@
       '<div>' +
         '<div class="hd">' +
           '<div>' +
+            '<div class="brand-mark">Runner</div>' +
             '<div class="hd-title">' + (state.userName ? escapeHtml(state.userName) + '&rsquo;s ' : '') + EVENT_LABEL[state.raceGoal.event] + ' Training</div>' +
             '<div class="hd-sub">' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal] + '</div>' +
           '</div>' +

@@ -1,7 +1,7 @@
 {
-  "name": "Half Marathon Training",
-  "short_name": "Half Marathon",
-  "description": "12-week half marathon training calendar, mapped to your race date.",
+  "name": "Runner",
+  "short_name": "Runner",
+  "description": "A training plan for 5K through 100-mile races, built around your real life.",
   "theme_color": "#0b0b0c",
   "background_color": "#0b0b0c",
   "display": "standalone",
