@@ -1,0 +1,577 @@
+<title>Runner — Execution Plan</title>
+<style>
+  :root {
+    --bg: #0b0b0c;
+    --surface: #141416;
+    --surface-2: #1a1a1c;
+    --border: rgba(20, 16, 12, 0.12);
+    --border-2: rgba(20, 16, 12, 0.08);
+    --text: #201c18;
+    --text-dim: #5c554c;
+    --text-faint: #8a8377;
+    --accent: #c96a38;
+    --accent-soft: rgba(201, 106, 56, 0.12);
+    --signal: #3f6e85;
+    --signal-soft: rgba(63, 110, 133, 0.12);
+    --later: #8a8377;
+    --later-soft: rgba(138, 131, 119, 0.10);
+    --page-bg: #f4efe8;
+    --card-bg: #fffdfa;
+  }
+  :root[data-theme="dark"] {
+    --text: #f0ede6;
+    --text-dim: #b3aa9c;
+    --text-faint: #746b5f;
+    --border: rgba(255, 255, 255, 0.10);
+    --border-2: rgba(255, 255, 255, 0.07);
+    --accent: #e08a52;
+    --accent-soft: rgba(224, 138, 82, 0.14);
+    --signal: #7fa6bd;
+    --signal-soft: rgba(127, 166, 189, 0.14);
+    --later: #948c7e;
+    --later-soft: rgba(148, 140, 126, 0.12);
+    --page-bg: #0e0c0a;
+    --card-bg: #17140f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --text: #f0ede6;
+      --text-dim: #b3aa9c;
+      --text-faint: #746b5f;
+      --border: rgba(255, 255, 255, 0.10);
+      --border-2: rgba(255, 255, 255, 0.07);
+      --accent: #e08a52;
+      --accent-soft: rgba(224, 138, 82, 0.14);
+      --signal: #7fa6bd;
+      --signal-soft: rgba(127, 166, 189, 0.14);
+      --later: #948c7e;
+      --later-soft: rgba(148, 140, 126, 0.12);
+      --page-bg: #0e0c0a;
+      --card-bg: #17140f;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html { background: var(--page-bg); }
+  body {
+    margin: 0;
+    background: var(--page-bg);
+    color: var(--text);
+    font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sans {
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 64px 24px 96px;
+  }
+
+  header.doc-head {
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 14px;
+  }
+  h1 {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .dek {
+    font-family: inherit;
+    font-size: 18px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    max-width: 62ch;
+    margin: 0;
+  }
+  .north-star {
+    font-family: inherit;
+    font-style: italic;
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--text);
+    max-width: 60ch;
+    margin: 18px 0 0;
+    padding-left: 16px;
+    border-left: 2px solid var(--accent);
+  }
+
+  .status-block {
+    margin-top: 40px;
+    padding: 22px 24px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .status-block h2 {
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    margin: 0 0 10px;
+  }
+  .status-block p {
+    font-size: 15.5px;
+    line-height: 1.65;
+    color: var(--text-dim);
+    margin: 0 0 12px;
+  }
+  .status-block p:last-child { margin-bottom: 0; }
+  .shipped {
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .shipped b { font-weight: 700; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 22px;
+    margin: 36px 0 8px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    flex: none;
+  }
+  .dot.now { background: var(--accent); }
+  .dot.fork { background: var(--signal); }
+  .dot.later { background: var(--later); }
+
+  .track {
+    margin-top: 44px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+  }
+  .track-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .track-code {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+    flex: none;
+  }
+  .track h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.005em;
+  }
+  .track-goal {
+    font-family: inherit;
+    font-size: 15.5px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin: 4px 0 22px;
+    max-width: 58ch;
+  }
+
+  ul.tasks { list-style: none; margin: 0; padding: 0; }
+  ul.tasks li {
+    display: grid;
+    grid-template-columns: 20px 1fr;
+    gap: 4px 14px;
+    padding: 13px 0;
+    border-bottom: 1px solid var(--border-2);
+  }
+  ul.tasks li:last-child { border-bottom: none; }
+  .box {
+    width: 15px;
+    height: 15px;
+    margin-top: 3px;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 3px;
+  }
+  li.now .box { border-color: var(--accent); }
+  li.fork .box { border-color: var(--signal); background: var(--signal-soft); }
+  li.later .box { border-color: var(--later); background: transparent; }
+  .task-title {
+    font-family: inherit;
+    font-size: 15.5px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.4;
+  }
+  .task-note {
+    grid-column: 2;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 8px;
+    vertical-align: 1px;
+  }
+  li.fork .tag { background: var(--signal-soft); color: var(--signal); }
+
+  .skip-block {
+    margin-top: 44px;
+    padding: 20px 24px;
+    background: var(--later-soft);
+    border-radius: 4px;
+  }
+  .skip-block h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: 0.01em;
+  }
+  .skip-block p {
+    font-family: inherit;
+    font-size: 14.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    margin: 0;
+  }
+
+  .order {
+    margin-top: 48px;
+    padding-top: 28px;
+    border-top: 1px solid var(--border);
+  }
+  .order h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0 0 6px;
+  }
+  .order-sub {
+    font-family: inherit;
+    font-size: 15.5px;
+    color: var(--text-dim);
+    margin: 0 0 24px;
+    max-width: 58ch;
+    line-height: 1.5;
+  }
+  ol.seq {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: step;
+  }
+  ol.seq li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 2px 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-2);
+  }
+  ol.seq li:last-child { border-bottom: none; }
+  ol.seq li::before {
+    content: counter(step);
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    grid-row: 1 / span 2;
+  }
+  .seq-title {
+    font-family: inherit;
+    font-size: 15.5px;
+    font-weight: 700;
+  }
+  .seq-note {
+    grid-column: 2;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text-dim);
+    line-height: 1.55;
+  }
+
+  .flag {
+    margin-top: 44px;
+    padding: 24px 26px;
+    border: 1px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 4px;
+  }
+  .flag h2 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 10px;
+    color: var(--accent);
+    letter-spacing: 0.01em;
+  }
+  .flag p {
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--text);
+    margin: 0 0 10px;
+  }
+  .flag p:last-child { margin-bottom: 0; }
+
+  footer.doc-foot {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--text-faint);
+    letter-spacing: 0.02em;
+  }
+
+  @media (max-width: 560px) {
+    .page { padding: 40px 18px 64px; }
+    h1 { font-size: 32px; }
+    .dek { font-size: 16px; }
+    .track h2, .order h2 { font-size: 20px; }
+  }
+</style>
+
+<div class="page">
+
+  <header class="doc-head">
+    <p class="eyebrow sans">Runner &middot; internal working doc</p>
+    <h1>The execution plan, restructured</h1>
+    <p class="dek">Zaera&nbsp;Labs' roadmap sketches the app Runner eventually becomes. This is the version scoped to what a solo, session-by-session build can actually do next &mdash; reorganized around what needs no new infrastructure versus what needs a real architecture decision first.</p>
+    <p class="north-star">&ldquo;Become the smartest running coach in every runner's pocket.&rdquo; &mdash; that's the North Star, and it means AI isn't optional scope. T2 is confirmed, not a maybe &mdash; the only open question is timing.</p>
+  </header>
+
+  <div class="status-block">
+    <h2 class="sans">Where Runner actually stands today</h2>
+    <p>Everything so far is a client-only PWA &mdash; no backend, no accounts, no AI calls. That already covers a surprising amount of Phase&nbsp;0 and the logic core of Phase&nbsp;1.</p>
+    <p class="shipped"><b>Shipped:</b> onboarding, plan-eligibility &amp; safety rules, the plan generator (5K&ndash;100&nbsp;mile), editable calendar, cross-training picker, basic missed-workout adaptation, a static workout glossary, and PWA install.</p>
+    <p><b>Gap against the roadmap's own "Must Have for Launch" list:</b> no dedicated Today screen, no per-workout detail view, logging is one free-text time field rather than distance/pace/effort, no weekly recap, no settings screen separate from the plan wizard, no units toggle.</p>
+  </div>
+
+  <div class="legend sans">
+    <span class="legend-item"><span class="dot now"></span>Buildable now &mdash; no new infrastructure</span>
+    <span class="legend-item"><span class="dot fork"></span>Needs a backend decision first</span>
+    <span class="legend-item"><span class="dot later"></span>Deliberately later</span>
+  </div>
+
+  <section class="track">
+    <div class="track-head">
+      <span class="track-code mono">T0</span>
+      <h2>Close the Phase&nbsp;1 gap</h2>
+    </div>
+    <p class="track-goal">The most visible distance between what exists and what the roadmap calls "launch-ready" &mdash; all pure UI and logic on top of the generator that already runs.</p>
+    <ul class="tasks">
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Today screen</span>
+        <span class="task-note">A focused single-workout view instead of scrolling the calendar to the highlighted row &mdash; the roadmap treats this as the app's home screen for a reason.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Workout detail view</span>
+        <span class="task-note">Tapping a day expands into what/why/how-hard/what-if-I-can't, reusing and extending the glossary content per workout type instead of a generic reference page.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Real logging fields</span>
+        <span class="task-note">Distance, pace or effort (RPE), optional heart rate, notes &mdash; replacing the single time input. This also unlocks difficulty-based adaptation later in T1.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Weekly recap</span>
+        <span class="task-note">Auto-generated from data already in state: planned vs. completed, longest run, consistency, next week's preview.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Settings screen</span>
+        <span class="task-note">Separate from the plan-edit wizard &mdash; name, units, reset plan, delete all data. The wizard should stop being the only way to reach basic account controls.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Export / import</span>
+        <span class="task-note">Since there's no account, a JSON download/upload is the only backup path &mdash; and the intro screen already promises "everything stays on your device," which makes this more than a nice-to-have.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Units toggle (km / mi)</span>
+        <span class="task-note">Currently hardcoded to miles; the roadmap explicitly lists units as a required onboarding input.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="track">
+    <div class="track-head">
+      <span class="track-code mono">T1</span>
+      <h2>Deepen adaptation</h2>
+    </div>
+    <p class="track-goal">Still pure client-side logic &mdash; no backend &mdash; but needs T0's richer logging as an input.</p>
+    <ul class="tasks">
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Illness &amp; vacation mode</span>
+        <span class="task-note">Mark date ranges unavailable; auto-reduce or shift the plan around them instead of leaving unmarked gaps.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Difficulty-based adaptation</span>
+        <span class="task-note">Repeated "too easy" or "too hard" ratings nudge future weeks &mdash; depends on T0's effort/RPE field existing first.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Structured pain reporting</span>
+        <span class="task-note">Location, severity, walking impact &mdash; replacing the static red-flag list with an actual flow. Same non-negotiable rule as the roadmap: never diagnose, only redirect to a professional when warranted.</span>
+      </li>
+      <li class="now"><span class="box"></span>
+        <span class="task-title">Guided goal-change flow</span>
+        <span class="task-note">Settings editing already supports changing the race date; this makes the "what changes, what stays, what's the new risk" summary explicit instead of implicit.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="track">
+    <div class="track-head">
+      <span class="track-code mono">T2</span>
+      <h2>The AI fork</h2>
+    </div>
+    <p class="track-goal">Confirmed, not optional &mdash; the North Star is being the smartest coach in the runner's pocket, and that's an AI claim. The only open question was ever timing: this starts after T0/T1, once the coaching core is solid enough to be worth explaining. First move is still a small serverless function that proxies LLM calls, so no key ever sits in client code.</p>
+    <ul class="tasks">
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">Stand up the proxy function<span class="tag mono">first step</span></span>
+        <span class="task-note">One serverless endpoint, no persistent user data required for this alone &mdash; the narrowest possible version of "add a backend."</span>
+      </li>
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">"Why this workout" explanations</span>
+        <span class="task-note">Grounded only in the active plan's real data &mdash; per the roadmap's own rule, the AI explains and personalizes, it never invents training load.</span>
+      </li>
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">AI weekly recap</span>
+        <span class="task-note">A natural-language layer over the T0 recap data, not a replacement for it &mdash; the deterministic version should keep working if the AI call fails.</span>
+      </li>
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">Guardrails as a system prompt</span>
+        <span class="task-note">The roadmap's non-negotiable rules (no unsafe plans, no diagnosis, no guilt-based motivation) become literal constraints on the prompt, not aspirational copy.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="track">
+    <div class="track-head">
+      <span class="track-code mono">T3</span>
+      <h2>The accounts fork</h2>
+    </div>
+    <p class="track-goal">Also confirmed, also deferred &mdash; a bigger backend lift than T2, since it's real auth and a database, not just a proxy function. Comes after T2 proves the AI layer is worth having an account for.</p>
+    <ul class="tasks">
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">Update the intro screen's promise<span class="tag mono">first step</span></span>
+        <span class="task-note">"No account, everything stays on your device" stops being true the moment T3 ships. Rewrite that copy before, not after &mdash; the intro screen has already been written once; it can be written again.</span>
+      </li>
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">Auth + cross-device sync</span>
+        <span class="task-note">If pursued: a known-quantity backend (Supabase has already been used elsewhere) rather than building auth from scratch.</span>
+      </li>
+      <li class="fork"><span class="box"></span>
+        <span class="task-title">Data-deletion flow</span>
+        <span class="task-note">The roadmap calls for this explicitly once accounts exist &mdash; not optional if there's a database with a person's training history in it.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="track">
+    <div class="track-head">
+      <span class="track-code mono">T4</span>
+      <h2>Integrations</h2>
+    </div>
+    <p class="track-goal">Realistically depends on T3 &mdash; Health Connect, Strava, and Garmin all involve OAuth tokens that need somewhere durable to live.</p>
+    <ul class="tasks">
+      <li class="later"><span class="box"></span>
+        <span class="task-title">Strava / Garmin / Health Connect import</span>
+        <span class="task-note">Not a pure-static-PWA task &mdash; needs the T3 backend to exist first, regardless of which integration comes first.</span>
+      </li>
+      <li class="later"><span class="box"></span>
+        <span class="task-title">Workout auto-matching</span>
+        <span class="task-note">Matching imported activities to planned workouts, with the user able to correct every match &mdash; per the roadmap's own rule.</span>
+      </li>
+    </ul>
+  </section>
+
+  <section class="track">
+    <div class="track-head">
+      <span class="track-code mono">T5</span>
+      <h2>Native app, GPS, notifications</h2>
+    </div>
+    <p class="track-goal">The roadmap itself sequences this last &mdash; "reduce dependence on third-party apps only after the coaching product is proven." Nothing changes that logic here.</p>
+    <ul class="tasks">
+      <li class="later"><span class="box"></span>
+        <span class="task-title">Web Push notifications</span>
+        <span class="task-note">Lighter first step than a native app &mdash; still needs a backend to hold push subscriptions, but far smaller than the rest of this track.</span>
+      </li>
+      <li class="later"><span class="box"></span>
+        <span class="task-title">Native GPS, live coaching, voice coaching, watch support</span>
+        <span class="task-note">A real platform decision (native app or a wrapper like Capacitor) &mdash; not worth resolving before T0&ndash;T2 prove the coaching product itself is worth using daily.</span>
+      </li>
+    </ul>
+  </section>
+
+  <div class="skip-block">
+    <h2 class="sans">Explicitly not building</h2>
+    <p>Straight from the roadmap's own "do not build without demand" list, and nothing here changes that judgment: community, teams, social feed, public profiles, coach marketplace, leaderboards, virtual races, clubs. If real demand shows up later, that's a new conversation &mdash; not a default to design around now.</p>
+  </div>
+
+  <section class="order">
+    <h2>The actual sequence</h2>
+    <p class="order-sub">Unlike the tracks above, this part is genuinely ordered &mdash; each step assumes the ones before it are done.</p>
+    <ol class="seq">
+      <li>
+        <span class="seq-title">T0, items 1&ndash;3 first</span>
+        <span class="seq-note">Today screen, workout detail, real logging fields &mdash; the biggest visible gap against "launch-ready," and needs nothing new architecturally.</span>
+      </li>
+      <li>
+        <span class="seq-title">T0, items 4&ndash;7</span>
+        <span class="seq-note">Recap, settings, export/import, units &mdash; rounds out parity with the roadmap's Phase&nbsp;1 checklist.</span>
+      </li>
+      <li>
+        <span class="seq-title">Stand up the backend once, for T2 first</span>
+        <span class="seq-note">Both T2 and T3 need infrastructure that doesn't exist yet; standing it up once for the AI proxy (T2) rather than twice is cheaper, and T2 is the more direct hit on the North Star.</span>
+      </li>
+      <li>
+        <span class="seq-title">T1 interleaves anytime after T0</span>
+        <span class="seq-note">Pure logic, no dependency on the T2/T3 timing &mdash; can happen in parallel with whichever comes first.</span>
+      </li>
+      <li>
+        <span class="seq-title">T4, then T5</span>
+        <span class="seq-note">Genuinely later. Importing Strava data into an app with one user isn't useful yet, and native GPS is something the roadmap itself defers.</span>
+      </li>
+    </ol>
+  </section>
+
+  <div class="flag">
+    <h2 class="sans">Decided</h2>
+    <p>T2 and T3 both happen &mdash; the North Star requires it. Timing is the lever, not whether: T0 and T1 come first so the coaching core is solid before there's anything for the AI to explain or an account to protect.</p>
+    <p>The one piece of homework that comes with that: the intro screen's "no account, no ads, everything stays on your device" line has an expiration date. It's accurate through T0/T1 and stops being true the moment T3 ships &mdash; noted as a first step inside T3 above, not left as a surprise for later.</p>
+  </div>
+
+  <footer class="doc-foot sans">
+    Restructured from <em>Runner &middot; Development Workplan</em> (Zaera&nbsp;Labs) &middot; source roadmap kept as reference, not reproduced here in full
+  </footer>
+
+</div>
