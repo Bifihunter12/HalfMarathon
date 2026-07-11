@@ -777,6 +777,7 @@
             '<div class="hd-sub">' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal] + '</div>' +
           '</div>' +
           '<div class="hd-actions">' +
+            '<i class="ti ti-chart-line hd-install" id="progressBtn" title="Progress"></i>' +
             '<i class="ti ti-book-2 hd-install" id="glossaryBtn" title="What this all means"></i>' +
             '<i class="ti ti-shield-check hd-install" id="safetyBtn" title="Safety info"></i>' +
             '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
@@ -809,6 +810,7 @@
     document.getElementById('gearBtn').addEventListener('click', renderSettings);
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
     document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
+    document.getElementById('progressBtn').addEventListener('click', renderProgressPanel);
     var installBtn = document.getElementById('installBtn');
     if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
     installBtn.addEventListener('click', function () {
@@ -1199,6 +1201,107 @@
     });
 
     document.getElementById('settingsBackBtn').addEventListener('click', renderMain);
+  }
+
+  function renderProgressPanel() {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var raceDate = parseDate(state.raceGoal.raceDate);
+    var planLengthWeeks = state.planMeta.planLengthWeeks;
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var weeks = result.weeks;
+
+    var totalDistance = 0, longestRun = 0, completedCount = 0, scheduledSoFar = 0;
+    var currentWeekIdx = -1;
+    weeks.forEach(function (wk) {
+      wk.days.forEach(function (day, di) {
+        var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+        var key = wk.weekNum + '-' + di;
+        var label = state.overrides[key] || day.label;
+        if (d <= today && isLoggable(label)) {
+          scheduledSoFar++;
+          var entry = getLog(key);
+          if (entry) {
+            completedCount++;
+            if (entry.distance) {
+              totalDistance += entry.distance;
+              if (entry.distance > longestRun) longestRun = entry.distance;
+            }
+          }
+        }
+        if (sameDate(d, today)) currentWeekIdx = wk.weekNum;
+      });
+    });
+    if (currentWeekIdx === -1) {
+      for (var w = 1; w <= planLengthWeeks; w++) {
+        if (today < dateForSlot(raceDate, planLengthWeeks, w, 0)) { currentWeekIdx = w; break; }
+      }
+      if (currentWeekIdx === -1) currentWeekIdx = planLengthWeeks;
+    }
+
+    var lastWeek = currentWeekIdx >= 2 ? weeks[currentWeekIdx - 2] : null;
+    var nextWeek = currentWeekIdx <= planLengthWeeks - 1 ? weeks[currentWeekIdx] : null;
+
+    var overallHtml =
+      '<dl class="wd-info">' +
+        '<dt>Distance so far</dt><dd>' + toUnit(round1(totalDistance)) + ' ' + unitLabel() + '</dd>' +
+        '<dt>Longest run</dt><dd>' + (longestRun ? toUnit(longestRun) + ' ' + unitLabel() : '&mdash;') + '</dd>' +
+        '<dt>Sessions completed</dt><dd>' + completedCount + ' of ' + scheduledSoFar + ' scheduled so far</dd>' +
+      '</dl>';
+
+    var lastWeekHtml = '<p class="recap-empty">No completed week yet.</p>';
+    if (lastWeek) {
+      var planned = 0, completed = 0, plannedDist = 0, doneDist = 0, hardestLabel = null, hardestRpe = -1;
+      lastWeek.days.forEach(function (day, di) {
+        var key = lastWeek.weekNum + '-' + di;
+        var label = state.overrides[key] || day.label;
+        if (!isLoggable(label)) return;
+        planned++;
+        if (day.miles) plannedDist += day.miles;
+        var entry = getLog(key);
+        if (entry) {
+          completed++;
+          if (entry.distance) doneDist += entry.distance;
+          if (entry.effort && entry.effort > hardestRpe) { hardestRpe = entry.effort; hardestLabel = label; }
+        }
+      });
+      var consistency = planned ? Math.round(100 * completed / planned) : 0;
+      lastWeekHtml =
+        '<dl class="wd-info">' +
+          '<dt>Sessions</dt><dd>' + completed + ' of ' + planned + ' completed (' + consistency + '%)</dd>' +
+          '<dt>Distance</dt><dd>' + toUnit(round1(doneDist)) + ' of ' + toUnit(round1(plannedDist)) + ' ' + unitLabel() + ' planned</dd>' +
+          '<dt>Hardest session</dt><dd>' + (hardestLabel ? escapeHtml(hardestLabel) + ' (RPE ' + hardestRpe + ')' : '&mdash;') + '</dd>' +
+        '</dl>';
+    }
+
+    var nextWeekHtml = '<p class="recap-empty">Nothing scheduled after this.</p>';
+    if (nextWeek) {
+      var items = nextWeek.days.map(function (day, di) {
+        var key = nextWeek.weekNum + '-' + di;
+        var label = state.overrides[key] || day.label;
+        var d = dateForSlot(raceDate, planLengthWeeks, nextWeek.weekNum, di);
+        if (!isLoggable(label)) return null;
+        return '<li>' + DOW_FULL[d.getDay()] + ' &middot; ' + escapeHtml(label) + '</li>';
+      }).filter(Boolean);
+      nextWeekHtml = items.length ? '<ul class="recap-list">' + items.join('') + '</ul>' : '<p class="recap-empty">Rest week.</p>';
+    }
+
+    var wrap = el(
+      '<div class="ob">' +
+        '<div class="ob-title">Progress</div>' +
+        '<div class="ob-sub">This far</div>' +
+        overallHtml +
+        '<div class="ob-sub" style="margin-top:20px">Last week</div>' +
+        lastWeekHtml +
+        '<div class="ob-sub" style="margin-top:20px">Next week</div>' +
+        nextWeekHtml +
+        '<button class="ob-btn" id="progressBackBtn">Back to plan</button>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+    document.getElementById('progressBackBtn').addEventListener('click', renderMain);
   }
 
   if ('serviceWorker' in navigator) {
