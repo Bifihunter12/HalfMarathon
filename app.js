@@ -127,6 +127,53 @@
     ['Cutback week', 'A deliberately lighter week built in every few weeks so your body can absorb the training instead of just accumulating fatigue.']
   ];
 
+  // Workout detail content, keyed by the generator's structural day.type — not by label
+  // text, so an edited label doesn't break which explanation shows.
+  var WORKOUT_DETAIL = {
+    easy: {
+      what: 'An easy-paced run.',
+      why: 'Builds your aerobic base without adding fatigue — most of your training should be this.',
+      howHard: 'Conversational pace. RPE 3-4 out of 10 — you should be able to talk in full sentences.',
+      ifCant: "Shorten it or walk portions. An easy run doesn't need to be perfect, just consistent.",
+      mistakes: 'Running it too fast is the #1 mistake — easy should feel almost too slow.'
+    },
+    long: {
+      what: 'Your longest run of the week.',
+      why: "Builds the endurance and durability shorter runs can't.",
+      howHard: 'Comfortable, slower than race pace. RPE 4-5.',
+      ifCant: 'Cut it short rather than skip it entirely — a partial long run still counts.',
+      mistakes: 'Starting too fast, and skipping fluids or fuel on runs over 90 minutes.'
+    },
+    quality: {
+      what: "Today's key workout — tempo, intervals, hills, or race-pace work (see the label above for specifics).",
+      why: 'This is the one effort each week that actually raises your fitness ceiling.',
+      howHard: 'Follow the effort described in the label. Usually RPE 6-8.',
+      ifCant: "Drop to an easy run instead of forcing it — one missed quality session won't hurt your race.",
+      mistakes: 'Skipping the warm-up, or going out too hard in the first rep.'
+    },
+    cross: {
+      what: 'Non-running aerobic work.',
+      why: 'Builds fitness while giving your running muscles a break.',
+      howHard: 'Easy-to-moderate effort unless the label says otherwise.',
+      ifCant: 'Swap for any aerobic activity you have access to, or just rest.',
+      mistakes: "Treating it as optional — it's protecting your running legs from overuse."
+    },
+    rest: {
+      what: 'A full day off running.',
+      why: 'This is when your body actually adapts and gets stronger.',
+      howHard: 'N/A — rest.',
+      ifCant: 'If you must move, keep it very light — a walk, not a workout.',
+      mistakes: "Feeling guilty about it. Rest is part of the plan, not a gap in it."
+    },
+    race: {
+      what: 'Race day.',
+      why: "The goal you've been building toward.",
+      howHard: 'Your target effort for the distance — start controlled, not fast.',
+      ifCant: "If you're sick or injured, it's OK to defer — check the safety panel.",
+      mistakes: "Trying anything new on race day — gear, food, pace — that you haven't practiced in training."
+    }
+  };
+
   function isRest(label) { return label.trim().toLowerCase() === 'rest'; }
   function isLoggable(label) { return !isRest(label); }
   function isRace(label) { return !!RACE_LABEL_SET[label.trim().toLowerCase()]; }
@@ -163,6 +210,22 @@
     return s;
   }
   function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+
+  // logs[key] is a structured entry ({time, distance, effort, notes}) but may still be
+  // a bare string for anything saved before logging fields existed — normalize on read.
+  function getLog(key) {
+    var v = state.logs[key];
+    if (!v) return null;
+    if (typeof v === 'string') return { time: v };
+    return v;
+  }
+  function setLog(key, patch) {
+    var next = Object.assign({}, getLog(key), patch);
+    var hasContent = !!(next.time || next.distance || next.effort || next.notes);
+    if (hasContent) state.logs[key] = next;
+    else delete state.logs[key];
+    saveState(state);
+  }
 
   var state = loadState();
   var didAutoScroll = false;
@@ -669,7 +732,7 @@
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var weeks = result.weeks;
 
-    var totalLoggable = 0, totalLogged = 0, currentWeek = 1;
+    var totalLoggable = 0, totalLogged = 0, currentWeek = 1, todayDayIdx = -1;
     weeks.forEach(function (wk) {
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
@@ -679,7 +742,7 @@
           totalLoggable++;
           if (state.logs[key]) totalLogged++;
         }
-        if (sameDate(d, today)) currentWeek = wk.weekNum;
+        if (sameDate(d, today)) { currentWeek = wk.weekNum; todayDayIdx = di; }
       });
     });
 
@@ -744,6 +807,41 @@
       });
     });
 
+    if (todayDayIdx !== -1) {
+      var todayKey = currentWeek + '-' + todayDayIdx;
+      var todayDayData = weeks[currentWeek - 1].days[todayDayIdx];
+      var todayLabel = state.overrides[todayKey] || todayDayData.label;
+      var todayLoggable = isLoggable(todayLabel);
+      var todayEntry = getLog(todayKey);
+      var todayLogged = !!todayEntry;
+
+      var todayStatusHtml;
+      if (!todayLoggable) {
+        todayStatusHtml = '<div class="today-status">Nothing scheduled &mdash; recover well.</div>';
+      } else if (todayLogged) {
+        todayStatusHtml = '<div class="today-status today-status--done"><i class="ti ti-check"></i> Logged' +
+          (todayEntry.time ? ' &middot; ' + escapeHtml(todayEntry.time) : '') +
+          (todayEntry.distance ? ' &middot; ' + todayEntry.distance + ' mi' : '') + '</div>';
+      } else {
+        todayStatusHtml = '<div class="today-status today-status--pending">Not logged yet</div>';
+      }
+
+      var todayCard = el(
+        '<div class="today-card' + (!todayLoggable ? ' is-rest' : '') + '">' +
+          '<div class="today-eyebrow">TODAY</div>' +
+          '<div class="today-plan">' + escapeHtml(todayLabel) + '</div>' +
+          todayStatusHtml +
+          (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
+        '</div>'
+      );
+      app.appendChild(todayCard);
+      if (todayLoggable) {
+        document.getElementById('todayDetailBtn').addEventListener('click', function () {
+          renderWorkoutDetail(currentWeek, todayDayIdx);
+        });
+      }
+    }
+
     var list = el('<div id="weekList"></div>');
     app.appendChild(list);
 
@@ -772,7 +870,9 @@
         var race = isRace(label);
         var cross = hasCross(label);
         var isToday = sameDate(d, today);
-        var value = state.logs[key] || '';
+        var entry = getLog(key);
+        var value = entry ? (entry.time || '') : '';
+        var hasEntry = !!entry;
         var crossValue = state.crossType[key] || '';
 
         var classes = 'day-row';
@@ -787,21 +887,19 @@
               '<div class="day-plan">' + escapeHtml(label) + '</div>' +
               (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
-            (loggable ? '<input class="day-time' + (value ? ' has-value' : '') + '" placeholder="' + (race ? 'FINISH' : 'TIME') + '" value="' + escapeHtml(value) + '">' : '') +
+            (loggable ? '<input class="day-time' + (hasEntry ? ' has-value' : '') + '" placeholder="' + (race ? 'FINISH' : 'TIME') + '" value="' + escapeHtml(value) + '">' : '') +
           '</div>'
         );
+
+        row.querySelector('.day-date').addEventListener('click', function () {
+          renderWorkoutDetail(weekNum, di);
+        });
 
         if (loggable) {
           var input = row.querySelector('.day-time');
           input.addEventListener('change', function () {
-            if (input.value.trim()) {
-              state.logs[key] = input.value.trim();
-              input.classList.add('has-value');
-            } else {
-              delete state.logs[key];
-              input.classList.remove('has-value');
-            }
-            saveState(state);
+            setLog(key, { time: input.value.trim() || null });
+            input.classList.toggle('has-value', !!getLog(key));
             var loggedNow = Object.keys(state.logs).length;
             document.getElementById('progressFill').style.width = (totalLoggable ? (100 * loggedNow / totalLoggable) : 0) + '%';
             document.getElementById('loggedCount').textContent = loggedNow + ' / ' + totalLoggable + ' LOGGED';
@@ -908,6 +1006,95 @@
     );
     app.appendChild(wrap);
     document.getElementById('glossaryBackBtn').addEventListener('click', renderMain);
+  }
+
+  function renderWorkoutDetail(weekNum, dayIdx) {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var raceDate = parseDate(state.raceGoal.raceDate);
+    var planLengthWeeks = state.planMeta.planLengthWeeks;
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var dayData = result.weeks[weekNum - 1].days[dayIdx];
+    var key = weekNum + '-' + dayIdx;
+    var d = dateForSlot(raceDate, planLengthWeeks, weekNum, dayIdx);
+    var label = state.overrides[key] || dayData.label;
+    var loggable = isLoggable(label);
+    var race = isRace(label);
+    var detail = WORKOUT_DETAIL[dayData.type] || null;
+    var entry = getLog(key) || {};
+
+    var detailHtml = detail ? (
+      '<dl class="wd-info">' +
+        '<dt>What</dt><dd>' + escapeHtml(detail.what) + '</dd>' +
+        '<dt>Why</dt><dd>' + escapeHtml(detail.why) + '</dd>' +
+        '<dt>How hard</dt><dd>' + escapeHtml(detail.howHard) + '</dd>' +
+        '<dt>If I can&rsquo;t</dt><dd>' + escapeHtml(detail.ifCant) + '</dd>' +
+        '<dt>Common mistake</dt><dd>' + escapeHtml(detail.mistakes) + '</dd>' +
+      '</dl>'
+    ) : '';
+
+    var rpeChips = '';
+    for (var i = 1; i <= 10; i++) {
+      rpeChips += '<button type="button" class="rpe-chip" data-rpe="' + i + '">' + i + '</button>';
+    }
+
+    var logHtml = loggable ? (
+      '<div class="wd-log">' +
+        '<div class="ob-label">Time</div>' +
+        '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10" value="' + escapeHtml(entry.time || '') + '">' +
+        '<div class="ob-label">Distance (mi)</div>' +
+        '<input class="ob-input" type="number" min="0" step="0.1" id="wd_distance" value="' + (entry.distance != null ? entry.distance : '') + '">' +
+        '<div class="ob-label">Effort (RPE 1&ndash;10)</div>' +
+        '<div class="chip-grid" id="wd_rpe">' + rpeChips + '</div>' +
+        '<div class="ob-label">Notes</div>' +
+        '<textarea class="ob-input wd-notes" id="wd_notes" rows="3" placeholder="How did it feel?">' + escapeHtml(entry.notes || '') + '</textarea>' +
+      '</div>'
+    ) : '';
+
+    var wrap = el(
+      '<div class="ob wd">' +
+        '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
+        '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
+        detailHtml +
+        logHtml +
+        (loggable ? '<button class="ob-btn" id="wdSaveBtn">Save</button>' : '') +
+        '<div class="ob-cancel" id="wdBackBtn">Back to plan</div>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+
+    if (loggable) {
+      var effortSelected = entry.effort || null;
+      var rpeWrap = document.getElementById('wd_rpe');
+      function paintRpe() {
+        rpeWrap.querySelectorAll('.rpe-chip').forEach(function (c) {
+          c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === effortSelected);
+        });
+      }
+      paintRpe();
+      rpeWrap.querySelectorAll('.rpe-chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var v = parseInt(chip.getAttribute('data-rpe'), 10);
+          effortSelected = effortSelected === v ? null : v;
+          paintRpe();
+        });
+      });
+      document.getElementById('wdSaveBtn').addEventListener('click', function () {
+        var time = document.getElementById('wd_time').value.trim();
+        var distanceRaw = document.getElementById('wd_distance').value;
+        var notes = document.getElementById('wd_notes').value.trim();
+        setLog(key, {
+          time: time || null,
+          distance: distanceRaw !== '' ? parseFloat(distanceRaw) : null,
+          effort: effortSelected,
+          notes: notes || null
+        });
+        renderMain();
+      });
+    }
+    document.getElementById('wdBackBtn').addEventListener('click', renderMain);
   }
 
   if ('serviceWorker' in navigator) {

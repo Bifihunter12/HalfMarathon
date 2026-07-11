@@ -245,6 +245,41 @@ body {
   transition: width 500ms cubic-bezier(.2,.8,.2,1);
 }
 
+/* ── Today card ─────────────────────────────────────────────────────── */
+.today-card {
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-active);
+  border-radius: 10px;
+}
+.today-card.is-rest { border-color: var(--border); opacity: 0.85; }
+.today-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+.today-plan {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+.today-status {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.today-status--done { color: var(--accent); }
+.today-status--pending { color: var(--text-faint); }
+.today-btn { margin-top: 14px; }
+
 /* ── Week blocks ────────────────────────────────────────────────────── */
 .week-block { margin-top: 30px; }
 .week-head {
@@ -288,7 +323,12 @@ body {
   width: 42px;
   text-align: center;
   line-height: 1.1;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 0;
+  transition: background 0.12s;
 }
+.day-date:hover { background: rgba(255, 255, 255, 0.05); }
 .day-dow {
   display: block;
   font-size: 10px;
@@ -365,6 +405,59 @@ body {
 .day-time::placeholder { color: var(--text-faint); }
 .day-time:focus { outline: none; border-color: var(--accent); }
 .day-time.has-value { border-color: var(--border-active); color: var(--accent); font-weight: 600; }
+
+/* ── Workout detail view ────────────────────────────────────────────── */
+.wd-date {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  text-transform: uppercase;
+}
+.wd-title { margin-top: 6px; }
+.wd-title.is-race { color: var(--accent); }
+
+dl.wd-info {
+  margin-top: 8px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+dl.wd-info dt {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-top: 12px;
+}
+dl.wd-info dt:first-child { margin-top: 0; }
+dl.wd-info dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.wd-log { margin-top: 4px; }
+.wd-notes { resize: vertical; font-family: var(--font); line-height: 1.5; }
+
+.rpe-chip {
+  appearance: none;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.rpe-chip:hover { border-color: var(--border-active); color: var(--text); }
+.rpe-chip.selected { border-color: var(--accent); color: var(--accent); background: rgba(217, 119, 66, 0.10); }
 
 @media (max-width: 420px) {
   #app { padding: 22px 14px 40px; }
