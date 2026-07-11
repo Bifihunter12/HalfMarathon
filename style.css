@@ -143,6 +143,9 @@ body {
 .step-nav .ob-btn { margin-top: 0; flex: 1; }
 .ob-btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
 .ob-btn-secondary:hover { border-color: var(--border-active); color: var(--text); opacity: 1; }
+.danger-label { color: #d96a6a; }
+.danger-btn { border-color: rgba(217, 106, 106, 0.35); color: #d96a6a; }
+.danger-btn:hover { border-color: #d96a6a; background: rgba(217, 106, 106, 0.08); color: #d96a6a; }
 
 .warn-banner {
   margin-top: 14px;

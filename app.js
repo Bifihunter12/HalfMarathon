@@ -183,14 +183,24 @@
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function round5(n) { return Math.round(n * 2) / 2; }
+  function round1(n) { return Math.round(n * 10) / 10; }
+
+  // Distances are always stored internally in miles; convert only at the
+  // input/display boundary so the generator's tables never need two versions.
+  var KM_PER_MI = 1.60934;
+  function unitLabel() { return state.units === 'km' ? 'km' : 'mi'; }
+  function toUnit(mi) { return state.units === 'km' ? round1(mi * KM_PER_MI) : mi; }
+  function fromUnit(displayVal) { return state.units === 'km' ? displayVal / KM_PER_MI : displayVal; }
   function terrainNoteFrom(terrains) {
     var extra = (terrains || []).filter(function (t) { return t !== 'road'; }).map(function (t) { return TERRAIN_LABEL[t]; });
     return extra.length ? extra.join('/') : null;
   }
   function formatLongRunLabel(miles, terrainNote) {
-    return miles + ' mi long run' + (terrainNote ? ' (' + terrainNote + ')' : '') + (miles * 11 >= 90 ? ' + fueling practice' : '');
+    // fueling-practice threshold is a duration estimate, so it's computed from the
+    // internal mile value (11 min/mi assumption) regardless of the display unit
+    return toUnit(miles) + ' ' + unitLabel() + ' long run' + (terrainNote ? ' (' + terrainNote + ')' : '') + (miles * 11 >= 90 ? ' + fueling practice' : '');
   }
-  function formatEasyRunLabel(miles) { return miles + ' mi easy run'; }
+  function formatEasyRunLabel(miles) { return toUnit(miles) + ' ' + unitLabel() + ' easy run'; }
 
   // ── State ──────────────────────────────────────────────────────────────
   function loadState() {
@@ -201,6 +211,7 @@
     } catch (e) {}
     if (!s) s = {};
     if (!s.userName) s.userName = '';
+    if (!s.units) s.units = 'mi';
     if (!s.raceGoal) s.raceGoal = null; // { event, raceDate, goal }
     if (!s.profile) s.profile = null;
     if (!s.planMeta) s.planMeta = null; // { level, weeksAvailable, planLengthWeeks, unsafe, warnings }
@@ -586,10 +597,10 @@
         body =
           '<div class="ob-title">Current fitness</div>' +
           '<div class="ob-sub">Step 3 of 4 · Be honest — this sets your safe starting point</div>' +
-          '<div class="ob-label">Current weekly mileage (mi)</div>' +
-          '<input class="ob-input" type="number" min="0" step="0.5" id="f_weeklyMileage" value="' + draft.weeklyMileage + '">' +
-          '<div class="ob-label">Longest run in the last 4 weeks (mi)</div>' +
-          '<input class="ob-input" type="number" min="0" step="0.5" id="f_longestRun" value="' + draft.longestRun + '">' +
+          '<div class="ob-label">Current weekly distance (' + unitLabel() + ')</div>' +
+          '<input class="ob-input" type="number" min="0" step="0.5" id="f_weeklyMileage" value="' + toUnit(draft.weeklyMileage) + '">' +
+          '<div class="ob-label">Longest run in the last 4 weeks (' + unitLabel() + ')</div>' +
+          '<input class="ob-input" type="number" min="0" step="0.5" id="f_longestRun" value="' + toUnit(draft.longestRun) + '">' +
           '<div class="ob-label">Runs per week right now</div>' +
           '<input class="ob-input" type="number" min="0" max="7" step="1" id="f_runDaysPerWeek" value="' + draft.runDaysPerWeek + '">' +
           '<div class="ob-label">Experience level</div>' +
@@ -626,9 +637,9 @@
         var startInput = document.getElementById('f_startDate');
         if (startInput) draft.startDate = startInput.value;
         var wm = document.getElementById('f_weeklyMileage');
-        if (wm) draft.weeklyMileage = parseFloat(wm.value) || 0;
+        if (wm) draft.weeklyMileage = fromUnit(parseFloat(wm.value) || 0);
         var lr = document.getElementById('f_longestRun');
-        if (lr) draft.longestRun = parseFloat(lr.value) || 0;
+        if (lr) draft.longestRun = fromUnit(parseFloat(lr.value) || 0);
         var rdpw = document.getElementById('f_runDaysPerWeek');
         if (rdpw) draft.runDaysPerWeek = parseInt(rdpw.value, 10) || 0;
         var ad = document.getElementById('f_availableDays');
@@ -769,7 +780,8 @@
             '<i class="ti ti-book-2 hd-install" id="glossaryBtn" title="What this all means"></i>' +
             '<i class="ti ti-shield-check hd-install" id="safetyBtn" title="Safety info"></i>' +
             '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
-            '<i class="ti ti-settings hd-gear" id="gearBtn"></i>' +
+            '<i class="ti ti-edit hd-install" id="editPlanBtn" title="Edit plan"></i>' +
+            '<i class="ti ti-settings hd-gear" id="gearBtn" title="Settings"></i>' +
           '</div>' +
         '</div>' +
         '<div class="stat-line">' +
@@ -786,7 +798,7 @@
     );
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
-    document.getElementById('gearBtn').addEventListener('click', function () {
+    document.getElementById('editPlanBtn').addEventListener('click', function () {
       renderWizard({
         event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
@@ -794,6 +806,7 @@
         terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(), userName: state.userName
       });
     });
+    document.getElementById('gearBtn').addEventListener('click', renderSettings);
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
     document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
     var installBtn = document.getElementById('installBtn');
@@ -821,7 +834,7 @@
       } else if (todayLogged) {
         todayStatusHtml = '<div class="today-status today-status--done"><i class="ti ti-check"></i> Logged' +
           (todayEntry.time ? ' &middot; ' + escapeHtml(todayEntry.time) : '') +
-          (todayEntry.distance ? ' &middot; ' + todayEntry.distance + ' mi' : '') + '</div>';
+          (todayEntry.distance ? ' &middot; ' + toUnit(todayEntry.distance) + ' ' + unitLabel() : '') + '</div>';
       } else {
         todayStatusHtml = '<div class="today-status today-status--pending">Not logged yet</div>';
       }
@@ -1044,8 +1057,8 @@
       '<div class="wd-log">' +
         '<div class="ob-label">Time</div>' +
         '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10" value="' + escapeHtml(entry.time || '') + '">' +
-        '<div class="ob-label">Distance (mi)</div>' +
-        '<input class="ob-input" type="number" min="0" step="0.1" id="wd_distance" value="' + (entry.distance != null ? entry.distance : '') + '">' +
+        '<div class="ob-label">Distance (' + unitLabel() + ')</div>' +
+        '<input class="ob-input" type="number" min="0" step="0.1" id="wd_distance" value="' + (entry.distance != null ? toUnit(entry.distance) : '') + '">' +
         '<div class="ob-label">Effort (RPE 1&ndash;10)</div>' +
         '<div class="chip-grid" id="wd_rpe">' + rpeChips + '</div>' +
         '<div class="ob-label">Notes</div>' +
@@ -1087,7 +1100,7 @@
         var notes = document.getElementById('wd_notes').value.trim();
         setLog(key, {
           time: time || null,
-          distance: distanceRaw !== '' ? parseFloat(distanceRaw) : null,
+          distance: distanceRaw !== '' ? fromUnit(parseFloat(distanceRaw)) : null,
           effort: effortSelected,
           notes: notes || null
         });
@@ -1095,6 +1108,97 @@
       });
     }
     document.getElementById('wdBackBtn').addEventListener('click', renderMain);
+  }
+
+  function renderSettings() {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    var wrap = el(
+      '<div class="ob">' +
+        '<div class="ob-title">Settings</div>' +
+        '<div class="ob-label">Your name</div>' +
+        '<input class="ob-input" type="text" id="set_name" value="' + escapeHtml(state.userName || '') + '">' +
+        '<div class="ob-label">Units</div>' +
+        '<div class="chip-grid" id="set_units">' + chipsHtml('units', ['mi', 'km'], { mi: 'Miles', km: 'Kilometers' }, state.units, false) + '</div>' +
+        '<div class="ob-label" style="margin-top:26px">Your data</div>' +
+        '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
+        '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
+        '<input type="file" id="importFile" accept="application/json" style="display:none">' +
+        '<div class="ob-label danger-label" style="margin-top:26px">Danger zone</div>' +
+        '<button class="ob-btn ob-btn-secondary danger-btn" id="resetPlanBtn">Start a new plan</button>' +
+        '<button class="ob-btn ob-btn-secondary danger-btn" id="deleteAllBtn">Delete all data</button>' +
+        '<div class="ob-cancel" id="settingsBackBtn">Back to plan</div>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+
+    document.getElementById('set_name').addEventListener('change', function (e) {
+      state.userName = e.target.value.trim();
+      saveState(state);
+    });
+
+    wrap.querySelectorAll('#set_units .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.units = chip.getAttribute('data-value');
+        saveState(state);
+        wrap.querySelectorAll('#set_units .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === state.units);
+        });
+      });
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', function () {
+      var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'runner-backup-' + dateToISO(new Date()) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    var importFile = document.getElementById('importFile');
+    document.getElementById('importBtn').addEventListener('click', function () { importFile.click(); });
+    importFile.addEventListener('change', function () {
+      var file = importFile.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        var parsed;
+        try { parsed = JSON.parse(reader.result); } catch (e) { window.alert("That file isn't valid JSON."); return; }
+        if (!parsed || typeof parsed !== 'object' || !parsed.raceGoal || !parsed.profile) {
+          window.alert("That doesn't look like a Runner backup file.");
+          return;
+        }
+        if (!window.confirm('This replaces everything currently saved in the app with the imported file. Continue?')) return;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        window.location.reload();
+      };
+      reader.readAsText(file);
+    });
+
+    document.getElementById('resetPlanBtn').addEventListener('click', function () {
+      if (!window.confirm('This clears your current plan and all logged workouts, but keeps your name and units. Start a new plan?')) return;
+      state.raceGoal = null;
+      state.profile = null;
+      state.planMeta = null;
+      state.logs = {};
+      state.overrides = {};
+      state.crossType = {};
+      saveState(state);
+      didAutoScroll = false;
+      renderMain();
+    });
+
+    document.getElementById('deleteAllBtn').addEventListener('click', function () {
+      if (!window.confirm('This permanently deletes everything — your plan, logs, and name. This cannot be undone. Continue?')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      window.location.reload();
+    });
+
+    document.getElementById('settingsBackBtn').addEventListener('click', renderMain);
   }
 
   if ('serviceWorker' in navigator) {
