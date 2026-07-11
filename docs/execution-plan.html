@@ -164,7 +164,8 @@
     border-radius: 2px;
     flex: none;
   }
-  .dot.now { background: var(--accent); }
+  .dot.done { background: var(--accent); }
+  .dot.now { background: transparent; border: 1.5px solid var(--accent); width: 6px; height: 6px; }
   .dot.fork { background: var(--signal); }
   .dot.later { background: var(--later); }
 
@@ -220,6 +221,23 @@
   li.now .box { border-color: var(--accent); }
   li.fork .box { border-color: var(--signal); background: var(--signal-soft); }
   li.later .box { border-color: var(--later); background: transparent; }
+  li.done .box {
+    border-color: var(--accent);
+    background: var(--accent);
+    position: relative;
+  }
+  li.done .box::after {
+    content: "\2713";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    line-height: 1;
+    color: var(--page-bg);
+  }
+  li.done .task-note { color: var(--text-faint); }
   .task-title {
     font-family: inherit;
     font-size: 15.5px;
@@ -247,6 +265,7 @@
     vertical-align: 1px;
   }
   li.fork .tag { background: var(--signal-soft); color: var(--signal); }
+  li.done .tag { background: var(--accent-soft); color: var(--accent); }
 
   .skip-block {
     margin-top: 44px;
@@ -374,11 +393,12 @@
   <div class="status-block">
     <h2 class="sans">Where Runner actually stands today</h2>
     <p>Everything so far is a client-only PWA &mdash; no backend, no accounts, no AI calls. That already covers a surprising amount of Phase&nbsp;0 and the logic core of Phase&nbsp;1.</p>
-    <p class="shipped"><b>Shipped:</b> onboarding, plan-eligibility &amp; safety rules, the plan generator (5K&ndash;100&nbsp;mile), editable calendar, cross-training picker, basic missed-workout adaptation, a static workout glossary, and PWA install.</p>
-    <p><b>Gap against the roadmap's own "Must Have for Launch" list:</b> no dedicated Today screen, no per-workout detail view, logging is one free-text time field rather than distance/pace/effort, no weekly recap, no settings screen separate from the plan wizard, no units toggle.</p>
+    <p class="shipped"><b>Shipped:</b> onboarding, plan-eligibility &amp; safety rules, the plan generator (5K&ndash;100&nbsp;mile), editable calendar, cross-training picker, basic missed-workout adaptation, a static workout glossary, PWA install, and (2026-07-11) the Today card, workout detail view, and structured logging (time/distance/RPE/notes).</p>
+    <p><b>Gap remaining against the roadmap's own "Must Have for Launch" list:</b> no weekly recap, no settings screen separate from the plan wizard, no export/import, no units toggle.</p>
   </div>
 
   <div class="legend sans">
+    <span class="legend-item"><span class="dot done"></span>Shipped</span>
     <span class="legend-item"><span class="dot now"></span>Buildable now &mdash; no new infrastructure</span>
     <span class="legend-item"><span class="dot fork"></span>Needs a backend decision first</span>
     <span class="legend-item"><span class="dot later"></span>Deliberately later</span>
@@ -391,17 +411,17 @@
     </div>
     <p class="track-goal">The most visible distance between what exists and what the roadmap calls "launch-ready" &mdash; all pure UI and logic on top of the generator that already runs.</p>
     <ul class="tasks">
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Today screen</span>
-        <span class="task-note">A focused single-workout view instead of scrolling the calendar to the highlighted row &mdash; the roadmap treats this as the app's home screen for a reason.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Today screen<span class="tag mono">shipped</span></span>
+        <span class="task-note">A card at the top of the calendar shows today's workout and logged status at a glance, instead of relying on scroll-to-highlighted-row.</span>
       </li>
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Workout detail view</span>
-        <span class="task-note">Tapping a day expands into what/why/how-hard/what-if-I-can't, reusing and extending the glossary content per workout type instead of a generic reference page.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Workout detail view<span class="tag mono">shipped</span></span>
+        <span class="task-note">Tapping any day's date opens what/why/how-hard/if-I-can't/common-mistake, keyed off the generator's structural day type so an edited label can't break which explanation shows.</span>
       </li>
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Real logging fields</span>
-        <span class="task-note">Distance, pace or effort (RPE), optional heart rate, notes &mdash; replacing the single time input. This also unlocks difficulty-based adaptation later in T1.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Real logging fields<span class="tag mono">shipped</span></span>
+        <span class="task-note">Time, distance, RPE 1&ndash;10, and notes &mdash; the quick calendar time input and the full detail form read/write the same structured entry without clobbering each other's fields. Heart rate skipped for now (needs a device to be worth asking for).</span>
       </li>
       <li class="now"><span class="box"></span>
         <span class="task-title">Weekly recap</span>
@@ -542,11 +562,11 @@
     <p class="order-sub">Unlike the tracks above, this part is genuinely ordered &mdash; each step assumes the ones before it are done.</p>
     <ol class="seq">
       <li>
-        <span class="seq-title">T0, items 1&ndash;3 first</span>
-        <span class="seq-note">Today screen, workout detail, real logging fields &mdash; the biggest visible gap against "launch-ready," and needs nothing new architecturally.</span>
+        <span class="seq-title">T0, items 1&ndash;3 &mdash; done (2026-07-11)</span>
+        <span class="seq-note">Today card, workout detail view, structured logging &mdash; the biggest visible gap against "launch-ready" is closed.</span>
       </li>
       <li>
-        <span class="seq-title">T0, items 4&ndash;7</span>
+        <span class="seq-title">T0, items 4&ndash;7 &mdash; next up</span>
         <span class="seq-note">Recap, settings, export/import, units &mdash; rounds out parity with the roadmap's Phase&nbsp;1 checklist.</span>
       </li>
       <li>
