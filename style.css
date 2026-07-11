@@ -462,6 +462,29 @@ dl.wd-info dd {
 .rpe-chip:hover { border-color: var(--border-active); color: var(--text); }
 .rpe-chip.selected { border-color: var(--accent); color: var(--accent); background: rgba(217, 119, 66, 0.10); }
 
+.pain-toggle {
+  margin-top: 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-faint);
+  cursor: pointer;
+  width: fit-content;
+  border-bottom: 1px dashed var(--text-faint);
+}
+.pain-toggle:hover { color: var(--text-dim); }
+.pain-form { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.pain-guidance {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.pain-guidance--mild { background: rgba(111, 174, 138, 0.10); color: var(--text); border: 1px solid rgba(111, 174, 138, 0.3); }
+.pain-guidance--caution { background: rgba(217, 178, 95, 0.10); color: var(--text); border: 1px solid rgba(217, 178, 95, 0.35); }
+.pain-guidance--urgent { background: rgba(217, 106, 106, 0.10); color: var(--text); border: 1px solid rgba(217, 106, 106, 0.4); }
+
 /* ── Progress / recap panel ─────────────────────────────────────────── */
 .recap-empty { font-size: 13.5px; color: var(--text-faint); font-style: italic; margin-top: 4px; }
 .recap-list { list-style: none; margin: 6px 0 0; padding: 0; }
@@ -473,6 +496,33 @@ dl.wd-info dd {
   border-bottom: 1px solid var(--border);
 }
 .recap-list li:last-child { border-bottom: none; }
+
+.timeoff-list { margin-top: 8px; }
+.timeoff-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+.timeoff-row:last-child { border-bottom: none; }
+.timeoff-remove {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  flex: none;
+}
+.timeoff-remove:hover { color: #d96a6a; }
 
 @media (max-width: 420px) {
   #app { padding: 22px 14px 40px; }

@@ -174,7 +174,19 @@
     }
   };
 
-  function isRest(label) { return label.trim().toLowerCase() === 'rest'; }
+  var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
+  // Never diagnoses -- only routes toward "keep going / back off / get it checked."
+  function painGuidance(severity, worsens, canWalk) {
+    if (severity >= 7 || (worsens && !canWalk)) {
+      return { level: 'urgent', text: "This sounds like it needs a professional evaluation before you keep training. Consider resting from running until you've been checked out." };
+    }
+    if (severity >= 4 && worsens) {
+      return { level: 'caution', text: "Consider replacing today's run with cross-training or rest, and keep an eye on it. If it's still there in a few days or gets worse, get it checked out." };
+    }
+    return { level: 'mild', text: 'Mild and not worsening — okay to continue cautiously, but back off if anything changes.' };
+  }
+
+  function isRest(label) { return /^rest\b/i.test(label.trim()); }
   function isLoggable(label) { return !isRest(label); }
   function isRace(label) { return !!RACE_LABEL_SET[label.trim().toLowerCase()]; }
   function hasCross(label) { return /\bcross\b/i.test(label); }
@@ -212,6 +224,7 @@
     if (!s) s = {};
     if (!s.userName) s.userName = '';
     if (!s.units) s.units = 'mi';
+    if (!s.unavailable) s.unavailable = []; // [{ start, end, reason }] -- illness/vacation mode
     if (!s.raceGoal) s.raceGoal = null; // { event, raceDate, goal }
     if (!s.profile) s.profile = null;
     if (!s.planMeta) s.planMeta = null; // { level, weeksAvailable, planLengthWeeks, unsafe, warnings }
@@ -232,7 +245,7 @@
   }
   function setLog(key, patch) {
     var next = Object.assign({}, getLog(key), patch);
-    var hasContent = !!(next.time || next.distance || next.effort || next.notes);
+    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain);
     if (hasContent) state.logs[key] = next;
     else delete state.logs[key];
     saveState(state);
@@ -467,17 +480,41 @@
     return weeks;
   }
 
+  function findCurrentWeekIdx(raceDate, planLengthWeeks, today) {
+    for (var w = 1; w <= planLengthWeeks; w++) {
+      var wkStart = dateForSlot(raceDate, planLengthWeeks, w, 0);
+      var wkEnd = dateForSlot(raceDate, planLengthWeeks, w, 6);
+      if (today >= wkStart && today <= wkEnd) return w;
+      if (today < wkStart) return w;
+    }
+    return -1;
+  }
+
+  // ── Adaptive layer: pause days the user marked unavailable (illness/travel) ──
+  function applyUnavailableRanges(weeks, raceGoal, planMeta, ranges) {
+    if (!ranges || !ranges.length) return weeks;
+    var raceDate = parseDate(raceGoal.raceDate);
+    var planLengthWeeks = planMeta.planLengthWeeks;
+    weeks.forEach(function (wk) {
+      wk.days.forEach(function (day, di) {
+        if (day.type === 'race') return;
+        var iso = dateToISO(dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di));
+        var hit = ranges.filter(function (r) { return iso >= r.start && iso <= r.end; })[0];
+        if (hit) {
+          day.type = 'rest';
+          day.miles = 0;
+          day.label = 'Rest — ' + (hit.reason === 'vacation' ? 'away' : 'illness');
+        }
+      });
+    });
+    return weeks;
+  }
+
   // ── Adaptive layer: dampen future weeks if recent training was mostly missed ──
   function applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote) {
     var raceDate = parseDate(raceGoal.raceDate);
     var planLengthWeeks = planMeta.planLengthWeeks;
-    var currentWeekIdx = -1;
-    for (var w = 1; w <= planLengthWeeks; w++) {
-      var wkStart = dateForSlot(raceDate, planLengthWeeks, w, 0);
-      var wkEnd = dateForSlot(raceDate, planLengthWeeks, w, 6);
-      if (today >= wkStart && today <= wkEnd) { currentWeekIdx = w; break; }
-      if (today < wkStart && currentWeekIdx === -1) { currentWeekIdx = w; break; }
-    }
+    var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
     if (currentWeekIdx <= 1) return { weeks: weeks, note: null };
 
     var lastWeek = weeks[currentWeekIdx - 2]; // the fully-completed week before current
@@ -520,9 +557,61 @@
     return { weeks: weeks, note: note };
   }
 
+  // ── Adaptive layer: nudge future volume if easy/long RPE has been consistently
+  // off-target for a couple of weeks (doesn't run in the same week a missed-
+  // workout adjustment already fired -- one adaptive story per render, not two) ──
+  var RPE_TARGET = { easy: [3, 4], long: [4, 5] };
+  function applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote) {
+    var raceDate = parseDate(raceGoal.raceDate);
+    var planLengthWeeks = planMeta.planLengthWeeks;
+    var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
+    if (currentWeekIdx <= 1) return null;
+
+    var samples = [];
+    for (var w = Math.max(1, currentWeekIdx - 2); w < currentWeekIdx; w++) {
+      var wk = weeks[w - 1];
+      if (!wk) continue;
+      wk.days.forEach(function (day, di) {
+        if (day.type !== 'easy' && day.type !== 'long') return;
+        var entry = getLog(wk.weekNum + '-' + di);
+        if (entry && entry.effort) samples.push(entry.effort);
+      });
+    }
+    if (samples.length < 3) return null;
+    var avg = samples.reduce(function (a, b) { return a + b; }, 0) / samples.length;
+
+    var factor = null, note = null;
+    if (avg <= RPE_TARGET.easy[0] - 1) {
+      factor = 1.05;
+      note = 'Your easy running has felt too easy lately, so upcoming volume was nudged up about 5%.';
+    } else if (avg >= RPE_TARGET.easy[1] + 3) {
+      factor = 0.9;
+      note = 'Your easy running has felt harder than it should lately, so upcoming volume was eased back about 10%.';
+    }
+    if (!factor) return null;
+
+    for (var i = currentWeekIdx; i < weeks.length; i++) {
+      var wk2 = weeks[i];
+      if (wk2.phase === 'race') continue;
+      wk2.days.forEach(function (day) {
+        if (day.miles && (day.type === 'easy' || day.type === 'long')) {
+          day.miles = round5(day.miles * factor);
+          day.label = day.type === 'long' ? formatLongRunLabel(day.miles, terrainNote) : formatEasyRunLabel(day.miles);
+        }
+      });
+    }
+    return note;
+  }
+
   function generateAll(profile, raceGoal, planMeta, logs, today) {
     var weeks = buildStructuredWeeks(profile, raceGoal, planMeta);
-    var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNoteFrom(profile.terrains));
+    weeks = applyUnavailableRanges(weeks, raceGoal, planMeta, state.unavailable);
+    var terrainNote = terrainNoteFrom(profile.terrains);
+    var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote);
+    if (!adjusted.note) {
+      var diffNote = applyDifficultyAdjustment(adjusted.weeks, raceGoal, planMeta, logs, today, terrainNote);
+      if (diffNote) adjusted.note = diffNote;
+    }
     return adjusted;
   }
 
@@ -693,7 +782,9 @@
           if (!draft.startDate) { document.getElementById('f_startDate').focus(); return; }
           if (parseDate(draft.startDate) >= parseDate(draft.raceDate)) { document.getElementById('f_startDate').focus(); return; }
         } else if (steps[step] === 'logistics') {
-          finishWizard(draft, isEdit);
+          var goalChanged = isEdit && (draft.event !== state.raceGoal.event || draft.raceDate !== state.raceGoal.raceDate || draft.startDate !== state.raceGoal.startDate);
+          if (goalChanged) renderGoalChangeConfirm(draft);
+          else finishWizard(draft, isEdit);
           return;
         }
         step++;
@@ -701,6 +792,50 @@
       });
     }
     renderStep();
+  }
+
+  // ── Guided goal-change: shown when editing settings changes the race itself,
+  // since that's the one edit that resets logged history -- never silent. ──
+  function renderGoalChangeConfirm(draft) {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+
+    var oldGoal = state.raceGoal, oldMeta = state.planMeta;
+    var previewProfile = {
+      weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
+      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, availableDays: draft.availableDays
+    };
+    var level = classifyUser(previewProfile);
+    var weeksAvailable = weeksBetween(parseDate(draft.startDate), parseDate(draft.raceDate));
+    var safety = evaluateSafety(draft.event, weeksAvailable, level);
+    var planLengthWeeks = choosePlanLength(weeksAvailable, draft.event, level);
+
+    var changes = [];
+    if (draft.event !== oldGoal.event) changes.push('Event: ' + EVENT_LABEL[oldGoal.event] + ' &rarr; ' + EVENT_LABEL[draft.event]);
+    if (draft.raceDate !== oldGoal.raceDate) changes.push('Race date: ' + oldGoal.raceDate + ' &rarr; ' + draft.raceDate);
+    if (draft.startDate !== oldGoal.startDate) changes.push('Start date: ' + (oldGoal.startDate || '&mdash;') + ' &rarr; ' + draft.startDate);
+    changes.push('Plan length: ' + oldMeta.planLengthWeeks + ' weeks &rarr; ' + planLengthWeeks + ' weeks');
+
+    var wrap = el(
+      '<div class="ob">' +
+        '<div class="ob-title">Confirm the change</div>' +
+        '<div class="ob-sub">What changes</div>' +
+        '<ul class="recap-list">' + changes.map(function (c) { return '<li>' + c + '</li>'; }).join('') + '</ul>' +
+        '<div class="ob-sub" style="margin-top:20px">What stays the same</div>' +
+        '<p class="recap-empty" style="font-style:normal">Your fitness profile, terrain, cross-training preferences, and name.</p>' +
+        (safety.unsafe ? '<div class="warn-banner" style="margin-top:16px"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(safety.warnings[0]) + '</span></div>' : '') +
+        '<div class="warn-banner warn-banner--info" style="margin-top:16px"><i class="ti ti-info-circle"></i><span>Because the race itself is changing, your logged workouts and any day edits will be cleared &mdash; the calendar dates are shifting under them.</span></div>' +
+        '<button class="ob-btn" id="confirmGoalChangeBtn">Confirm changes</button>' +
+        '<div class="ob-cancel" id="cancelGoalChangeBtn">Go back</div>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+    document.getElementById('confirmGoalChangeBtn').addEventListener('click', function () {
+      finishWizard(draft, true);
+    });
+    document.getElementById('cancelGoalChangeBtn').addEventListener('click', function () {
+      renderWizard(draft);
+    });
   }
 
   function finishWizard(draft, isEdit) {
@@ -1065,6 +1200,18 @@
         '<div class="chip-grid" id="wd_rpe">' + rpeChips + '</div>' +
         '<div class="ob-label">Notes</div>' +
         '<textarea class="ob-input wd-notes" id="wd_notes" rows="3" placeholder="How did it feel?">' + escapeHtml(entry.notes || '') + '</textarea>' +
+        '<div class="pain-toggle" id="painToggle">' + (entry.pain ? 'Update pain report' : 'Report pain or discomfort') + '</div>' +
+        '<div class="pain-form" id="painForm" style="display:' + (entry.pain ? 'block' : 'none') + '">' +
+          '<div class="ob-label">Where?</div>' +
+          '<div class="chip-grid" id="pain_location">' + chipsHtml('painLoc', PAIN_LOCATIONS, null, entry.pain ? entry.pain.location : null, false) + '</div>' +
+          '<div class="ob-label">Severity (1&ndash;10)</div>' +
+          '<div class="chip-grid" id="pain_severity">' + rpeChips.replace(/rpe-chip/g, 'rpe-chip pain-chip') + '</div>' +
+          '<div class="ob-label">Gets worse while running?</div>' +
+          '<div class="chip-grid" id="pain_worsens">' + chipsHtml('painWorsens', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain ? (entry.pain.worsens ? 'yes' : 'no') : null, false) + '</div>' +
+          '<div class="ob-label">Can you walk normally?</div>' +
+          '<div class="chip-grid" id="pain_walk">' + chipsHtml('painWalk', ['yes', 'no'], { yes: 'Yes', no: 'No' }, entry.pain ? (entry.pain.canWalk ? 'yes' : 'no') : null, false) + '</div>' +
+          '<div class="pain-guidance" id="painGuidance" style="display:none"></div>' +
+        '</div>' +
       '</div>'
     ) : '';
 
@@ -1096,15 +1243,85 @@
           paintRpe();
         });
       });
+      var painToggle = document.getElementById('painToggle');
+      var painForm = document.getElementById('painForm');
+      painToggle.addEventListener('click', function () {
+        painForm.style.display = painForm.style.display === 'none' ? 'block' : 'none';
+      });
+
+      var painLocation = entry.pain ? entry.pain.location : null;
+      var painSeverity = entry.pain ? entry.pain.severity : null;
+      var painWorsens = entry.pain ? entry.pain.worsens : null;
+      var painCanWalk = entry.pain ? entry.pain.canWalk : null;
+      var painGuidanceEl = document.getElementById('painGuidance');
+
+      function updatePainGuidance() {
+        if (painSeverity == null || painWorsens == null || painCanWalk == null) {
+          painGuidanceEl.style.display = 'none';
+          return;
+        }
+        var g = painGuidance(painSeverity, painWorsens, painCanWalk);
+        painGuidanceEl.className = 'pain-guidance pain-guidance--' + g.level;
+        painGuidanceEl.textContent = g.text;
+        painGuidanceEl.style.display = 'block';
+      }
+      updatePainGuidance();
+      document.querySelectorAll('#pain_severity .rpe-chip').forEach(function (c) {
+        c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === painSeverity);
+      });
+
+      document.querySelectorAll('#pain_location .chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var v = chip.getAttribute('data-value');
+          painLocation = painLocation === v ? null : v;
+          document.querySelectorAll('#pain_location .chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === painLocation);
+          });
+        });
+      });
+      document.querySelectorAll('#pain_severity .rpe-chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var v = parseInt(chip.getAttribute('data-rpe'), 10);
+          painSeverity = painSeverity === v ? null : v;
+          document.querySelectorAll('#pain_severity .rpe-chip').forEach(function (c) {
+            c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === painSeverity);
+          });
+          updatePainGuidance();
+        });
+      });
+      document.querySelectorAll('#pain_worsens .chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          painWorsens = chip.getAttribute('data-value') === 'yes';
+          document.querySelectorAll('#pain_worsens .chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === (painWorsens ? 'yes' : 'no'));
+          });
+          updatePainGuidance();
+        });
+      });
+      document.querySelectorAll('#pain_walk .chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          painCanWalk = chip.getAttribute('data-value') === 'yes';
+          document.querySelectorAll('#pain_walk .chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === (painCanWalk ? 'yes' : 'no'));
+          });
+          updatePainGuidance();
+        });
+      });
+
       document.getElementById('wdSaveBtn').addEventListener('click', function () {
         var time = document.getElementById('wd_time').value.trim();
         var distanceRaw = document.getElementById('wd_distance').value;
         var notes = document.getElementById('wd_notes').value.trim();
+        // only persist a pain report once the three fields the guidance depends on
+        // are all answered -- a partial report can't be shown back unambiguously
+        var pain = (painSeverity != null && painWorsens != null && painCanWalk != null) ?
+          { location: painLocation, severity: painSeverity, worsens: painWorsens, canWalk: painCanWalk } : null;
         setLog(key, {
           time: time || null,
           distance: distanceRaw !== '' ? fromUnit(parseFloat(distanceRaw)) : null,
           effort: effortSelected,
-          notes: notes || null
+          notes: notes || null,
+          pain: pain
         });
         renderMain();
       });
@@ -1122,6 +1339,14 @@
         '<input class="ob-input" type="text" id="set_name" value="' + escapeHtml(state.userName || '') + '">' +
         '<div class="ob-label">Units</div>' +
         '<div class="chip-grid" id="set_units">' + chipsHtml('units', ['mi', 'km'], { mi: 'Miles', km: 'Kilometers' }, state.units, false) + '</div>' +
+        '<div class="ob-label" style="margin-top:26px">Time off</div>' +
+        (state.unavailable.length ? '<div class="timeoff-list" id="timeoff_list">' + state.unavailable.map(function (r, i) {
+          return '<div class="timeoff-row"><span>' + (r.reason === 'vacation' ? 'Away' : 'Illness') + ' &middot; ' + r.start + ' &ndash; ' + r.end + '</span><button type="button" class="timeoff-remove" data-idx="' + i + '">Remove</button></div>';
+        }).join('') + '</div>' : '<p class="recap-empty">No time off marked.</p>') +
+        '<input class="ob-input" type="date" id="set_toStart" style="margin-top:10px">' +
+        '<input class="ob-input" type="date" id="set_toEnd" style="margin-top:8px">' +
+        '<div class="chip-grid" id="set_toReason" style="margin-top:8px">' + chipsHtml('toReason', ['illness', 'vacation'], { illness: 'Illness', vacation: 'Away' }, 'illness', false) + '</div>' +
+        '<button class="ob-btn ob-btn-secondary" id="markUnavailableBtn" style="margin-top:8px">Mark unavailable</button>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -1146,6 +1371,31 @@
         wrap.querySelectorAll('#set_units .chip').forEach(function (c) {
           c.classList.toggle('selected', c.getAttribute('data-value') === state.units);
         });
+      });
+    });
+
+    var toReason = 'illness';
+    wrap.querySelectorAll('#set_toReason .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        toReason = chip.getAttribute('data-value');
+        wrap.querySelectorAll('#set_toReason .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === toReason);
+        });
+      });
+    });
+    document.getElementById('markUnavailableBtn').addEventListener('click', function () {
+      var startVal = document.getElementById('set_toStart').value;
+      var endVal = document.getElementById('set_toEnd').value;
+      if (!startVal || !endVal || startVal > endVal) { window.alert('Pick a valid start and end date.'); return; }
+      state.unavailable.push({ start: startVal, end: endVal, reason: toReason });
+      saveState(state);
+      renderSettings();
+    });
+    wrap.querySelectorAll('.timeoff-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.unavailable.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+        saveState(state);
+        renderSettings();
       });
     });
 
