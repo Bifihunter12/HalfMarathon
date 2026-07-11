@@ -392,9 +392,9 @@
 
   <div class="status-block">
     <h2 class="sans">Where Runner actually stands today</h2>
-    <p>Everything so far is a client-only PWA &mdash; no backend, no accounts, no AI calls. That already covers a surprising amount of Phase&nbsp;0 and the logic core of Phase&nbsp;1.</p>
-    <p class="shipped"><b>Shipped:</b> onboarding, plan-eligibility &amp; safety rules, the plan generator (5K&ndash;100&nbsp;mile), editable calendar, cross-training picker, basic missed-workout adaptation, a static workout glossary, PWA install, and (2026-07-11) the Today card, workout detail view, and structured logging (time/distance/RPE/notes).</p>
-    <p><b>Gap remaining against the roadmap's own "Must Have for Launch" list:</b> no weekly recap, no settings screen separate from the plan wizard, no export/import, no units toggle.</p>
+    <p>Everything so far is a client-only PWA &mdash; no backend, no accounts, no AI calls. <b>T0 (the entire no-backend Phase&nbsp;1 gap) shipped 2026-07-11</b> &mdash; every item below is done.</p>
+    <p class="shipped"><b>Shipped:</b> onboarding, plan-eligibility &amp; safety rules, the plan generator (5K&ndash;100&nbsp;mile), editable calendar, cross-training picker, basic missed-workout adaptation, a static workout glossary, PWA install, Today card, workout detail view, structured logging (time/distance/RPE/notes), a Progress/recap panel, a real Settings screen, mi/km units, and JSON export/import.</p>
+    <p><b>Against the roadmap's own "Must Have for Launch" list, what's left is T1</b> (illness/vacation mode, difficulty-based adaptation, structured pain reporting, guided goal-change flow) &mdash; still no new infrastructure, see below.</p>
   </div>
 
   <div class="legend sans">
@@ -423,21 +423,21 @@
         <span class="task-title">Real logging fields<span class="tag mono">shipped</span></span>
         <span class="task-note">Time, distance, RPE 1&ndash;10, and notes &mdash; the quick calendar time input and the full detail form read/write the same structured entry without clobbering each other's fields. Heart rate skipped for now (needs a device to be worth asking for).</span>
       </li>
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Weekly recap</span>
-        <span class="task-note">Auto-generated from data already in state: planned vs. completed, longest run, consistency, next week's preview.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Weekly recap<span class="tag mono">shipped</span></span>
+        <span class="task-note">A Progress panel: distance/longest-run/sessions so far, last week's planned-vs-completed and hardest session, and a next-week preview. Reuses the same "week before current" logic the adaptive layer already had, so the two never disagree.</span>
       </li>
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Settings screen</span>
-        <span class="task-note">Separate from the plan-edit wizard &mdash; name, units, reset plan, delete all data. The wizard should stop being the only way to reach basic account controls.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Settings screen<span class="tag mono">shipped</span></span>
+        <span class="task-note">Separate from the plan-edit wizard, which now has its own pencil icon &mdash; name, units, export/import, reset plan, delete all data.</span>
       </li>
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Export / import</span>
-        <span class="task-note">Since there's no account, a JSON download/upload is the only backup path &mdash; and the intro screen already promises "everything stays on your device," which makes this more than a nice-to-have.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Export / import<span class="tag mono">shipped</span></span>
+        <span class="task-note">JSON download/upload, living in Settings &mdash; the intro screen's "everything stays on your device" promise now has an actual backup path behind it.</span>
       </li>
-      <li class="now"><span class="box"></span>
-        <span class="task-title">Units toggle (km / mi)</span>
-        <span class="task-note">Currently hardcoded to miles; the roadmap explicitly lists units as a required onboarding input.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Units toggle (km / mi)<span class="tag mono">shipped</span></span>
+        <span class="task-note">Generator still computes everything in miles internally (EVENT_TABLE etc. untouched); a toUnit()/fromUnit() pair converts only at the input/display boundary, so switching units never needed a second copy of the tables.</span>
       </li>
     </ul>
   </section>
@@ -562,20 +562,16 @@
     <p class="order-sub">Unlike the tracks above, this part is genuinely ordered &mdash; each step assumes the ones before it are done.</p>
     <ol class="seq">
       <li>
-        <span class="seq-title">T0, items 1&ndash;3 &mdash; done (2026-07-11)</span>
-        <span class="seq-note">Today card, workout detail view, structured logging &mdash; the biggest visible gap against "launch-ready" is closed.</span>
+        <span class="seq-title">T0, all seven items &mdash; done (2026-07-11)</span>
+        <span class="seq-note">Today card, workout detail view, structured logging, Progress/recap panel, Settings screen, export/import, mi/km units. The entire no-backend Phase&nbsp;1 gap is closed.</span>
       </li>
       <li>
-        <span class="seq-title">T0, items 4&ndash;7 &mdash; next up</span>
-        <span class="seq-note">Recap, settings, export/import, units &mdash; rounds out parity with the roadmap's Phase&nbsp;1 checklist.</span>
+        <span class="seq-title">T1 &mdash; next up</span>
+        <span class="seq-note">Illness/vacation mode, difficulty-based adaptation, structured pain reporting, guided goal-change flow. Still pure client-side logic, no new infrastructure.</span>
       </li>
       <li>
         <span class="seq-title">Stand up the backend once, for T2 first</span>
         <span class="seq-note">Both T2 and T3 need infrastructure that doesn't exist yet; standing it up once for the AI proxy (T2) rather than twice is cheaper, and T2 is the more direct hit on the North Star.</span>
-      </li>
-      <li>
-        <span class="seq-title">T1 interleaves anytime after T0</span>
-        <span class="seq-note">Pure logic, no dependency on the T2/T3 timing &mdash; can happen in parallel with whichever comes first.</span>
       </li>
       <li>
         <span class="seq-title">T4, then T5</span>
