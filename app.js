@@ -1484,17 +1484,24 @@
       setLog(key, { notes: note || null });
     }
 
+    // Returns { text, confirmable } -- confirmable:false means show the text
+    // as an explanatory note with no Confirm button, since acting on it would
+    // either do nothing or isn't something this action type can actually do.
     function actionConfirmText(action, day) {
       if (action.type === 'mark_rest') {
-        return 'Mark ' + DOW_FULL[day.date.getDay()] + ' as rest' + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?';
+        return { text: 'Mark ' + DOW_FULL[day.date.getDay()] + ' as rest' + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
       }
       if (action.type === 'substitute_workout') {
         var sourceKey = findSourceKey(action.key, action.newType);
         if (!sourceKey) return null;
-        return 'Change ' + DOW_FULL[day.date.getDay()] + ' (' + escapeHtml(day.effectiveLabel) + ') to ' + escapeHtml(daysByKey[sourceKey].effectiveLabel) + '?';
+        var newLabel = daysByKey[sourceKey].effectiveLabel;
+        if (newLabel === day.effectiveLabel) {
+          return { text: DOW_FULL[day.date.getDay()] + ' is already ' + escapeHtml(newLabel) + ' — nothing to change there. If you need a specific distance, tap the workout text on that day to edit it directly.', confirmable: false };
+        }
+        return { text: 'Change ' + DOW_FULL[day.date.getDay()] + ' (' + escapeHtml(day.effectiveLabel) + ') to ' + escapeHtml(newLabel) + '?', confirmable: true };
       }
       if (action.type === 'log_unplanned_activity') {
-        return 'Log &ldquo;' + escapeHtml(action.note || '') + '&rdquo; for ' + DOW_FULL[day.date.getDay()] + ' instead of the scheduled workout? The plan itself won’t change.';
+        return { text: 'Log &ldquo;' + escapeHtml(action.note || '') + '&rdquo; for ' + DOW_FULL[day.date.getDay()] + ' instead of the scheduled workout? The plan itself won’t change.', confirmable: true };
       }
       return null;
     }
@@ -1506,13 +1513,15 @@
       var actionHtml = '';
       if (turn.action && !turn.resolved) {
         var day = daysByKey[turn.action.key];
-        var confirmText = day ? actionConfirmText(turn.action, day) : null;
-        if (confirmText) {
+        var confirm = day ? actionConfirmText(turn.action, day) : null;
+        if (confirm && confirm.confirmable) {
           actionHtml = '<div class="coach-action">' +
-            '<div style="margin-bottom:8px">' + confirmText + '</div>' +
+            '<div style="margin-bottom:8px">' + confirm.text + '</div>' +
             '<button type="button" class="ob-btn" data-confirm-idx="' + idx + '" style="margin-bottom:6px">Confirm</button>' +
             '<div class="ob-cancel" data-cancel-idx="' + idx + '">Cancel</div>' +
           '</div>';
+        } else if (confirm) {
+          actionHtml = '<div class="coach-action-status">' + confirm.text + '</div>';
         }
       } else if (turn.action && turn.resolved) {
         actionHtml = '<div class="coach-action-status">' + (turn.resolved === 'confirmed' ? '✓ Done' : 'Cancelled') + '</div>';
