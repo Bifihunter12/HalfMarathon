@@ -75,6 +75,14 @@ exports.handler = async function (event) {
     event: plan.event, goal: plan.goal, experienceLevel: plan.experienceLevel
   };
 
+  // Prior turns give the model conversational memory -- capped and sanitized
+  // to plain role/content pairs so a bad client payload can't inject
+  // arbitrary roles or oversized content into the request.
+  var history = Array.isArray(payload.history) ? payload.history.slice(-10) : [];
+  var cleanHistory = history
+    .filter(function (h) { return h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string'; })
+    .map(function (h) { return { role: h.role, content: h.content.slice(0, 500) }; });
+
   var userPrompt = 'Today\'s date: ' + today +
     '\n\nRunner\'s plan: ' + JSON.stringify(context) +
     '\n\nUpcoming days (JSON): ' + JSON.stringify(cleanDays) +
@@ -89,10 +97,7 @@ exports.handler = async function (event) {
       },
       body: JSON.stringify({
         model: MODEL,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userPrompt }
-        ],
+        messages: [{ role: 'system', content: SYSTEM_PROMPT }].concat(cleanHistory, [{ role: 'user', content: userPrompt }]),
         temperature: 0.4,
         max_tokens: 300,
         response_format: { type: 'json_object' }
