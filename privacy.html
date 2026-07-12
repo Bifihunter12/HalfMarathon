@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="index, follow">
+    <title>Privacy Policy — Runner</title>
+    <meta name="description" content="Runner privacy policy. What data we collect, how it's stored, and your rights.">
+    <link rel="icon" href="icons/icon-192.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :root {
+        --bg:      #0b0b0c;
+        --surface: #141416;
+        --border:  rgba(255, 255, 255, 0.09);
+        --text:    #f0efed;
+        --text-dim:#a8a5a0;
+        --accent:  #d97742;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Inter', system-ui, sans-serif;
+        font-size: 15px;
+        line-height: 1.7;
+        min-height: 100vh;
+      }
+
+      .page {
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 48px 24px 80px;
+      }
+
+      .pp-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 48px;
+      }
+
+      .pp-logo {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .pp-back {
+        margin-left: auto;
+        font-size: 13px;
+        color: var(--text-dim);
+        text-decoration: none;
+        padding: 6px 12px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        transition: color 0.15s;
+      }
+      .pp-back:hover { color: var(--text); }
+
+      h1 { font-size: 28px; font-weight: 700; margin-bottom: 6px; letter-spacing: -0.02em; }
+
+      .pp-updated { font-size: 13px; color: var(--text-dim); margin-bottom: 40px; }
+
+      section { margin-bottom: 40px; }
+
+      h2 {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text);
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      p { color: var(--text-dim); margin-bottom: 12px; }
+      p:last-child { margin-bottom: 0; }
+
+      ul { list-style: none; padding: 0; margin-bottom: 12px; }
+      ul li { color: var(--text-dim); padding: 4px 0 4px 20px; position: relative; }
+      ul li::before { content: "–"; position: absolute; left: 0; color: var(--accent); }
+
+      strong { color: var(--text); font-weight: 700; }
+
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      .highlight-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 20px;
+        margin-bottom: 12px;
+        color: var(--text-dim);
+        font-size: 14px;
+      }
+      .highlight-box strong { display: block; margin-bottom: 4px; font-size: 15px; }
+
+      .pp-footer {
+        margin-top: 56px;
+        padding-top: 24px;
+        border-top: 1px solid var(--border);
+        font-size: 13px;
+        color: var(--text-dim);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+
+      <header class="pp-header">
+        <a class="pp-logo" href="/">RUNNER</a>
+        <a class="pp-back" href="/">← Back to app</a>
+      </header>
+
+      <h1>Privacy Policy</h1>
+      <p class="pp-updated">Last updated: July 2026</p>
+
+      <div class="highlight-box">
+        <strong>The short version</strong>
+        Runner stores your training plan locally on your device by default — no account needed.
+        If you turn on optional cloud sync, only your email and your training data are stored, nothing else.
+        If you use the AI coaching features, the relevant plan/message data is sent to OpenAI to generate a response, but nothing is stored there beyond that request.
+        No ads. No tracking. No selling data. Ever.
+      </div>
+
+      <section>
+        <h2>1. Who we are</h2>
+        <p>Runner is a running-plan app developed under the <a href="https://www.zaeralabs.com/" target="_blank" rel="noopener">Zaera Labs</a> brand, available at <a href="https://tubular-mochi-1a8ae6.netlify.app">tubular-mochi-1a8ae6.netlify.app</a>. Questions about this policy can be sent to <a href="mailto:support@zaeralabs.com">support@zaeralabs.com</a>.</p>
+      </section>
+
+      <section>
+        <h2>2. Data we collect</h2>
+
+        <p><strong>Without an account (the default)</strong></p>
+        <p>Your training plan, schedule edits, logged workouts, and settings are stored only in your browser's <code>localStorage</code>. It never leaves your device. We collect nothing.</p>
+
+        <p><strong>With optional cloud sync</strong></p>
+        <p>If you choose to sign in (via a passwordless email link), we store:</p>
+        <ul>
+          <li><strong>Your email address</strong> — used to identify your account and send sign-in links</li>
+          <li><strong>Your training data</strong> — the same plan, logs, and settings that would otherwise stay local, so it can sync across your devices</li>
+        </ul>
+        <p>We do <strong>not</strong> collect your name (beyond what you type into the app), location, device identifiers, IP address, or behavioral analytics.</p>
+
+        <p><strong>If you connect Fitbit / Google Health</strong></p>
+        <p>This is entirely optional. If connected, we request read-only access to your recent activity data (distance, duration, pace) to help auto-fill your workout logs. Your access tokens are stored only on your own device, never on our servers. We never request write access and never modify your Fitbit/Google Health data.</p>
+      </section>
+
+      <section>
+        <h2>3. AI coaching features</h2>
+        <p>Features like workout explanations, weekly recaps, the AI coach chat, and completion celebrations send relevant data — your training plan context, the specific question or message you typed, and recent conversation history — to OpenAI's API to generate a response. This data is used only to generate that single response; we don't use it for any other purpose, and OpenAI processes it under their own API data usage policies (by default, API data submitted through OpenAI's API is not used to train their models). No health or training data is sent to OpenAI unless you actively use one of these AI features.</p>
+      </section>
+
+      <section>
+        <h2>4. How data is stored</h2>
+        <p>Account and sync data is stored using <a href="https://supabase.com" target="_blank" rel="noopener">Supabase</a>, a managed database service. AI features are processed via <a href="https://openai.com" target="_blank" rel="noopener">OpenAI's API</a>. Optional Fitbit/Google Health data is fetched via <a href="https://developers.google.com/health" target="_blank" rel="noopener">Google's Health API</a>, using tokens stored only on your device.</p>
+      </section>
+
+      <section>
+        <h2>5. Cookies &amp; tracking</h2>
+        <p>Runner uses <strong>no cookies</strong>, no analytics scripts, no advertising pixels, and no third-party tracking of any kind. The only browser storage used is <code>localStorage</code> for app state and, if signed in, your session.</p>
+      </section>
+
+      <section>
+        <h2>6. Data sharing</h2>
+        <p>We do not sell, rent, or share your data with any third party beyond the sub-processors described above (Supabase, OpenAI, Google Health API, and Netlify for hosting).</p>
+      </section>
+
+      <section>
+        <h2>7. Your rights</h2>
+        <p>Regardless of where you are located, you have the right to:</p>
+        <ul>
+          <li><strong>Access</strong> — export a full copy of your data at any time (Settings → Export data)</li>
+          <li><strong>Deletion</strong> — permanently delete your cloud backup or your entire account (Settings → Account &amp; sync)</li>
+          <li><strong>Portability</strong> — your export is a plain JSON file you can re-import or move elsewhere</li>
+          <li><strong>Correction</strong> — everything in the app is directly editable by you at any time</li>
+        </ul>
+        <p>To exercise any of these rights, email <a href="mailto:support@zaeralabs.com">support@zaeralabs.com</a>. We will respond within 30 days.</p>
+        <p>You can also delete your own local data at any time via Settings → Delete all data, with no account required.</p>
+      </section>
+
+      <section>
+        <h2>8. Data retention</h2>
+        <p>Local-only data is never on our servers and can be deleted at any time from Settings. Cloud-synced data is retained until you delete your cloud data or account, at which point it's removed immediately.</p>
+      </section>
+
+      <section>
+        <h2>9. Children</h2>
+        <p>Runner is not directed at children under 13. We do not knowingly collect data from anyone under 13. If you believe a child has provided us data, contact us and we will delete it immediately.</p>
+      </section>
+
+      <section>
+        <h2>10. Changes to this policy</h2>
+        <p>If we make material changes to this policy we will update the "Last updated" date at the top of this page. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
+      </section>
+
+      <section>
+        <h2>11. Contact</h2>
+        <p>Questions or requests: <a href="mailto:support@zaeralabs.com">support@zaeralabs.com</a></p>
+      </section>
+
+      <footer class="pp-footer">
+        &copy; 2026 Runner &mdash; <a href="/">Back to app</a>
+      </footer>
+
+    </div>
+  </body>
+</html>
