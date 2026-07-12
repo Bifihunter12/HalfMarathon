@@ -516,6 +516,110 @@
     }
   };
 
+  // ── Google Health (formerly Fitbit) activity import, fully optional ──
+  // Tokens are stored in their own localStorage key, deliberately NOT on
+  // `state` -- so they never ride along in CloudSync's synced blob (per
+  // user's explicit choice: this stays device-only, even when signed in).
+  var GOOGLE_HEALTH_CLIENT_ID = 'YOUR-GOOGLE-HEALTH-CLIENT-ID.apps.googleusercontent.com';
+  var GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly';
+  var GH_TOKEN_KEY = 'runner_google_health_tokens';
+  var GH_OAUTH_STATE_KEY = 'runner_gh_oauth_state';
+
+  function ghRedirectUri() { return window.location.origin + window.location.pathname; }
+  function loadGHTokens() {
+    try { return JSON.parse(localStorage.getItem(GH_TOKEN_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function saveGHTokens(tokens) { localStorage.setItem(GH_TOKEN_KEY, JSON.stringify(tokens)); }
+  function clearGHTokens() { localStorage.removeItem(GH_TOKEN_KEY); }
+
+  var GoogleHealth = {
+    get isConnected() { return !!loadGHTokens(); },
+
+    connect() {
+      var oauthState = Math.random().toString(36).slice(2);
+      sessionStorage.setItem(GH_OAUTH_STATE_KEY, oauthState);
+      var params = new URLSearchParams({
+        client_id: GOOGLE_HEALTH_CLIENT_ID,
+        redirect_uri: ghRedirectUri(),
+        response_type: 'code',
+        scope: GOOGLE_HEALTH_SCOPE,
+        access_type: 'offline',
+        prompt: 'consent',
+        state: oauthState
+      });
+      window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params.toString();
+    },
+
+    disconnect() { clearGHTokens(); },
+
+    // Handles the ?code=&state= redirect back from Google -- called once at
+    // boot. Cleans the URL afterward either way so a refresh doesn't
+    // re-trigger the exchange.
+    async handleOAuthRedirect() {
+      var url = new URL(window.location.href);
+      var code = url.searchParams.get('code');
+      var returnedState = url.searchParams.get('state');
+      if (!code) return;
+      var expectedState = sessionStorage.getItem(GH_OAUTH_STATE_KEY);
+      sessionStorage.removeItem(GH_OAUTH_STATE_KEY);
+      window.history.replaceState({}, '', ghRedirectUri());
+      if (!expectedState || returnedState !== expectedState) return; // CSRF check failed -- silently drop
+
+      try {
+        var res = await fetch('/.netlify/functions/google-health-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: code, redirect_uri: ghRedirectUri() })
+        });
+        var data = await res.json();
+        if (!res.ok || data.error) return;
+        saveGHTokens({
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresAt: Date.now() + (data.expires_in || 3600) * 1000
+        });
+      } catch (e) { /* silent -- Settings will just still show "not connected" */ }
+    },
+
+    async getValidAccessToken() {
+      var tokens = loadGHTokens();
+      if (!tokens) return null;
+      if (tokens.expiresAt && Date.now() < tokens.expiresAt - 60000) return tokens.accessToken;
+      try {
+        var res = await fetch('/.netlify/functions/google-health-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: tokens.refreshToken })
+        });
+        var data = await res.json();
+        if (!res.ok || data.error) { clearGHTokens(); return null; }
+        var next = {
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token || tokens.refreshToken,
+          expiresAt: Date.now() + (data.expires_in || 3600) * 1000
+        };
+        saveGHTokens(next);
+        return next.accessToken;
+      } catch (e) { return null; }
+    },
+
+    // dateStr: 'YYYY-MM-DD'. Returns { sessions } or { error }.
+    async fetchActivitiesForDate(dateStr) {
+      var accessToken = await this.getValidAccessToken();
+      if (!accessToken) return { error: 'Not connected' };
+      try {
+        var res = await fetch('/.netlify/functions/google-health-activities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accessToken: accessToken, date: dateStr })
+        });
+        var data = await res.json();
+        if (!res.ok || data.error) return { error: (data && data.error) || 'Request failed' };
+        return { sessions: data.sessions || [] };
+      } catch (e) { return { error: String((e && e.message) || e) }; }
+    }
+  };
+
   var state = loadState();
   var didAutoScroll = false;
   var deferredInstallPrompt = null;
@@ -1699,6 +1803,7 @@
 
     var logHtml = loggable ? (
       '<div class="wd-log">' +
+        (GoogleHealth.isConnected ? '<div class="pain-toggle" id="ghImportBtn">Import from Google Health</div><div class="ai-why-result" id="ghImportResult" style="display:none"></div>' : '') +
         '<div class="ob-label">Time</div>' +
         '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10" value="' + escapeHtml(entry.time || '') + '">' +
         '<div class="ob-label">Distance (' + unitLabel() + ')</div>' +
@@ -1783,6 +1888,39 @@
     }
 
     if (loggable) {
+      if (GoogleHealth.isConnected) {
+        var ghImportBtn = document.getElementById('ghImportBtn');
+        var ghImportResult = document.getElementById('ghImportResult');
+        ghImportBtn.addEventListener('click', function () {
+          ghImportBtn.textContent = 'Checking...';
+          ghImportResult.style.display = 'none';
+          GoogleHealth.fetchActivitiesForDate(dateToISO(d)).then(function (result) {
+            ghImportBtn.textContent = 'Import from Google Health';
+            if (result.error || !result.sessions.length) {
+              ghImportResult.style.display = 'block';
+              ghImportResult.className = 'ai-why-result ai-why-error';
+              ghImportResult.textContent = result.error ? "Couldn't reach Google Health right now." : 'No activity found for this day.';
+              return;
+            }
+            ghImportResult.style.display = 'block';
+            ghImportResult.className = 'ai-why-result';
+            ghImportResult.innerHTML = '';
+            result.sessions.forEach(function (s, i) {
+              var summary = (s.displayName || s.exerciseType) +
+                (s.distanceMiles ? ' &middot; ' + toUnit(s.distanceMiles) + ' ' + unitLabel() : '') +
+                (s.durationMinutes ? ' &middot; ' + s.durationMinutes + ' min' : '');
+              var row = el('<button type="button" class="ob-btn ob-btn-secondary" style="margin-top:' + (i ? '8px' : '0') + '">' + summary + '</button>');
+              row.addEventListener('click', function () {
+                if (s.distanceMiles != null) document.getElementById('wd_distance').value = toUnit(s.distanceMiles);
+                if (s.durationMinutes != null) document.getElementById('wd_time').value = s.durationMinutes + ':00';
+                ghImportResult.style.display = 'none';
+              });
+              ghImportResult.appendChild(row);
+            });
+          });
+        });
+      }
+
       var effortSelected = entry.effort || null;
       var rpeWrap = document.getElementById('wd_rpe');
       function paintRpe() {
@@ -1919,6 +2057,14 @@
           '<button class="ob-btn ob-btn-secondary" id="sendMagicLinkBtn" style="margin-top:8px">Send sign-in link</button>' +
           '<div class="ai-why-result" id="magicLinkStatus" style="display:none"></div>'
         ) + '</div>' +
+        '<div class="ob-label" style="margin-top:26px">Fitness tracker</div>' +
+        '<div id="googleHealthSection">' + (GoogleHealth.isConnected ?
+          '<p class="recap-empty">Connected &mdash; workout detail screens can now offer to import a matching activity.</p>' +
+          '<button class="ob-btn ob-btn-secondary" id="ghDisconnectBtn">Disconnect</button>'
+          :
+          '<p class="recap-empty">Connect Google Health (Fitbit) to import completed runs into your log. Fully optional &mdash; read-only, and the connection stays on this device only.</p>' +
+          '<button class="ob-btn ob-btn-secondary" id="ghConnectBtn">Connect Google Health</button>'
+        ) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -2014,6 +2160,17 @@
         }).finally(function () {
           btn.disabled = false; btn.textContent = 'Send sign-in link';
         });
+      });
+    }
+
+    if (GoogleHealth.isConnected) {
+      document.getElementById('ghDisconnectBtn').addEventListener('click', function () {
+        GoogleHealth.disconnect();
+        renderSettings();
+      });
+    } else {
+      document.getElementById('ghConnectBtn').addEventListener('click', function () {
+        GoogleHealth.connect();
       });
     }
 
@@ -2239,4 +2396,7 @@
 
   renderMain();
   CloudSync.init();
+  GoogleHealth.handleOAuthRedirect().then(function () {
+    if (document.getElementById('googleHealthSection')) renderSettings();
+  });
 })();
