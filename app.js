@@ -231,9 +231,17 @@
     if (!s.logs) s.logs = {};
     if (!s.overrides) s.overrides = {};
     if (!s.crossType) s.crossType = {};
+    if (!s.lastModified) s.lastModified = 0;
     return s;
   }
-  function saveState(state) { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  function saveState(state) {
+    state.lastModified = Date.now();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    if (!_skipCloudPush && CloudSync.isSignedIn) {
+      clearTimeout(_cloudPushTimer);
+      _cloudPushTimer = setTimeout(function () { CloudSync.push(); }, 5000);
+    }
+  }
 
   // logs[key] is a structured entry ({time, distance, effort, notes}) but may still be
   // a bare string for anything saved before logging fields existed — normalize on read.
@@ -250,6 +258,162 @@
     else delete state.logs[key];
     saveState(state);
   }
+
+  // ── Cloud sync (Supabase, fully optional -- app works entirely offline without it) ──
+  var SUPABASE_URL = 'https://ssqdkituquloolgtlfpl.supabase.co';
+  var SUPABASE_KEY = 'sb_publishable_OGz777pTa7ISrm5J6xhZpQ_nCaVAROF';
+  var _sbClient = null;
+  function _sb() {
+    if (!window.supabase) throw new Error('Supabase library failed to load');
+    if (!_sbClient) _sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    return _sbClient;
+  }
+  var _skipCloudPush = false;
+  var _cloudPushTimer = null;
+
+  // Same lastModified-wins-for-scalars / union-merge-for-collections pattern as
+  // Conqur's CloudSync, adapted to this app's shape -- logs/overrides/crossType
+  // are keyed by "weekNum-dayIdx" so they union the same way Conqur unions by id.
+  function mergeRunnerState(local, remote) {
+    var localNewer = (local.lastModified || 0) >= (remote.lastModified || 0);
+    var prefer = localNewer ? local : remote;
+
+    function mergeMap(localMap, remoteMap) {
+      var out = {};
+      Object.keys(localMap || {}).concat(Object.keys(remoteMap || {})).forEach(function (k) {
+        if (out.hasOwnProperty(k)) return;
+        var lv = (localMap || {})[k], rv = (remoteMap || {})[k];
+        out[k] = (lv !== undefined && rv !== undefined) ? (localNewer ? lv : rv) : (lv !== undefined ? lv : rv);
+      });
+      return out;
+    }
+
+    var unavailableMap = {};
+    (remote.unavailable || []).concat(local.unavailable || []).forEach(function (r) {
+      unavailableMap[r.start + '|' + r.end + '|' + r.reason] = r;
+    });
+
+    return {
+      userName: prefer.userName,
+      units: prefer.units,
+      raceGoal: prefer.raceGoal,
+      profile: prefer.profile,
+      planMeta: prefer.planMeta,
+      logs: mergeMap(local.logs, remote.logs),
+      overrides: mergeMap(local.overrides, remote.overrides),
+      crossType: mergeMap(local.crossType, remote.crossType),
+      unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
+      lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
+    };
+  }
+
+  var CloudSync = {
+    _user: null,
+    syncing: false,
+    lastError: null,
+
+    get isSignedIn() { return !!this._user; },
+    get userEmail() { return this._user ? this._user.email : null; },
+    get uid() { return this._user ? this._user.id : null; },
+
+    async init() {
+      if (!window.supabase) return; // CDN blocked/offline -- app still works fully offline
+      try {
+        var sessionRes = await _sb().auth.getSession();
+        this._user = (sessionRes.data.session && sessionRes.data.session.user) || null;
+        if (this._user) await this.pull();
+      } catch (e) { this.lastError = String((e && e.message) || e); }
+      _sb().auth.onAuthStateChange(function (_event, session) {
+        var wasSignedIn = CloudSync.isSignedIn;
+        CloudSync._user = (session && session.user) || null;
+        if (!wasSignedIn && CloudSync.isSignedIn) CloudSync.pull();
+        if (document.getElementById('accountSection')) renderSettings();
+      });
+    },
+
+    async sendMagicLink(email) {
+      try {
+        var res = await _sb().auth.signInWithOtp({
+          email: email,
+          options: { emailRedirectTo: window.location.origin + window.location.pathname }
+        });
+        if (res.error) return { error: res.error.message };
+        return {};
+      } catch (e) { return { error: String((e && e.message) || e) }; }
+    },
+
+    async signOut() {
+      try { await _sb().auth.signOut(); } catch (e) {}
+      this._user = null;
+    },
+
+    async push() {
+      if (!this.isSignedIn) return;
+      this.syncing = true;
+      try {
+        var res = await _sb().from('user_data').upsert({
+          user_id: this.uid,
+          state_json: state,
+          updated_at: new Date().toISOString()
+        });
+        this.lastError = res.error ? res.error.message : null;
+      } catch (e) { this.lastError = String((e && e.message) || e); }
+      this.syncing = false;
+    },
+
+    async pull() {
+      if (!this.isSignedIn) return;
+      this.syncing = true;
+      try {
+        var res = await _sb().from('user_data').select('state_json').eq('user_id', this.uid).maybeSingle();
+        if (res.error) { this.lastError = res.error.message; this.syncing = false; return; }
+        if (!res.data || !res.data.state_json) {
+          // No cloud copy yet -- this device's local state becomes the first one.
+          this.syncing = false;
+          await this.push();
+          return;
+        }
+        var merged = mergeRunnerState(state, res.data.state_json);
+        _skipCloudPush = true;
+        state = merged;
+        saveState(state);
+        _skipCloudPush = false;
+        renderMain();
+        await this.push();
+      } catch (e) { this.lastError = String((e && e.message) || e); }
+      this.syncing = false;
+    },
+
+    async deleteCloudData() {
+      if (!this.isSignedIn) return { error: 'Not signed in' };
+      try {
+        var res = await _sb().from('user_data').delete().eq('user_id', this.uid);
+        if (res.error) return { error: res.error.message };
+        return {};
+      } catch (e) { return { error: String((e && e.message) || e) }; }
+    },
+
+    // Full account deletion (not just the data row) -- needs the service-role
+    // key, so it goes through a Netlify function rather than running here.
+    async deleteAccountPermanently() {
+      if (!this.isSignedIn) return { error: 'Not signed in' };
+      try {
+        var sessionRes = await _sb().auth.getSession();
+        var token = sessionRes.data.session && sessionRes.data.session.access_token;
+        if (!token) return { error: 'No active session' };
+        var res = await fetch('/.netlify/functions/delete-account', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_token: token })
+        });
+        var data = await res.json();
+        if (!res.ok || data.error) return { error: (data && data.error) || 'Request failed' };
+        await _sb().auth.signOut();
+        this._user = null;
+        return {};
+      } catch (e) { return { error: String((e && e.message) || e) }; }
+    }
+  };
 
   var state = loadState();
   var didAutoScroll = false;
@@ -281,7 +445,12 @@
     return Math.round((B - A) / 86400000);
   }
   function weeksBetween(today, raceDate) {
-    return Math.max(1, Math.ceil(daysBetween(today, raceDate) / 7));
+    // +1 because the plan must cover both endpoints (start day through race day
+    // inclusive), not just the gap between them -- otherwise a start-to-race
+    // span that's an exact multiple of 7 comes out one day short, and since
+    // dateForSlot anchors the calendar to race day, the dropped day is the
+    // first one: the runner's chosen start date.
+    return Math.max(1, Math.ceil((daysBetween(today, raceDate) + 1) / 7));
   }
   function sameDate(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -640,7 +809,7 @@
         '<div class="ob-label">What\'s your name?</div>' +
         '<input class="ob-input" type="text" id="introName" placeholder="e.g. Sarah" value="' + escapeHtml(state.userName || '') + '">' +
         '<button class="ob-btn" id="introStartBtn">Build My Plan</button>' +
-        '<div class="intro-footer">No account, no ads — everything stays on your device.</div>' +
+        '<div class="intro-footer">No account required, no ads — your data stays on this device unless you turn on sync.</div>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -866,6 +1035,47 @@
   }
 
   // ── Main calendar (reuses the original edit / cross-select / time-log UI) ──
+  // Shared icon strip so Progress/Glossary/Safety/Edit/Settings are reachable
+  // from any subscreen, not just the main plan view -- avoids forcing a detour
+  // through "Back to plan" just to switch between them.
+  function headerIconsHtml(activeId) {
+    function cls(id) { return 'ti hd-install' + (id === activeId ? ' active' : ''); }
+    return (
+      '<div class="hd-actions">' +
+        '<i class="' + cls('progressBtn') + ' ti-chart-line" id="progressBtn" title="Progress"></i>' +
+        '<i class="' + cls('glossaryBtn') + ' ti-book-2" id="glossaryBtn" title="What this all means"></i>' +
+        '<i class="' + cls('safetyBtn') + ' ti-shield-check" id="safetyBtn" title="Safety info"></i>' +
+        '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
+        '<i class="' + cls('editPlanBtn') + ' ti-edit" id="editPlanBtn" title="Edit plan"></i>' +
+        '<i class="ti hd-gear' + (activeId === 'gearBtn' ? ' active' : '') + ' ti-settings" id="gearBtn" title="Settings"></i>' +
+      '</div>'
+    );
+  }
+  function wireHeaderIcons() {
+    document.getElementById('editPlanBtn').addEventListener('click', function () {
+      renderWizard({
+        event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
+        weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
+        experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, availableDays: state.profile.availableDays,
+        terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(), userName: state.userName
+      });
+    });
+    document.getElementById('gearBtn').addEventListener('click', renderSettings);
+    document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
+    document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
+    document.getElementById('progressBtn').addEventListener('click', renderProgressPanel);
+    var installBtn = document.getElementById('installBtn');
+    if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
+    installBtn.addEventListener('click', function () {
+      if (!deferredInstallPrompt) return;
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.then(function () {
+        deferredInstallPrompt = null;
+        installBtn.style.display = 'none';
+      });
+    });
+  }
+
   function renderMain() {
     if (!state.raceGoal || !state.profile || !state.planMeta) { renderIntro(); return; }
 
@@ -877,11 +1087,19 @@
     var planLengthWeeks = state.planMeta.planLengthWeeks;
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var weeks = result.weeks;
+    // The calendar grid is always whole 7-day weeks anchored to race day (see
+    // weeksBetween's comment) -- week 1 can include a few lead-in slots before
+    // the runner's actual chosen start date. Those are excluded everywhere
+    // below (stats, "today" detection, and the rendered day list further
+    // down) so a lead-in slot can never masquerade as "today" or count toward
+    // logged/scheduled totals.
+    var planStartDate = state.raceGoal.startDate ? parseDate(state.raceGoal.startDate) : null;
 
     var totalLoggable = 0, totalLogged = 0, currentWeek = 1, todayDayIdx = -1;
     weeks.forEach(function (wk) {
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+        if (planStartDate && d < planStartDate) return;
         var key = wk.weekNum + '-' + di;
         var effectiveLabel = state.overrides[key] || day.label;
         if (isLoggable(effectiveLabel)) {
@@ -911,14 +1129,7 @@
             '<div class="hd-title">' + (state.userName ? escapeHtml(state.userName) + '&rsquo;s ' : '') + EVENT_LABEL[state.raceGoal.event] + ' Training</div>' +
             '<div class="hd-sub">' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal] + '</div>' +
           '</div>' +
-          '<div class="hd-actions">' +
-            '<i class="ti ti-chart-line hd-install" id="progressBtn" title="Progress"></i>' +
-            '<i class="ti ti-book-2 hd-install" id="glossaryBtn" title="What this all means"></i>' +
-            '<i class="ti ti-shield-check hd-install" id="safetyBtn" title="Safety info"></i>' +
-            '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
-            '<i class="ti ti-edit hd-install" id="editPlanBtn" title="Edit plan"></i>' +
-            '<i class="ti ti-settings hd-gear" id="gearBtn" title="Settings"></i>' +
-          '</div>' +
+          headerIconsHtml(null) +
         '</div>' +
         '<div class="stat-line">' +
           '<span class="accent">WEEK ' + currentWeek + ' OF ' + planLengthWeeks + '</span>' +
@@ -934,28 +1145,7 @@
     );
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
-    document.getElementById('editPlanBtn').addEventListener('click', function () {
-      renderWizard({
-        event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
-        weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
-        experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, availableDays: state.profile.availableDays,
-        terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(), userName: state.userName
-      });
-    });
-    document.getElementById('gearBtn').addEventListener('click', renderSettings);
-    document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
-    document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
-    document.getElementById('progressBtn').addEventListener('click', renderProgressPanel);
-    var installBtn = document.getElementById('installBtn');
-    if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
-    installBtn.addEventListener('click', function () {
-      if (!deferredInstallPrompt) return;
-      deferredInstallPrompt.prompt();
-      deferredInstallPrompt.userChoice.then(function () {
-        deferredInstallPrompt = null;
-        installBtn.style.display = 'none';
-      });
-    });
+    wireHeaderIcons();
 
     if (todayDayIdx !== -1) {
       var todayKey = currentWeek + '-' + todayDayIdx;
@@ -982,6 +1172,14 @@
           '<div class="today-plan">' + escapeHtml(todayLabel) + '</div>' +
           todayStatusHtml +
           (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
+          '<div class="ai-reschedule">' +
+            '<div class="pain-toggle" id="aiRescheduleToggle">Need to move a workout? Ask AI</div>' +
+            '<div class="ai-reschedule-form" id="aiRescheduleForm" style="display:none">' +
+              '<input class="ob-input" type="text" id="aiRescheduleInput" placeholder="e.g. I want to run today instead of tomorrow">' +
+              '<button type="button" class="ob-btn ob-btn-secondary" id="aiRescheduleAskBtn" style="margin-top:8px">Ask</button>' +
+              '<div class="ai-why-result" id="aiRescheduleResult" style="display:none"></div>' +
+            '</div>' +
+          '</div>' +
         '</div>'
       );
       app.appendChild(todayCard);
@@ -990,6 +1188,99 @@
           renderWorkoutDetail(currentWeek, todayDayIdx);
         });
       }
+
+      (function () {
+        var toggle = document.getElementById('aiRescheduleToggle');
+        var form = document.getElementById('aiRescheduleForm');
+        var input = document.getElementById('aiRescheduleInput');
+        var askBtn = document.getElementById('aiRescheduleAskBtn');
+        var resultEl = document.getElementById('aiRescheduleResult');
+
+        toggle.addEventListener('click', function () {
+          form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        });
+
+        function showMessage(text, isError) {
+          resultEl.style.display = 'block';
+          resultEl.className = 'ai-why-result' + (isError ? ' ai-why-error' : '');
+          resultEl.textContent = text;
+        }
+
+        function applySwap(keyA, keyB, daysByKey) {
+          var dayA = daysByKey[keyA], dayB = daysByKey[keyB];
+          var labelA = dayA.effectiveLabel, labelB = dayB.effectiveLabel;
+          if (labelB === dayA.baseLabel) delete state.overrides[keyA]; else state.overrides[keyA] = labelB;
+          if (labelA === dayB.baseLabel) delete state.overrides[keyB]; else state.overrides[keyB] = labelA;
+          saveState(state);
+          renderMain();
+        }
+
+        askBtn.addEventListener('click', function () {
+          var req = input.value.trim();
+          if (!req) return;
+
+          var daysByKey = {};
+          var daysPayload = [];
+          [currentWeek - 1, currentWeek].forEach(function (wIdx) {
+            if (wIdx < 0 || wIdx >= weeks.length) return;
+            var wk = weeks[wIdx];
+            wk.days.forEach(function (dd, di) {
+              var dt = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+              var key = wk.weekNum + '-' + di;
+              var effectiveLabel = state.overrides[key] || dd.label;
+              daysByKey[key] = { effectiveLabel: effectiveLabel, baseLabel: dd.label, date: dt };
+              daysPayload.push({ key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: effectiveLabel });
+            });
+          });
+
+          askBtn.disabled = true;
+          askBtn.textContent = 'Asking...';
+          showMessage('', false);
+          resultEl.style.display = 'none';
+
+          fetch('/.netlify/functions/reschedule-workout', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ request: req, days: daysPayload })
+          }).then(function (res) {
+            return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+          }).then(function (result2) {
+            if (!result2.ok || result2.data.error) {
+              showMessage(result2.data && result2.data.error ? result2.data.error : "Couldn't reach the AI coach right now.", true);
+              return;
+            }
+            var keys = result2.data.keys;
+            var dayA = daysByKey[keys[0]], dayB = daysByKey[keys[1]];
+            if (!dayA || !dayB) {
+              showMessage("Couldn't match that to two of the upcoming days.", true);
+              return;
+            }
+            resultEl.style.display = 'block';
+            resultEl.className = 'ai-why-result';
+            resultEl.innerHTML = '';
+            var confirmWrap = el(
+              '<div>' +
+                '<div style="margin-bottom:10px">Swap <strong>' + DOW_FULL[dayA.date.getDay()] + '</strong> (' + escapeHtml(dayA.effectiveLabel) + ') with <strong>' + DOW_FULL[dayB.date.getDay()] + '</strong> (' + escapeHtml(dayB.effectiveLabel) + ')?</div>' +
+                '<button type="button" class="ob-btn" id="aiRescheduleConfirm" style="margin-bottom:8px">Confirm swap</button>' +
+                '<div class="ob-cancel" id="aiRescheduleCancel">Cancel</div>' +
+              '</div>'
+            );
+            resultEl.appendChild(confirmWrap);
+            document.getElementById('aiRescheduleConfirm').addEventListener('click', function () {
+              applySwap(keys[0], keys[1], daysByKey);
+            });
+            document.getElementById('aiRescheduleCancel').addEventListener('click', function () {
+              resultEl.style.display = 'none';
+              input.value = '';
+            });
+          }).catch(function () {
+            showMessage("Couldn't reach the AI coach right now.", true);
+          }).finally(function () {
+            askBtn.disabled = false;
+            askBtn.textContent = 'Ask';
+          });
+        });
+      })();
     }
 
     var list = el('<div id="weekList"></div>');
@@ -999,12 +1290,13 @@
       var weekNum = wk.weekNum;
       var firstDate = dateForSlot(raceDate, planLengthWeeks, weekNum, 0);
       var lastDate = dateForSlot(raceDate, planLengthWeeks, weekNum, 6);
+      var visibleFirstDate = (planStartDate && planStartDate > firstDate) ? planStartDate : firstDate;
 
       var block = el(
         '<div class="week-block">' +
           '<div class="week-head">' +
             '<div class="week-num">WEEK ' + (weekNum < 10 ? '0' + weekNum : weekNum) + ' <span class="phase-tag">' + wk.phase.toUpperCase() + '</span></div>' +
-            '<div class="week-range">' + fmtRange(firstDate, lastDate) + '</div>' +
+            '<div class="week-range">' + fmtRange(visibleFirstDate, lastDate) + '</div>' +
           '</div>' +
           '<div class="day-list"></div>' +
         '</div>'
@@ -1013,6 +1305,7 @@
 
       wk.days.forEach(function (dayData, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, weekNum, di);
+        if (planStartDate && d < planStartDate) return;
         var key = weekNum + '-' + di;
         var baseLabel = dayData.label;
         var label = state.overrides[key] || baseLabel;
@@ -1122,6 +1415,8 @@
   function renderSafetyPanel() {
     var app = document.getElementById('app');
     app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml('safetyBtn') + '</div>'));
+    wireHeaderIcons();
     var wrap = el(
       '<div class="ob">' +
         '<div class="ob-title">When to stop and see a doctor</div>' +
@@ -1139,6 +1434,8 @@
   function renderGlossaryPanel() {
     var app = document.getElementById('app');
     app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml('glossaryBtn') + '</div>'));
+    wireHeaderIcons();
     function defList(entries) {
       return '<dl class="glossary-list">' + entries.map(function (e) {
         return '<dt>' + escapeHtml(e[0]) + '</dt><dd>' + escapeHtml(e[1]) + '</dd>';
@@ -1161,6 +1458,8 @@
   function renderWorkoutDetail(weekNum, dayIdx) {
     var app = document.getElementById('app');
     app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
+    wireHeaderIcons();
 
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
@@ -1220,12 +1519,60 @@
         '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
         '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
         detailHtml +
+        (detail ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiWhyBtn">Ask AI: why this workout?</button><div class="ai-why-result" id="aiWhyResult" style="display:none"></div></div>' : '') +
         logHtml +
         (loggable ? '<button class="ob-btn" id="wdSaveBtn">Save</button>' : '') +
         '<div class="ob-cancel" id="wdBackBtn">Back to plan</div>' +
       '</div>'
     );
     app.appendChild(wrap);
+
+    if (detail) {
+      var aiWhyBtn = document.getElementById('aiWhyBtn');
+      var aiWhyResult = document.getElementById('aiWhyResult');
+      aiWhyBtn.addEventListener('click', function () {
+        aiWhyBtn.disabled = true;
+        aiWhyBtn.textContent = 'Asking...';
+        aiWhyResult.style.display = 'block';
+        aiWhyResult.className = 'ai-why-result';
+        aiWhyResult.textContent = '';
+        var context = {
+          day: {
+            type: dayData.type,
+            label: label,
+            plannedDistance: dayData.miles ? toUnit(dayData.miles) : null,
+            unit: unitLabel()
+          },
+          plan: {
+            event: state.raceGoal.event,
+            goal: state.raceGoal.goal,
+            experienceLevel: state.planMeta.level,
+            weekNum: weekNum,
+            totalWeeks: planLengthWeeks,
+            phase: result.weeks[weekNum - 1].phase,
+            isUnsafe: !!state.planMeta.unsafe
+          }
+        };
+        fetch('/.netlify/functions/why-workout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(context)
+        }).then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+        }).then(function (result2) {
+          if (!result2.ok || !result2.data.explanation) {
+            throw new Error((result2.data && result2.data.error) || 'Request failed');
+          }
+          aiWhyResult.textContent = result2.data.explanation;
+        }).catch(function () {
+          aiWhyResult.className = 'ai-why-result ai-why-error';
+          aiWhyResult.textContent = "Couldn't reach the AI coach right now -- the explanation above still applies.";
+        }).finally(function () {
+          aiWhyBtn.disabled = false;
+          aiWhyBtn.textContent = 'Ask AI: why this workout?';
+        });
+      });
+    }
 
     if (loggable) {
       var effortSelected = entry.effort || null;
@@ -1332,6 +1679,8 @@
   function renderSettings() {
     var app = document.getElementById('app');
     app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml('gearBtn') + '</div>'));
+    wireHeaderIcons();
     var wrap = el(
       '<div class="ob">' +
         '<div class="ob-title">Settings</div>' +
@@ -1347,6 +1696,20 @@
         '<input class="ob-input" type="date" id="set_toEnd" style="margin-top:8px">' +
         '<div class="chip-grid" id="set_toReason" style="margin-top:8px">' + chipsHtml('toReason', ['illness', 'vacation'], { illness: 'Illness', vacation: 'Away' }, 'illness', false) + '</div>' +
         '<button class="ob-btn ob-btn-secondary" id="markUnavailableBtn" style="margin-top:8px">Mark unavailable</button>' +
+        '<div class="ob-label" style="margin-top:26px">Account &amp; sync</div>' +
+        '<div id="accountSection">' + (CloudSync.isSignedIn ?
+          '<p class="recap-empty">Signed in as ' + escapeHtml(CloudSync.userEmail || '') + '</p>' +
+          (CloudSync.lastError ? '<div class="ai-why-result ai-why-error">' + escapeHtml(CloudSync.lastError) + '</div>' : '') +
+          '<button class="ob-btn ob-btn-secondary" id="syncNowBtn">' + (CloudSync.syncing ? 'Syncing...' : 'Sync now') + '</button>' +
+          '<button class="ob-btn ob-btn-secondary" id="signOutBtn" style="margin-top:8px">Sign out</button>' +
+          '<button class="ob-btn ob-btn-secondary danger-btn" id="deleteCloudBtn" style="margin-top:14px">Delete my cloud data</button>' +
+          '<button class="ob-btn ob-btn-secondary danger-btn" id="deleteAccountBtn" style="margin-top:8px">Delete my account permanently</button>'
+          :
+          '<p class="recap-empty">Sign in to back up your plan and sync it across devices. Fully optional &mdash; everything already works without it.</p>' +
+          '<input class="ob-input" type="email" id="magicLinkEmail" placeholder="you@example.com">' +
+          '<button class="ob-btn ob-btn-secondary" id="sendMagicLinkBtn" style="margin-top:8px">Send sign-in link</button>' +
+          '<div class="ai-why-result" id="magicLinkStatus" style="display:none"></div>'
+        ) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -1398,6 +1761,52 @@
         renderSettings();
       });
     });
+
+    if (CloudSync.isSignedIn) {
+      document.getElementById('signOutBtn').addEventListener('click', function () {
+        CloudSync.signOut().then(renderSettings);
+      });
+      document.getElementById('syncNowBtn').addEventListener('click', function () {
+        var btn = document.getElementById('syncNowBtn');
+        btn.disabled = true; btn.textContent = 'Syncing...';
+        CloudSync.pull().then(function () { renderSettings(); });
+      });
+      document.getElementById('deleteCloudBtn').addEventListener('click', function () {
+        if (!window.confirm('This permanently deletes your synced backup from the cloud. Your local data on this device is not affected. Continue?')) return;
+        CloudSync.deleteCloudData().then(function (res) {
+          if (res.error) { window.alert('Could not delete cloud data: ' + res.error); return; }
+          window.alert('Cloud data deleted.');
+        });
+      });
+      document.getElementById('deleteAccountBtn').addEventListener('click', function () {
+        if (!window.confirm('This permanently deletes your account and cloud backup. Your local data on this device is not affected. This cannot be undone. Continue?')) return;
+        CloudSync.deleteAccountPermanently().then(function (res) {
+          if (res.error) { window.alert('Could not delete account: ' + res.error); return; }
+          window.alert('Account deleted.');
+          renderSettings();
+        });
+      });
+    } else {
+      document.getElementById('sendMagicLinkBtn').addEventListener('click', function () {
+        var email = document.getElementById('magicLinkEmail').value.trim();
+        if (!email) return;
+        var btn = document.getElementById('sendMagicLinkBtn');
+        var statusEl = document.getElementById('magicLinkStatus');
+        btn.disabled = true; btn.textContent = 'Sending...';
+        CloudSync.sendMagicLink(email).then(function (res) {
+          statusEl.style.display = 'block';
+          if (res.error) {
+            statusEl.className = 'ai-why-result ai-why-error';
+            statusEl.textContent = res.error;
+          } else {
+            statusEl.className = 'ai-why-result';
+            statusEl.textContent = 'Check ' + email + ' for a sign-in link.';
+          }
+        }).finally(function () {
+          btn.disabled = false; btn.textContent = 'Send sign-in link';
+        });
+      });
+    }
 
     document.getElementById('exportBtn').addEventListener('click', function () {
       var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -1456,6 +1865,8 @@
   function renderProgressPanel() {
     var app = document.getElementById('app');
     app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml('progressBtn') + '</div>'));
+    wireHeaderIcons();
 
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
@@ -1463,11 +1874,17 @@
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var weeks = result.weeks;
 
+    // See renderMain's matching comment -- week 1 can include lead-in slots
+    // before the runner's actual chosen start date; those must never count as
+    // scheduled/completed or be mistaken for "today".
+    var planStartDate = state.raceGoal.startDate ? parseDate(state.raceGoal.startDate) : null;
+
     var totalDistance = 0, longestRun = 0, completedCount = 0, scheduledSoFar = 0;
     var currentWeekIdx = -1;
     weeks.forEach(function (wk) {
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+        if (planStartDate && d < planStartDate) return;
         var key = wk.weekNum + '-' + di;
         var label = state.overrides[key] || day.label;
         if (d <= today && isLoggable(label)) {
@@ -1502,6 +1919,7 @@
       '</dl>';
 
     var lastWeekHtml = '<p class="recap-empty">No completed week yet.</p>';
+    var aiRecapContext = null;
     if (lastWeek) {
       var planned = 0, completed = 0, plannedDist = 0, doneDist = 0, hardestLabel = null, hardestRpe = -1;
       lastWeek.days.forEach(function (day, di) {
@@ -1524,6 +1942,24 @@
           '<dt>Distance</dt><dd>' + toUnit(round1(doneDist)) + ' of ' + toUnit(round1(plannedDist)) + ' ' + unitLabel() + ' planned</dd>' +
           '<dt>Hardest session</dt><dd>' + (hardestLabel ? escapeHtml(hardestLabel) + ' (RPE ' + hardestRpe + ')' : '&mdash;') + '</dd>' +
         '</dl>';
+      aiRecapContext = {
+        week: {
+          phase: lastWeek.phase,
+          sessionsCompleted: completed,
+          sessionsPlanned: planned,
+          consistencyPercent: consistency,
+          distanceCompleted: toUnit(round1(doneDist)),
+          distancePlanned: toUnit(round1(plannedDist)),
+          unit: unitLabel(),
+          hardestSessionLabel: hardestLabel,
+          hardestSessionRpe: hardestRpe > 0 ? hardestRpe : null
+        },
+        plan: {
+          event: state.raceGoal.event,
+          goal: state.raceGoal.goal,
+          experienceLevel: state.planMeta.level
+        }
+      };
     }
 
     var nextWeekHtml = '<p class="recap-empty">Nothing scheduled after this.</p>';
@@ -1545,12 +1981,44 @@
         overallHtml +
         '<div class="ob-sub" style="margin-top:20px">Last week</div>' +
         lastWeekHtml +
+        (aiRecapContext ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiRecapBtn">Ask AI for a recap</button><div class="ai-why-result" id="aiRecapResult" style="display:none"></div></div>' : '') +
         '<div class="ob-sub" style="margin-top:20px">Next week</div>' +
         nextWeekHtml +
         '<button class="ob-btn" id="progressBackBtn">Back to plan</button>' +
       '</div>'
     );
     app.appendChild(wrap);
+
+    if (aiRecapContext) {
+      var aiRecapBtn = document.getElementById('aiRecapBtn');
+      var aiRecapResult = document.getElementById('aiRecapResult');
+      aiRecapBtn.addEventListener('click', function () {
+        aiRecapBtn.disabled = true;
+        aiRecapBtn.textContent = 'Asking...';
+        aiRecapResult.style.display = 'block';
+        aiRecapResult.className = 'ai-why-result';
+        aiRecapResult.textContent = '';
+        fetch('/.netlify/functions/weekly-recap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(aiRecapContext)
+        }).then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+        }).then(function (result2) {
+          if (!result2.ok || !result2.data.recap) {
+            throw new Error((result2.data && result2.data.error) || 'Request failed');
+          }
+          aiRecapResult.textContent = result2.data.recap;
+        }).catch(function () {
+          aiRecapResult.className = 'ai-why-result ai-why-error';
+          aiRecapResult.textContent = "Couldn't reach the AI coach right now -- the stats above still apply.";
+        }).finally(function () {
+          aiRecapBtn.disabled = false;
+          aiRecapBtn.textContent = 'Ask AI for a recap';
+        });
+      });
+    }
+
     document.getElementById('progressBackBtn').addEventListener('click', renderMain);
   }
 
@@ -1561,4 +2029,5 @@
   }
 
   renderMain();
+  CloudSync.init();
 })();

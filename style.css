@@ -217,6 +217,9 @@ body {
   padding: 4px;
 }
 .hd-gear:hover, .hd-install:hover { color: var(--accent); }
+.hd-gear.active, .hd-install.active { color: var(--accent); }
+
+.subnav { display: flex; justify-content: flex-end; margin-bottom: 18px; }
 
 .stat-line {
   margin-top: 16px;
@@ -282,6 +285,8 @@ body {
 .today-status--done { color: var(--accent); }
 .today-status--pending { color: var(--text-faint); }
 .today-btn { margin-top: 14px; }
+.ai-reschedule { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ai-reschedule-form { margin-top: 10px; }
 
 /* ── Week blocks ────────────────────────────────────────────────────── */
 .week-block { margin-top: 30px; }
@@ -484,6 +489,32 @@ dl.wd-info dd {
 .pain-guidance--mild { background: rgba(111, 174, 138, 0.10); color: var(--text); border: 1px solid rgba(111, 174, 138, 0.3); }
 .pain-guidance--caution { background: rgba(217, 178, 95, 0.10); color: var(--text); border: 1px solid rgba(217, 178, 95, 0.35); }
 .pain-guidance--urgent { background: rgba(217, 106, 106, 0.10); color: var(--text); border: 1px solid rgba(217, 106, 106, 0.4); }
+
+.ai-why { margin-top: 14px; }
+.ai-why-btn {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(217, 119, 66, 0.3);
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+}
+.ai-why-btn:hover { background: rgba(217, 119, 66, 0.18); }
+.ai-why-btn:disabled { opacity: 0.6; cursor: default; }
+.ai-why-result {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.ai-why-error { color: var(--text-dim); font-style: italic; }
 
 /* ── Progress / recap panel ─────────────────────────────────────────── */
 .recap-empty { font-size: 13.5px; color: var(--text-faint); font-style: italic; margin-top: 4px; }

@@ -475,21 +475,25 @@
     </div>
     <p class="track-goal">Confirmed, not optional &mdash; the North Star is being the smartest coach in the runner's pocket, and that's an AI claim. The only open question was ever timing: this starts after T0/T1, once the coaching core is solid enough to be worth explaining. First move is still a small serverless function that proxies LLM calls, so no key ever sits in client code.</p>
     <ul class="tasks">
-      <li class="fork"><span class="box"></span>
-        <span class="task-title">Stand up the proxy function<span class="tag mono">first step</span></span>
-        <span class="task-note">One serverless endpoint, no persistent user data required for this alone &mdash; the narrowest possible version of "add a backend."</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Stand up the proxy function<span class="tag mono">shipped</span></span>
+        <span class="task-note">Netlify Functions, calling OpenAI (gpt-4o-mini) server-side &mdash; the key lives only in Netlify's env, never in client code.</span>
       </li>
-      <li class="fork"><span class="box"></span>
-        <span class="task-title">"Why this workout" explanations</span>
-        <span class="task-note">Grounded only in the active plan's real data &mdash; per the roadmap's own rule, the AI explains and personalizes, it never invents training load.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">"Why this workout" explanations<span class="tag mono">shipped</span></span>
+        <span class="task-note">Grounded only in the active plan's real data (event/goal/phase/week/day type/label/distance) &mdash; the AI explains and personalizes, it never invents training load.</span>
       </li>
-      <li class="fork"><span class="box"></span>
-        <span class="task-title">AI weekly recap</span>
-        <span class="task-note">A natural-language layer over the T0 recap data, not a replacement for it &mdash; the deterministic version should keep working if the AI call fails.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">AI weekly recap<span class="tag mono">shipped</span></span>
+        <span class="task-note">A natural-language layer over the T0 recap data, not a replacement for it &mdash; the deterministic Progress panel numbers keep working if the AI call fails.</span>
       </li>
-      <li class="fork"><span class="box"></span>
-        <span class="task-title">Guardrails as a system prompt</span>
-        <span class="task-note">The roadmap's non-negotiable rules (no unsafe plans, no diagnosis, no guilt-based motivation) become literal constraints on the prompt, not aspirational copy.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Guardrails as a system prompt<span class="tag mono">shipped</span></span>
+        <span class="task-note">The roadmap's non-negotiable rules (no unsafe plans, no diagnosis, no guilt-based motivation) are literal constraints in every AI function's system prompt, not aspirational copy.</span>
+      </li>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Conversational day-swap<span class="tag mono">shipped</span></span>
+        <span class="task-note">"I want to run today instead of tomorrow" replaces the old two-day manual retype. The AI only identifies which two already-scheduled days to swap (hard-validated server-side against the real day list); the label swap itself is done client-side with the plan's own data, plus a confirm step before anything saves.</span>
       </li>
     </ul>
   </section>
@@ -501,17 +505,21 @@
     </div>
     <p class="track-goal">Also confirmed, also deferred &mdash; a bigger backend lift than T2, since it's real auth and a database, not just a proxy function. Comes after T2 proves the AI layer is worth having an account for.</p>
     <ul class="tasks">
-      <li class="fork"><span class="box"></span>
-        <span class="task-title">Update the intro screen's promise<span class="tag mono">first step</span></span>
-        <span class="task-note">"No account, everything stays on your device" stops being true the moment T3 ships. Rewrite that copy before, not after &mdash; the intro screen has already been written once; it can be written again.</span>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Update the intro screen's promise<span class="tag mono">shipped</span></span>
+        <span class="task-note">Now reads "No account required, no ads — your data stays on this device unless you turn on sync," accurate the moment sign-in ships since it's opt-in, not required.</span>
+      </li>
+      <li class="done"><span class="box"></span>
+        <span class="task-title">Auth + cross-device sync<span class="tag mono">shipped</span></span>
+        <span class="task-note">Supabase project `runner` (ref ssqdkituquloolgtlfpl), magic-link email, fully optional — local-only usage is untouched for anyone who never signs in. Sync uses the same lastModified-wins-for-scalars / union-merge-for-collections pattern as Conqur's CloudSync. Real URL + anon key are wired into app.js's SUPABASE_URL/SUPABASE_KEY; first sign-in tested successfully against the live project.</span>
       </li>
       <li class="fork"><span class="box"></span>
-        <span class="task-title">Auth + cross-device sync</span>
-        <span class="task-note">If pursued: a known-quantity backend (Supabase has already been used elsewhere) rather than building auth from scratch.</span>
+        <span class="task-title">Data-deletion flow<span class="tag mono">code done, needs Netlify env vars</span></span>
+        <span class="task-note">Two levels in Settings: "Delete my cloud data" (self-service, deletes the user_data row via RLS) and "Delete my account permanently" (full auth.users deletion via a new Netlify function, netlify/functions/delete-account.js, using a service-role key that never touches the client). Needs SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY set as Netlify env vars (same pattern as OPENAI_API_KEY) before this can be tested end to end.</span>
       </li>
-      <li class="fork"><span class="box"></span>
-        <span class="task-title">Data-deletion flow</span>
-        <span class="task-note">The roadmap calls for this explicitly once accounts exist &mdash; not optional if there's a database with a person's training history in it.</span>
+      <li class="later"><span class="box"></span>
+        <span class="task-title">Custom SMTP + branded auth emails<span class="tag mono">deferred, not urgent</span></span>
+        <span class="task-note">Supabase's built-in mailer only sends default-wording templates (confirmed 2026-07-13: the Subject/Body fields in Authentication → Emails are read-only until custom SMTP is connected) — the actual sign-in link inside those emails works fine regardless, this is cosmetic only. Deferred until closer to public launch, since Supabase's built-in mailer is meant for testing/low volume anyway and real users will need reliable delivery at the same time the wording starts mattering. Plan: connect a free-tier SMTP provider (Resend is the easiest Supabase pairing, ~100/day free) then customize the "Confirm signup" and "Magic Link" templates to explain this is Runner's optional sync, not a generic account signup.</span>
       </li>
     </ul>
   </section>
@@ -566,8 +574,12 @@
         <span class="seq-note">Today card, workout detail view, structured logging, Progress/recap panel, Settings screen, export/import, mi/km units, illness/vacation mode, difficulty-based adaptation, structured pain reporting, guided goal-change flow. The entire no-backend build is closed.</span>
       </li>
       <li>
-        <span class="seq-title">Stand up the backend once, for T2 first &mdash; next up</span>
-        <span class="seq-note">Both T2 and T3 need infrastructure that doesn't exist yet; standing it up once for the AI proxy (T2) rather than twice is cheaper, and T2 is the more direct hit on the North Star.</span>
+        <span class="seq-title">T2, all four items &mdash; done (2026-07-12)</span>
+        <span class="seq-note">Proxy function, "why this workout" explanations, AI weekly recap, guardrails-as-system-prompt, plus a bonus conversational day-swap. The backend (Netlify Functions + OpenAI) now exists.</span>
+      </li>
+      <li>
+        <span class="seq-title">T3 &mdash; next up</span>
+        <span class="seq-note">The bigger lift: real auth + a database, not just a proxy. Starts with rewriting the intro screen's "no account" promise before it becomes false, per the flag below.</span>
       </li>
       <li>
         <span class="seq-title">T4, then T5</span>
