@@ -520,7 +520,7 @@
   // Tokens are stored in their own localStorage key, deliberately NOT on
   // `state` -- so they never ride along in CloudSync's synced blob (per
   // user's explicit choice: this stays device-only, even when signed in).
-  var GOOGLE_HEALTH_CLIENT_ID = 'YOUR-GOOGLE-HEALTH-CLIENT-ID.apps.googleusercontent.com';
+  var GOOGLE_HEALTH_CLIENT_ID = '1024548053353-3u3n0g1hekthin8p39054bo2imbgds87.apps.googleusercontent.com';
   var GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly';
   var GH_TOKEN_KEY = 'runner_google_health_tokens';
   var GH_OAUTH_STATE_KEY = 'runner_gh_oauth_state';
