@@ -253,10 +253,111 @@
   }
   function setLog(key, patch) {
     var next = Object.assign({}, getLog(key), patch);
-    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain);
+    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.done);
     if (hasContent) state.logs[key] = next;
     else delete state.logs[key];
     saveState(state);
+  }
+
+  // ── Completion celebration -- personal bests get an AI-phrased note, everything else gets a quick local one ──
+  // "TIME" is free text (e.g. "32:10" or plain minutes), so this is a lenient
+  // parse, not strict validation -- unparseable values just skip milestone
+  // detection rather than blocking the log.
+  function parseTimeToMinutes(str) {
+    if (!str) return null;
+    var m = str.trim().match(/^(\d+):(\d{1,2})$/);
+    if (m) return parseInt(m[1], 10) + parseInt(m[2], 10) / 60;
+    var n = parseFloat(str);
+    return isNaN(n) ? null : n;
+  }
+
+  function pastRunStats(weeks, excludeKey, type) {
+    var stats = [];
+    weeks.forEach(function (wk) {
+      wk.days.forEach(function (dd, di) {
+        var k = wk.weekNum + '-' + di;
+        if (k === excludeKey || dd.type !== type) return;
+        var e = getLog(k);
+        if (!e || e.distance == null || !e.time) return;
+        var mins = parseTimeToMinutes(e.time);
+        if (!mins) return;
+        stats.push({ distance: e.distance, pace: mins / e.distance });
+      });
+    });
+    return stats;
+  }
+
+  // Only meaningful for actual runs (not cross/rest/race) with both a
+  // distance and a parseable time logged -- compared only against the same
+  // structural type, since an easy day's deliberately slow pace isn't a fair
+  // comparison against a quality day's.
+  function checkForMilestone(key, dayType, entry, weeks) {
+    if (['easy', 'long', 'quality'].indexOf(dayType) === -1) return null;
+    if (entry.distance == null || !entry.time) return null;
+    var mins = parseTimeToMinutes(entry.time);
+    if (!mins) return null;
+    var pace = mins / entry.distance;
+    var past = pastRunStats(weeks, key, dayType);
+    if (!past.length) return null; // first one of this type ever -- a baseline, not a "best"
+
+    if (dayType === 'long') {
+      var maxDist = past.reduce(function (m, s) { return Math.max(m, s.distance); }, 0);
+      if (entry.distance > maxDist) {
+        return { kind: 'longest_run', distance: toUnit(entry.distance), previousBest: toUnit(maxDist), unit: unitLabel() };
+      }
+    }
+    var bestPace = past.reduce(function (m, s) { return Math.min(m, s.pace); }, Infinity);
+    if (pace < bestPace) {
+      return { kind: 'fastest_pace', workoutType: dayType, distance: toUnit(entry.distance), unit: unitLabel(), paceMinPerUnit: Math.round(pace * 100) / 100 };
+    }
+    return null;
+  }
+
+  var CELEBRATE_MESSAGES = [
+    'Logged — nice work.',
+    "Another one in the books, keep it up.",
+    'Showing up consistently is what actually builds fitness.',
+    'Done and dusted. Great job today.'
+  ];
+  var _celebrateMsgIdx = 0;
+
+  function showToast(text) {
+    var existing = document.querySelector('.app-toast');
+    if (existing) existing.remove();
+    var toast = document.createElement('div');
+    toast.className = 'app-toast';
+    toast.textContent = text;
+    document.body.appendChild(toast);
+    setTimeout(function () { toast.classList.add('app-toast--out'); }, 3200);
+    setTimeout(function () { toast.remove(); }, 3700);
+  }
+
+  // Shared by the quick calendar row, its done-checkbox, and the workout
+  // detail Save button -- one place decides whether a log is an ordinary
+  // completion (free local message) or an actual personal best (worth a
+  // real AI-phrased note, since those are rare enough that the API call is
+  // cheap and the moment deserves more than a canned line).
+  function logAndCelebrate(key, patch, dayType, weeks) {
+    setLog(key, patch);
+    var entry = getLog(key);
+    if (!entry) return;
+    var milestone = checkForMilestone(key, dayType, entry, weeks);
+    if (milestone) {
+      fetch('/.netlify/functions/celebrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fact: milestone, plan: { event: state.raceGoal.event, goal: state.raceGoal.goal } })
+      }).then(function (res) {
+        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
+      }).then(function (result) {
+        showToast((result.ok && result.data.message) || 'That’s a personal best — nice work!');
+      }).catch(function () {
+        showToast('That’s a personal best — nice work!');
+      });
+    } else {
+      showToast(CELEBRATE_MESSAGES[_celebrateMsgIdx % CELEBRATE_MESSAGES.length]);
+      _celebrateMsgIdx++;
+    }
   }
 
   // ── Cloud sync (Supabase, fully optional -- app works entirely offline without it) ──
@@ -1234,6 +1335,7 @@
 
         var row = el(
           '<div class="' + classes + '">' +
+            (loggable ? '<input type="checkbox" class="day-done-check" title="Mark done"' + (entry && entry.done ? ' checked' : '') + '>' : '') +
             '<div class="day-date"><span class="day-dow">' + DOW_FULL[d.getDay()] + '</span><span class="day-dom">' + d.getDate() + '</span></div>' +
             '<div class="day-main">' +
               '<div class="day-plan">' + escapeHtml(label) + '</div>' +
@@ -1247,14 +1349,25 @@
           renderWorkoutDetail(weekNum, di);
         });
 
+        function refreshLoggedCount() {
+          var loggedNow = Object.keys(state.logs).length;
+          document.getElementById('progressFill').style.width = (totalLoggable ? (100 * loggedNow / totalLoggable) : 0) + '%';
+          document.getElementById('loggedCount').textContent = loggedNow + ' / ' + totalLoggable + ' LOGGED';
+        }
+
         if (loggable) {
           var input = row.querySelector('.day-time');
           input.addEventListener('change', function () {
-            setLog(key, { time: input.value.trim() || null });
+            logAndCelebrate(key, { time: input.value.trim() || null }, dayData.type, weeks);
             input.classList.toggle('has-value', !!getLog(key));
-            var loggedNow = Object.keys(state.logs).length;
-            document.getElementById('progressFill').style.width = (totalLoggable ? (100 * loggedNow / totalLoggable) : 0) + '%';
-            document.getElementById('loggedCount').textContent = loggedNow + ' / ' + totalLoggable + ' LOGGED';
+            refreshLoggedCount();
+          });
+
+          var doneCheck = row.querySelector('.day-done-check');
+          doneCheck.addEventListener('change', function () {
+            logAndCelebrate(key, { done: doneCheck.checked ? true : null }, dayData.type, weeks);
+            input.classList.toggle('has-value', !!getLog(key));
+            refreshLoggedCount();
           });
         }
 
@@ -1749,13 +1862,14 @@
         // are all answered -- a partial report can't be shown back unambiguously
         var pain = (painSeverity != null && painWorsens != null && painCanWalk != null) ?
           { location: painLocation, severity: painSeverity, worsens: painWorsens, canWalk: painCanWalk } : null;
-        setLog(key, {
+        logAndCelebrate(key, {
           time: time || null,
           distance: distanceRaw !== '' ? fromUnit(parseFloat(distanceRaw)) : null,
           effort: effortSelected,
           notes: notes || null,
-          pain: pain
-        });
+          pain: pain,
+          done: true
+        }, dayData.type, result.weeks);
         renderMain();
       });
     }
