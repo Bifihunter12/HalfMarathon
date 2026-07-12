@@ -1241,7 +1241,7 @@
           fetch('/.netlify/functions/reschedule-workout', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ request: req, days: daysPayload })
+            body: JSON.stringify({ request: req, today: dateToISO(today), days: daysPayload })
           }).then(function (res) {
             return res.json().then(function (data) { return { ok: res.ok, data: data }; });
           }).then(function (result2) {

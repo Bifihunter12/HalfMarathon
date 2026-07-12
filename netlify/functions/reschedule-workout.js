@@ -9,7 +9,8 @@ var MODEL = 'gpt-4o-mini';
 
 var SYSTEM_PROMPT = [
   'You are a scheduling assistant for a running training plan.',
-  'You are given a JSON list of upcoming days, each with a "key", day-of-week ("dow"), "date", and its currently scheduled "label".',
+  'You are given the real-world "today" date, and a JSON list of upcoming days, each with a "key", day-of-week ("dow"), "date", and its currently scheduled "label".',
+  'Resolve relative terms in the user\'s request (e.g. "today", "tomorrow", "this weekend") against the given "today" date -- never guess at what day the user means without anchoring to it.',
   'Read the user\'s natural-language request and identify EXACTLY TWO keys from the provided list whose workouts the user wants swapped with each other.',
   'You may ONLY return keys that appear in the provided list -- never invent a day, a key, or a workout label.',
   'If the request does not clearly resolve to a swap between two of the provided days (ambiguous, needs more than a swap, or refers to a day not in the list), respond with an error instead.',
@@ -34,10 +35,11 @@ exports.handler = async function (event) {
   }
 
   var request = typeof payload.request === 'string' ? payload.request.slice(0, 300) : '';
+  var today = typeof payload.today === 'string' ? payload.today.slice(0, 10) : '';
   var days = Array.isArray(payload.days) ? payload.days.slice(0, 21) : [];
 
-  if (!request || !days.length) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'Missing request or days' }) };
+  if (!request || !today || !days.length) {
+    return { statusCode: 400, body: JSON.stringify({ error: 'Missing request, today, or days' }) };
   }
 
   // Only forward the fields the prompt is built around.
@@ -48,7 +50,7 @@ exports.handler = async function (event) {
   var validKeys = {};
   cleanDays.forEach(function (d) { validKeys[d.key] = true; });
 
-  var userPrompt = 'Upcoming days (JSON): ' + JSON.stringify(cleanDays) + '\n\nUser request: ' + request;
+  var userPrompt = 'Today\'s date: ' + today + '\n\nUpcoming days (JSON): ' + JSON.stringify(cleanDays) + '\n\nUser request: ' + request;
 
   try {
     var res = await fetch(OPENAI_URL, {
