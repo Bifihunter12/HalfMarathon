@@ -285,8 +285,9 @@ body {
 .today-status--done { color: var(--accent); }
 .today-status--pending { color: var(--text-faint); }
 .today-btn { margin-top: 14px; }
-.ai-reschedule { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-.ai-reschedule-form { margin-top: 10px; }
+.ai-coach { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ai-coach-form { margin-top: 10px; }
+.coach-message { margin-bottom: 4px; }
 
 /* ── Week blocks ────────────────────────────────────────────────────── */
 .week-block { margin-top: 30px; }

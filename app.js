@@ -1172,12 +1172,12 @@
           '<div class="today-plan">' + escapeHtml(todayLabel) + '</div>' +
           todayStatusHtml +
           (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
-          '<div class="ai-reschedule">' +
-            '<div class="pain-toggle" id="aiRescheduleToggle">Need to move a workout? Ask AI</div>' +
-            '<div class="ai-reschedule-form" id="aiRescheduleForm" style="display:none">' +
-              '<input class="ob-input" type="text" id="aiRescheduleInput" placeholder="e.g. I want to run today instead of tomorrow">' +
-              '<button type="button" class="ob-btn ob-btn-secondary" id="aiRescheduleAskBtn" style="margin-top:8px">Ask</button>' +
-              '<div class="ai-why-result" id="aiRescheduleResult" style="display:none"></div>' +
+          '<div class="ai-coach">' +
+            '<div class="pain-toggle" id="aiCoachToggle">Ask your coach</div>' +
+            '<div class="ai-coach-form" id="aiCoachForm" style="display:none">' +
+              '<input class="ob-input" type="text" id="aiCoachInput" placeholder="e.g. My back hurts a little, or: I want to run instead of cross-train today">' +
+              '<button type="button" class="ob-btn ob-btn-secondary" id="aiCoachAskBtn" style="margin-top:8px">Ask</button>' +
+              '<div class="ai-why-result" id="aiCoachResult" style="display:none"></div>' +
             '</div>' +
           '</div>' +
         '</div>'
@@ -1190,11 +1190,11 @@
       }
 
       (function () {
-        var toggle = document.getElementById('aiRescheduleToggle');
-        var form = document.getElementById('aiRescheduleForm');
-        var input = document.getElementById('aiRescheduleInput');
-        var askBtn = document.getElementById('aiRescheduleAskBtn');
-        var resultEl = document.getElementById('aiRescheduleResult');
+        var toggle = document.getElementById('aiCoachToggle');
+        var form = document.getElementById('aiCoachForm');
+        var input = document.getElementById('aiCoachInput');
+        var askBtn = document.getElementById('aiCoachAskBtn');
+        var resultEl = document.getElementById('aiCoachResult');
 
         toggle.addEventListener('click', function () {
           form.style.display = form.style.display === 'none' ? 'block' : 'none';
@@ -1206,12 +1206,33 @@
           resultEl.textContent = text;
         }
 
-        function applySwap(keyA, keyB, daysByKey) {
-          var dayA = daysByKey[keyA], dayB = daysByKey[keyB];
-          var labelA = dayA.effectiveLabel, labelB = dayB.effectiveLabel;
-          if (labelB === dayA.baseLabel) delete state.overrides[keyA]; else state.overrides[keyA] = labelB;
-          if (labelA === dayB.baseLabel) delete state.overrides[keyB]; else state.overrides[keyB] = labelA;
+        function findSourceKey(daysByKey, excludeKey, type) {
+          return Object.keys(daysByKey).filter(function (k) {
+            return k !== excludeKey && daysByKey[k].type === type;
+          })[0];
+        }
+
+        function applyMarkRest(key, note, daysByKey) {
+          var day = daysByKey[key];
+          var label = 'Rest' + (note ? ' — ' + note : '');
+          if (day && label === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = label;
           saveState(state);
+          renderMain();
+        }
+
+        function applySubstitute(key, newType, daysByKey) {
+          var day = daysByKey[key];
+          var sourceKey = findSourceKey(daysByKey, key, newType);
+          if (!sourceKey) return false;
+          var newLabel = daysByKey[sourceKey].effectiveLabel;
+          if (newLabel === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = newLabel;
+          saveState(state);
+          renderMain();
+          return true;
+        }
+
+        function applyLogUnplanned(key, note) {
+          setLog(key, { notes: note || null });
           renderMain();
         }
 
@@ -1225,23 +1246,28 @@
             if (wIdx < 0 || wIdx >= weeks.length) return;
             var wk = weeks[wIdx];
             wk.days.forEach(function (dd, di) {
+              if (dd.type === 'race') return; // never let chat touch race day
               var dt = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
               var key = wk.weekNum + '-' + di;
               var effectiveLabel = state.overrides[key] || dd.label;
-              daysByKey[key] = { effectiveLabel: effectiveLabel, baseLabel: dd.label, date: dt };
-              daysPayload.push({ key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: effectiveLabel });
+              daysByKey[key] = { effectiveLabel: effectiveLabel, baseLabel: dd.label, type: dd.type, date: dt };
+              daysPayload.push({ key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: effectiveLabel, type: dd.type });
             });
           });
 
           askBtn.disabled = true;
           askBtn.textContent = 'Asking...';
-          showMessage('', false);
           resultEl.style.display = 'none';
 
-          fetch('/.netlify/functions/reschedule-workout', {
+          fetch('/.netlify/functions/coach', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ request: req, today: dateToISO(today), days: daysPayload })
+            body: JSON.stringify({
+              request: req,
+              today: dateToISO(today),
+              days: daysPayload,
+              plan: { event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level }
+            })
           }).then(function (res) {
             return res.json().then(function (data) { return { ok: res.ok, data: data }; });
           }).then(function (result2) {
@@ -1249,27 +1275,48 @@
               showMessage(result2.data && result2.data.error ? result2.data.error : "Couldn't reach the AI coach right now.", true);
               return;
             }
-            var keys = result2.data.keys;
-            var dayA = daysByKey[keys[0]], dayB = daysByKey[keys[1]];
-            if (!dayA || !dayB) {
-              showMessage("Couldn't match that to two of the upcoming days.", true);
-              return;
-            }
+            var message = result2.data.message || '';
+            var action = result2.data.action;
+
             resultEl.style.display = 'block';
             resultEl.className = 'ai-why-result';
             resultEl.innerHTML = '';
+            var wrap = el('<div><div class="coach-message">' + escapeHtml(message) + '</div></div>');
+            resultEl.appendChild(wrap);
+
+            if (!action) return;
+            var day = daysByKey[action.key];
+            if (!day) return;
+
+            var confirmText, applyFn;
+            if (action.type === 'mark_rest') {
+              confirmText = 'Mark ' + DOW_FULL[day.date.getDay()] + ' as rest' + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?';
+              applyFn = function () { applyMarkRest(action.key, action.note, daysByKey); };
+            } else if (action.type === 'substitute_workout') {
+              var sourceKey = findSourceKey(daysByKey, action.key, action.newType);
+              if (!sourceKey) {
+                wrap.appendChild(el('<div class="ai-why-error" style="margin-top:8px">Couldn’t find a comparable day to substitute from.</div>'));
+                return;
+              }
+              confirmText = 'Change ' + DOW_FULL[day.date.getDay()] + ' (' + escapeHtml(day.effectiveLabel) + ') to ' + escapeHtml(daysByKey[sourceKey].effectiveLabel) + '?';
+              applyFn = function () { applySubstitute(action.key, action.newType, daysByKey); };
+            } else if (action.type === 'log_unplanned_activity') {
+              confirmText = 'Log &ldquo;' + escapeHtml(action.note || '') + '&rdquo; for ' + DOW_FULL[day.date.getDay()] + ' instead of the scheduled workout? The plan itself won’t change.';
+              applyFn = function () { applyLogUnplanned(action.key, action.note); };
+            } else {
+              return;
+            }
+
             var confirmWrap = el(
               '<div>' +
-                '<div style="margin-bottom:10px">Swap <strong>' + DOW_FULL[dayA.date.getDay()] + '</strong> (' + escapeHtml(dayA.effectiveLabel) + ') with <strong>' + DOW_FULL[dayB.date.getDay()] + '</strong> (' + escapeHtml(dayB.effectiveLabel) + ')?</div>' +
-                '<button type="button" class="ob-btn" id="aiRescheduleConfirm" style="margin-bottom:8px">Confirm swap</button>' +
-                '<div class="ob-cancel" id="aiRescheduleCancel">Cancel</div>' +
+                '<div style="margin:10px 0">' + confirmText + '</div>' +
+                '<button type="button" class="ob-btn" id="aiCoachConfirm" style="margin-bottom:8px">Confirm</button>' +
+                '<div class="ob-cancel" id="aiCoachCancel">Cancel</div>' +
               '</div>'
             );
-            resultEl.appendChild(confirmWrap);
-            document.getElementById('aiRescheduleConfirm').addEventListener('click', function () {
-              applySwap(keys[0], keys[1], daysByKey);
-            });
-            document.getElementById('aiRescheduleCancel').addEventListener('click', function () {
+            wrap.appendChild(confirmWrap);
+            document.getElementById('aiCoachConfirm').addEventListener('click', applyFn);
+            document.getElementById('aiCoachCancel').addEventListener('click', function () {
               resultEl.style.display = 'none';
               input.value = '';
             });
