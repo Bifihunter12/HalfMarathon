@@ -109,11 +109,32 @@
   // paragraphs -- those are for the dedicated Glossary screen, this is a
   // one-line hint that fits the calendar row.
   var CALENDAR_HINTS = [
+    // Most-specific labels first -- first substring match wins, so generic
+    // ones like "easy run"/"long run" have to come after every label that
+    // contains those words but means something more specific.
     ['Easy + strides', 'Easy pace, then 4-6 x ~20 sec quick-but-controlled pickups, full recovery between'],
     ['Medium-long run', 'Longer than an easy run, shorter than your weekly long run'],
     ['Back-to-back long runs', 'Two long-ish runs on consecutive days, to train running on tired legs'],
     ['Time-on-feet long run', 'Paced by duration, not distance -- hiking the tough parts is fine'],
-    ['Gear + fueling rehearsal', 'Practice your actual race-day gear, food, and drink on this run']
+    ['Trail long run w/ climbing', 'A long run on the hilliest terrain you have access to'],
+    ['Long climb + descent conditioning', 'Sustained uphill and downhill running to condition legs for race terrain'],
+    ['Night run rehearsal', 'Practice running in the dark -- test your lights/gear before race day'],
+    ['Downhill conditioning', 'Repeated descents to condition your legs for the pounding of downhill running'],
+    ['Gear + fueling rehearsal', 'Practice your actual race-day gear, food, and drink on this run'],
+    ['Fartlek', '"Speed play" -- unstructured faster bursts mixed into an easy run, by feel not exact pace'],
+    ['Hill repeats', 'Hard uphill efforts, jogging or walking back down as recovery between each'],
+    ['Hills:', 'Hard uphill efforts, jogging or walking back down as recovery between each'],
+    ['@ half-marathon pace', 'Miles at your actual goal race pace, so it feels familiar on race day'],
+    ['@ marathon pace', 'Miles at your actual goal race pace, so it feels familiar on race day'],
+    ['@ 5K pace', 'Fast reps at your goal 5K race pace, with recovery jogs between'],
+    ['@ 5K effort', 'Hard, sustained reps around 5K effort -- go by feel, not a watch'],
+    ['@ 10K pace', 'Reps at your goal 10K race pace, with recovery jogs between'],
+    ['@ 10K effort', 'Sustained, controlled reps around 10K effort -- harder than tempo, not all-out'],
+    ['Tempo', 'A "comfortably hard" sustained effort -- faster than easy, controlled, not a sprint'],
+    ['long run', 'Your longest effort of the week, done slower than race pace'],
+    ['easy run', 'Comfortable, conversational pace -- most of your running should feel like this'],
+    ['cross', 'Non-running aerobic work -- builds fitness while giving your running muscles a break'],
+    ['Rest', 'A full day off running -- this is when your body actually adapts and gets stronger']
   ];
   function calendarHint(label) {
     for (var i = 0; i < CALENDAR_HINTS.length; i++) {
