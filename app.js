@@ -1298,19 +1298,11 @@
     var planLengthWeeks = state.planMeta.planLengthWeeks;
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var weeks = result.weeks;
-    // The calendar grid is always whole 7-day weeks anchored to race day (see
-    // weeksBetween's comment) -- week 1 can include a few lead-in slots before
-    // the runner's actual chosen start date. Those are excluded everywhere
-    // below (stats, "today" detection, and the rendered day list further
-    // down) so a lead-in slot can never masquerade as "today" or count toward
-    // logged/scheduled totals.
-    var planStartDate = state.raceGoal.startDate ? parseDate(state.raceGoal.startDate) : null;
 
     var totalLoggable = 0, totalLogged = 0, currentWeek = 1, todayDayIdx = -1;
     weeks.forEach(function (wk) {
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
-        if (planStartDate && d < planStartDate) return;
         var key = wk.weekNum + '-' + di;
         var effectiveLabel = state.overrides[key] || day.label;
         if (isLoggable(effectiveLabel)) {
@@ -1404,13 +1396,12 @@
       var weekNum = wk.weekNum;
       var firstDate = dateForSlot(raceDate, planLengthWeeks, weekNum, 0);
       var lastDate = dateForSlot(raceDate, planLengthWeeks, weekNum, 6);
-      var visibleFirstDate = (planStartDate && planStartDate > firstDate) ? planStartDate : firstDate;
 
       var block = el(
         '<div class="week-block">' +
           '<div class="week-head">' +
             '<div class="week-num">WEEK ' + (weekNum < 10 ? '0' + weekNum : weekNum) + ' <span class="phase-tag">' + wk.phase.toUpperCase() + '</span></div>' +
-            '<div class="week-range">' + fmtRange(visibleFirstDate, lastDate) + '</div>' +
+            '<div class="week-range">' + fmtRange(firstDate, lastDate) + '</div>' +
           '</div>' +
           '<div class="day-list"></div>' +
         '</div>'
@@ -1419,7 +1410,6 @@
 
       wk.days.forEach(function (dayData, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, weekNum, di);
-        if (planStartDate && d < planStartDate) return;
         var key = weekNum + '-' + di;
         var baseLabel = dayData.label;
         var label = state.overrides[key] || baseLabel;
@@ -2240,17 +2230,11 @@
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var weeks = result.weeks;
 
-    // See renderMain's matching comment -- week 1 can include lead-in slots
-    // before the runner's actual chosen start date; those must never count as
-    // scheduled/completed or be mistaken for "today".
-    var planStartDate = state.raceGoal.startDate ? parseDate(state.raceGoal.startDate) : null;
-
     var totalDistance = 0, longestRun = 0, completedCount = 0, scheduledSoFar = 0;
     var currentWeekIdx = -1;
     weeks.forEach(function (wk) {
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
-        if (planStartDate && d < planStartDate) return;
         var key = wk.weekNum + '-' + di;
         var label = state.overrides[key] || day.label;
         if (d <= today && isLoggable(label)) {
