@@ -1563,8 +1563,12 @@
         var dt = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
         var key = wk.weekNum + '-' + di;
         var effectiveLabel = state.overrides[key] || dd.label;
-        daysByKey[key] = { effectiveLabel: effectiveLabel, baseLabel: dd.label, type: dd.type, date: dt };
-        daysPayload.push({ key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: effectiveLabel, type: dd.type });
+        var logEntry = getLog(key);
+        daysByKey[key] = { effectiveLabel: effectiveLabel, baseLabel: dd.label, type: dd.type, date: dt, miles: dd.miles || null };
+        daysPayload.push({
+          key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: effectiveLabel, type: dd.type,
+          plannedDistance: dd.miles || null, log: logEntry
+        });
       });
     });
 
@@ -1589,6 +1593,16 @@
     function applyLogUnplanned(key, note) {
       setLog(key, { notes: note || null });
     }
+    function applyReduceIntensity(key, factor) {
+      var day = daysByKey[key];
+      if (!day || day.miles == null || (day.type !== 'easy' && day.type !== 'long')) return false;
+      var newMiles = round1(day.miles * factor);
+      var terrainNote = terrainNoteFrom(state.profile.terrains);
+      var newLabel = day.type === 'long' ? formatLongRunLabel(newMiles, terrainNote) : formatEasyRunLabel(newMiles);
+      if (newLabel === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = newLabel;
+      saveState(state);
+      return true;
+    }
 
     // Returns { text, confirmable } -- confirmable:false means show the text
     // as an explanatory note with no Confirm button, since acting on it would
@@ -1608,6 +1622,11 @@
       }
       if (action.type === 'log_unplanned_activity') {
         return { text: 'Log &ldquo;' + escapeHtml(action.note || '') + '&rdquo; for ' + DOW_FULL[day.date.getDay()] + ' instead of the scheduled workout? The plan itself won’t change.', confirmable: true };
+      }
+      if (action.type === 'reduce_intensity') {
+        if (day.miles == null) return { text: "Can't scale that day down — it doesn't have a plain distance to reduce.", confirmable: false };
+        var newMiles = round1(day.miles * action.factor);
+        return { text: 'Cut ' + DOW_FULL[day.date.getDay()] + ' from ' + toUnit(day.miles) + ' to about ' + toUnit(newMiles) + ' ' + unitLabel() + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
       }
       return null;
     }
@@ -1632,7 +1651,13 @@
       } else if (turn.action && turn.resolved) {
         actionHtml = '<div class="coach-action-status">' + (turn.resolved === 'confirmed' ? '✓ Done' : 'Cancelled') + '</div>';
       }
-      return '<div class="coach-turn coach-turn--coach">' + escapeHtml(turn.text) + actionHtml + '</div>';
+      var redFlagHtml = (turn.redFlags && turn.redFlags.length) || turn.riskLevel === 'red'
+        ? '<div class="coach-redflag">⚠ Please stop training and see a doctor' + (turn.redFlags && turn.redFlags.length ? ' — mentioned: ' + turn.redFlags.map(escapeHtml).join(', ') : '') + '. This isn’t something a training app should manage.</div>'
+        : '';
+      var avoidHtml = (turn.avoidToday && turn.avoidToday.length)
+        ? '<div class="coach-avoid">Avoid today: ' + turn.avoidToday.map(escapeHtml).join(', ') + '</div>'
+        : '';
+      return '<div class="coach-turn coach-turn--coach">' + redFlagHtml + escapeHtml(turn.text) + avoidHtml + actionHtml + '</div>';
     }).join('');
 
     var wrap = el(
@@ -1660,6 +1685,7 @@
         if (turn.action.type === 'mark_rest') applyMarkRest(turn.action.key, turn.action.note);
         else if (turn.action.type === 'substitute_workout') ok = applySubstitute(turn.action.key, turn.action.newType);
         else if (turn.action.type === 'log_unplanned_activity') applyLogUnplanned(turn.action.key, turn.action.note);
+        else if (turn.action.type === 'reduce_intensity') ok = applyReduceIntensity(turn.action.key, turn.action.factor);
         turn.resolved = ok ? 'confirmed' : 'failed';
         renderCoachChat();
       });
@@ -1695,7 +1721,11 @@
           request: req,
           today: dateToISO(today),
           days: daysPayload,
-          plan: { event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level },
+          plan: {
+            event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level,
+            phase: weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : null,
+            currentWeek: currentWeek, totalWeeks: planLengthWeeks
+          },
           history: history
         })
       }).then(function (res) {
@@ -1704,7 +1734,10 @@
         if (!result2.ok || result2.data.error) {
           coachHistory.push({ role: 'coach', text: (result2.data && result2.data.error) || "Couldn't reach the AI coach right now.", action: null, resolved: null });
         } else {
-          coachHistory.push({ role: 'coach', text: result2.data.message || '', action: result2.data.action || null, resolved: null });
+          coachHistory.push({
+            role: 'coach', text: result2.data.message || '', action: result2.data.action || null, resolved: null,
+            riskLevel: result2.data.riskLevel || 'green', avoidToday: result2.data.avoidToday || [], redFlags: result2.data.redFlags || []
+          });
         }
       }).catch(function () {
         coachHistory.push({ role: 'coach', text: "Couldn't reach the AI coach right now.", action: null, resolved: null });

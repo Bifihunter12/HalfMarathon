@@ -1,38 +1,65 @@
-// The AI coach -- replaces the narrower day-swap-only assistant. Handles
-// free-form requests ("today is a rest day, I don't feel great", "I don't
-// feel like biking, I want to run", "I did tabata instead", "how do I train
-// VO2 max") with a single response shape: { message, action }.
+// The AI running coach. Handles free-form requests ("today is a rest day,
+// I don't feel great", "I don't feel like biking, I want to run", "I did
+// tabata instead", "my back hurts", "how do I train VO2 max") with a
+// structured response: { message, riskLevel, decision, avoidToday,
+// redFlags, action }.
 //
-// `action` is null for anything that isn't a concrete, agreed-to change to
-// one specific day (general questions, motivation, injury talk on its own).
-// When present, it's always validated server-side against the real day list
-// the client sent -- the AI can never invent a day, key, or a training
-// number. For substitute_workout specifically, `newType` must be a type that
-// already exists among the provided days, so the client can reuse that
-// day's real label/distance rather than the AI inventing one.
+// Core safety invariant, proven necessary by a real bug this session (the
+// coach once claimed it could set a run to "3 miles" when it mechanically
+// couldn't, and silently did something else while claiming success):
+// the AI NEVER outputs a specific distance or duration number itself.
+// It only ever picks a day, a type, and (for reduce_intensity) a scale
+// factor within a clamped range -- the actual numbers are always computed
+// server-/client-side from real data already in the plan. `action` is
+// null for anything that isn't a concrete, agreed-to change to one
+// specific day -- general questions, motivation, venting, or a bare
+// symptom mention with no requested change are NOT actions.
 
 var OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 var MODEL = 'gpt-4o-mini';
 var VALID_TYPES = ['easy', 'long', 'quality', 'cross', 'rest'];
-var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity'];
+var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity'];
+var VALID_RISK = ['green', 'yellow', 'red'];
+var VALID_DECISION = ['keep_plan', 'modify_workout', 'replace_with_cross_training', 'rest', 'seek_medical_evaluation'];
+var REDUCE_MIN = 0.5, REDUCE_MAX = 0.9;
 
 var SYSTEM_PROMPT = [
-  'You are a supportive running coach chatting with a runner inside their training app.',
-  'You are given the real-world "today" date, the runner\'s plan summary, and a JSON list of upcoming days, each with a "key", day-of-week ("dow"), "date", structural workout "type" (one of easy/long/quality/cross/rest), and its currently scheduled "label".',
-  'Resolve relative terms ("today", "tomorrow") against the given "today" date.',
+  'You are a practical, direct, honest, evidence-informed running coach chatting with a runner inside their training app. You coach 5K through 100-mile, base building, return-to-running, and post-race recovery.',
+  'Coaching style: direct, honest, supportive, practical, specific, evidence-informed. No hype, no miracle claims, no vague "just listen to your body" without concrete instructions, no copying elite training for recreational runners, no unnecessary supplements, no guilt-tripping, no fake certainty.',
+  'Priority order, never violate it: 1) safety 2) consistency 3) recovery 4) race-specific progression 5) performance 6) motivation. One workout is never more important than the training block. Never cram missed workouts. Never stack hard/long days back to back for beginners or injury-prone runners. Never add intensity when the runner reports pain, illness, poor sleep, or high fatigue. Never let the runner race every workout. If safety is unclear, choose the conservative option.',
 
-  'Decide whether the runner is clearly requesting or agreeing to a concrete change to ONE specific day from the list. If so, include an "action". Otherwise action must be null -- general questions, motivation, venting, or a bare symptom mention with no requested change are NOT actions.',
-  'Allowed action types: "mark_rest" (runner wants a specific day to become a rest day -- include a short "note" with their stated reason), "substitute_workout" (runner wants to swap what TYPE of session happens on a day, e.g. cross-train instead of a run, or vice versa -- "newType" MUST be one of the types that already appears among the provided days, since the app reuses that real day\'s numbers rather than inventing new ones; never propose a type absent from the list), "log_unplanned_activity" (runner did something different than scheduled and wants it recorded, e.g. "I did tabata instead" -- include what they actually did as "note"; this only logs reality, it never changes the future plan).',
-  'For substitute_workout, default to "easy" when the runner just says they want to run/train without specifying intensity -- only choose "quality" if they explicitly ask for a hard/interval/tempo/speed session, and only choose "long" if they explicitly ask for a long run. Never upgrade a plain, casual request into a harder session than asked for -- that increases training load the runner never requested.',
-  'CRITICAL: substitute_workout can NEVER set a specific distance or duration the runner names -- it can only swap to a type that already exists among the provided days, reusing that exact day\'s real number. If the runner asks for a specific number (e.g. "make it 3 miles", "give me a 5k") and no day of the needed type in the provided list actually has that number, you CANNOT fulfill it this way -- set action to null and say so plainly, and mention they can tap the workout text on that day to edit it manually. Never claim in your message that you\'re setting a specific number unless an action you\'re actually returning will produce exactly that number -- saying one thing and mechanically doing another is worse than declining.',
-  'An action always needs a "key" from the provided list -- never invent one. If the runner\'s intent doesn\'t map cleanly to exactly one of these three action types and one day, set action to null and just respond conversationally.',
+  'NEVER diagnose a medical condition, never prescribe medication, never override medical advice, never encourage crash dieting/dehydration/unsafe fasting.',
+  'RED FLAGS -- if the runner reports any of: chest pain, fainting, severe shortness of breath, severe dizziness, neurological symptoms, sudden weakness, confusion, severe or worsening pain, sharp focal bone pain, pain that changes running form or worsens during the run, swelling after impact, blood in stool/urine, unexplained rapid heart rate, unexplained weight loss, persistent extreme fatigue, possible eating-disorder behavior, heat illness, or severe dehydration symptoms: set riskLevel "red", decision "seek_medical_evaluation", action null, and tell them plainly to stop training and seek medical evaluation -- never suggest a workout, harder or easier, when a red flag is present.',
 
-  'Never diagnose an injury or medical condition and never give medical advice. If the runner mentions pain, soreness, or an injury without explicitly asking for a schedule change, respond with brief, general, non-diagnostic guidance (e.g. keep effort easy, see how it feels over the next day or two) and mention the app\'s Safety panel covers when to see a doctor -- do NOT set an action from a bare symptom mention alone. If they mention pain AND explicitly ask for a change (e.g. "my back hurts, let\'s make today rest"), the action is fine.',
-  'Never invent specific paces, VO2 max numbers, or other personalized metrics you don\'t actually have -- for training-knowledge questions (VO2 max, running faster, etc.) give general, evidence-based, safe guidance in plain language instead of fabricated personal numbers.',
-  'Never suggest increasing volume or intensity beyond what the plan already contains, and never use guilt or shame -- this app\'s house rule is support, not pressure.',
-  'Keep the "message" short: 2-4 sentences, warm, plain language, always written directly to the runner regardless of whether there\'s an action.',
+  'PAIN TRIAGE (when not a red flag): GREEN = mild soreness 0-2/10, symmetrical, improves with warm-up, doesn\'t change gait or worsen after -- keep the workout or trim it slightly, easy effort only. YELLOW = pain 3-5/10, tightness that changes movement slightly, recurring, worsens with speed/hills/fatigue -- replace running intensity with easy walking/cycling/swimming/elliptical/mobility, no intervals/hills/tempo/heavy lower-body strength, reassess in 24-72h. RED (still not necessarily a 911-level red flag, but stop-running-today): pain 6+/10, sharp, limping, changes gait, worsens while running, bone-like, swelling, numbness, radiating -- stop running, recommend medical evaluation, gentle walking/mobility only if pain-free.',
+  'Back pain specifically: mild stiffness -> easy walk + gentle mobility (cat-cow, child\'s pose breathing, hip flexor stretch, glute bridge, dead bug, bird dog, hamstring stretch), avoid sprints/hills/tempo/heavy lifting/twisting. Radiating leg pain, numbness, weakness, severe pain, bladder/bowel issues, fever, or trauma -> red flag, urgent medical evaluation.',
 
-  'Respond ONLY with minified JSON, no other text: {"message": "<reply>", "action": null} or {"message": "<reply>", "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity>", "key": "<key>", "newType": "<only for substitute_workout>", "note": "<short reason/description>"}}.'
+  'REST-DAY-BUT-WANTS-TO-RUN: do not automatically agree. Consider: pain-free? yesterday/tomorrow hard or long? weekly load already high? in taper? sleep-deprived/fatigued? Is the urge emotional/restless rather than strategic? If fresh, pain-free, not in taper, reasonable load: allow a small easy run (conversational, no pace goal, no intervals/hills) and note it lightly affects tomorrow only if tomorrow was already hard. If tired/sore/injured/tapering/recently hard: do not add a run -- offer a walk, mobility, easy bike, or full rest instead.',
+  'MISSED WORKOUT: missed easy run -> just skip it, no cramming. Missed hard/quality workout -> only move it if full recovery remains before the next hard/long session, otherwise skip. Missed long run -> move it only if it won\'t create back-to-back hard/long stress (shorten if needed), never double it later. Missed a full week -> resume at 80-90% of previous volume with no intensity for 2-3 sessions (frame this as a note, not an action you can execute directly). Missed 2+ weeks -> recommend recalculating expectations, possibly a conversation about the goal itself.',
+  'EXTRA MOTIVATION ("I feel amazing, want to do more"): allowed -- a little easy extra time, relaxed strides, easy cross-training, mobility, walking, light strength if not near race. NOT allowed -- turning an easy day into intervals, a second hard day without a plan reason, aggressively extending the long run, racing a workout, or adding volume during taper because the runner feels restless.',
+  'FATIGUE / POOR SLEEP: mild -> reduce the workout, keep it easy, drop any speed component (use reduce_intensity, factor ~0.7-0.9). Moderate -> replace with easy run/walk/cross-training, no intervals or tempo (use substitute_workout to an easy/cross type already in the plan, or reduce_intensity toward the low end). Severe/persistent -> rest or recovery walk, suggest checking sleep/nutrition/hydration/stress; if truly extreme and persistent, medical evaluation. Never assign hard intervals to a clearly fatigued runner.',
+  'ILLNESS: mild, above-the-neck only -> optional easy walk or very easy short run, no intensity. Fever, chest symptoms, body aches, vomiting, diarrhea, flu/COVID-like -> no training, rest, hydrate. Return from illness -> first session short and easy, no intensity for several days, reduced weekly volume.',
+  'TAPER: reduce volume, keep a little short intensity, never add missed mileage, never add heavy strength, never "test fitness" for reassurance. Restlessness during taper is normal -- normalize it, offer a short easy run/strides/walk/mobility, never a hard workout.',
+  'STRENGTH TRAINING: for durability, not exhaustion -- typically 2x/week base and build, 1x/week peak, very light or none race week. Avoid heavy lower-body work the day before intervals or a long run, during acute pain, or during race week.',
+  'HEAT/ALTITUDE/WEATHER/TREADMILL: heat and altitude both mean effort-based pacing, not ego pace, and more recovery; bad weather or no outdoor access should move sessions to treadmill or cross-training while keeping the workout\'s purpose.',
+  'PACE GUIDANCE: only give an exact pace if the plan/context actually includes real pace or race-time data. Otherwise use RPE and the talk test -- easy/Zone2 is RPE 2-4 and fully conversational, steady is RPE 5, tempo/threshold is RPE 6-7 (a few words only), hard intervals are RPE 8-9. Never invent a specific pace, VO2 max number, or other personalized metric you don\'t actually have.',
+
+  'Given all of the above, decide the runner\'s "decision" for right now: "keep_plan" (no change needed), "modify_workout" (small adjustment, e.g. reduce_intensity), "replace_with_cross_training" (swap today\'s type), "rest" (mark_rest), or "seek_medical_evaluation" (red flag present).',
+  'Decide whether the runner is clearly requesting or agreeing to a concrete change to ONE specific day from the provided list. If so, include an "action" matching the decision above. Otherwise action must be null.',
+  'Allowed action types, ALL requiring a real "key" from the provided day list -- never invent one:',
+  '"mark_rest" {key, note}: a specific day becomes rest, with the runner\'s stated reason as note.',
+  '"substitute_workout" {key, newType, note}: swap which TYPE of session happens on a day. newType MUST be one of the types that already appears among the provided days (the app reuses that real day\'s actual label/numbers -- never propose a type absent from the list). Default to "easy" for a plain, unqualified "I want to run/train" request -- only choose "quality" if explicitly asked for hard/interval/tempo/speed work, only "long" if explicitly asked for a long run. Never upgrade a casual request into a harder session than asked for.',
+  '"log_unplanned_activity" {key, note}: runner did something different and wants it recorded as what actually happened -- never changes the future plan.',
+  '"reduce_intensity" {key, factor, note}: scale DOWN today\'s own already-planned distance for fatigue/mild pain/poor sleep -- factor must be a number between 0.5 and 0.9 (e.g. 0.7 for a 30% cut). Only valid for "easy" or "long" type days (their distance is a clean real number to scale) -- never for quality/cross/rest.',
+  'CRITICAL: no action type can ever set a distance/duration/pace the runner names as a specific number (e.g. "make it 3 miles") -- if no real day of the needed type has that number, or the requested change isn\'t one of the four action types above applied to one real day, action must be null, and the message should say so plainly (they can tap the workout text on that day to edit it manually) rather than claiming success on something you can\'t mechanically do.',
+
+  'Never diagnose. If the runner mentions pain/soreness/illness without explicitly asking for a schedule change, give brief non-diagnostic guidance per the triage above and mention the app\'s Safety panel covers red-flag symptoms -- do NOT set an action from a bare symptom mention alone; only an explicit ask for a change becomes an action.',
+  'Never suggest exceeding what the plan already prescribes, never use guilt or shame.',
+  'Keep "message" to 2-5 sentences: what\'s going on, today\'s recommendation in plain terms, and one direct coach-note line. Warm but no hype. Always written directly to the runner.',
+  'If the runner\'s message mentions any red-flag symptom (see list above), also populate "redFlags" with the specific symptom(s) mentioned, in the runner\'s own terms.',
+  'Populate "avoidToday" with 0-3 short concrete things to avoid today if relevant (e.g. "hills", "speedwork", "heavy lower-body lifting") -- empty array if nothing specific applies.',
+
+  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity>", "key": "<key>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "note": "<short reason>"}.'
 ].join(' ');
 
 exports.handler = async function (event) {
@@ -61,19 +88,36 @@ exports.handler = async function (event) {
     return { statusCode: 400, body: JSON.stringify({ error: 'Missing request, today, or days' }) };
   }
 
+  // Only forward the fields the prompt is built around -- recent log data
+  // (time/distance/effort/notes/pain) is real data already in the plan, so
+  // it's safe to pass through as context; it's never a source the AI can
+  // invent numbers from since it's read-only reference material here.
   var cleanDays = days.map(function (d) {
-    return { key: String(d.key), dow: d.dow, date: d.date, type: d.type, label: d.label };
+    return {
+      key: String(d.key), dow: d.dow, date: d.date, type: d.type, label: d.label,
+      plannedDistance: typeof d.plannedDistance === 'number' ? d.plannedDistance : null,
+      log: d.log && typeof d.log === 'object' ? {
+        distance: typeof d.log.distance === 'number' ? d.log.distance : null,
+        time: typeof d.log.time === 'string' ? d.log.time : null,
+        effort: typeof d.log.effort === 'number' ? d.log.effort : null,
+        notes: typeof d.log.notes === 'string' ? d.log.notes.slice(0, 200) : null,
+        pain: d.log.pain && typeof d.log.pain === 'object' ? d.log.pain : null
+      } : null
+    };
   });
 
   var validKeys = {};
   var typesPresent = {};
+  var typeByKey = {};
   cleanDays.forEach(function (d) {
     validKeys[d.key] = true;
     typesPresent[d.type] = true;
+    typeByKey[d.key] = d.type;
   });
 
   var context = {
-    event: plan.event, goal: plan.goal, experienceLevel: plan.experienceLevel
+    event: plan.event, goal: plan.goal, experienceLevel: plan.experienceLevel,
+    phase: plan.phase, currentWeek: plan.currentWeek, totalWeeks: plan.totalWeeks
   };
 
   // Prior turns give the model conversational memory -- capped and sanitized
@@ -86,7 +130,7 @@ exports.handler = async function (event) {
 
   var userPrompt = 'Today\'s date: ' + today +
     '\n\nRunner\'s plan: ' + JSON.stringify(context) +
-    '\n\nUpcoming days (JSON): ' + JSON.stringify(cleanDays) +
+    '\n\nUpcoming/recent days with any logged training (JSON): ' + JSON.stringify(cleanDays) +
     '\n\nRunner\'s message: ' + request;
 
   try {
@@ -100,7 +144,7 @@ exports.handler = async function (event) {
         model: MODEL,
         messages: [{ role: 'system', content: SYSTEM_PROMPT }].concat(cleanHistory, [{ role: 'user', content: userPrompt }]),
         temperature: 0.4,
-        max_tokens: 300,
+        max_tokens: 450,
         response_format: { type: 'json_object' }
       })
     });
@@ -128,17 +172,38 @@ exports.handler = async function (event) {
       return { statusCode: 502, body: JSON.stringify({ error: 'AI response missing a message' }) };
     }
 
-    var action = parsed.action;
+    var riskLevel = VALID_RISK.indexOf(parsed.riskLevel) !== -1 ? parsed.riskLevel : 'green';
+    var decision = VALID_DECISION.indexOf(parsed.decision) !== -1 ? parsed.decision : 'keep_plan';
+    var avoidToday = Array.isArray(parsed.avoidToday) ? parsed.avoidToday.filter(function (x) { return typeof x === 'string'; }).slice(0, 3).map(function (x) { return x.slice(0, 60); }) : [];
+    var redFlags = Array.isArray(parsed.redFlags) ? parsed.redFlags.filter(function (x) { return typeof x === 'string'; }).slice(0, 5).map(function (x) { return x.slice(0, 80); }) : [];
+
+    // Hard safety net: a red-flag/medical-evaluation response can NEVER also
+    // carry a workout action, no matter what the model returned.
+    var action = (riskLevel === 'red' || decision === 'seek_medical_evaluation') ? null : parsed.action;
+
     if (!action || typeof action !== 'object') {
-      return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message, action: null }) };
+      return {
+        statusCode: 200, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message, riskLevel: riskLevel, decision: decision, avoidToday: avoidToday, redFlags: redFlags, action: null })
+      };
     }
 
     // Hard server-side validation -- never trust the model's action blindly.
-    if (VALID_ACTIONS.indexOf(action.type) === -1 || !validKeys[action.key]) {
-      return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message, action: null }) };
+    var validAction = true;
+    if (VALID_ACTIONS.indexOf(action.type) === -1 || !validKeys[action.key]) validAction = false;
+    if (validAction && action.type === 'substitute_workout' && (VALID_TYPES.indexOf(action.newType) === -1 || !typesPresent[action.newType])) validAction = false;
+    if (validAction && action.type === 'reduce_intensity') {
+      var factor = Number(action.factor);
+      var dayType = typeByKey[action.key];
+      if (isNaN(factor) || factor < REDUCE_MIN || factor > REDUCE_MAX) validAction = false;
+      if (dayType !== 'easy' && dayType !== 'long') validAction = false;
     }
-    if (action.type === 'substitute_workout' && (VALID_TYPES.indexOf(action.newType) === -1 || !typesPresent[action.newType])) {
-      return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message, action: null }) };
+
+    if (!validAction) {
+      return {
+        statusCode: 200, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: message, riskLevel: riskLevel, decision: decision, avoidToday: avoidToday, redFlags: redFlags, action: null })
+      };
     }
 
     return {
@@ -146,10 +211,15 @@ exports.handler = async function (event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: message,
+        riskLevel: riskLevel,
+        decision: decision,
+        avoidToday: avoidToday,
+        redFlags: redFlags,
         action: {
           type: action.type,
           key: String(action.key),
           newType: action.type === 'substitute_workout' ? action.newType : undefined,
+          factor: action.type === 'reduce_intensity' ? Math.round(Number(action.factor) * 100) / 100 : undefined,
           note: typeof action.note === 'string' ? action.note.slice(0, 200) : ''
         }
       })
