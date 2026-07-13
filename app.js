@@ -1430,8 +1430,6 @@
         var cross = hasCross(label);
         var isToday = sameDate(d, today);
         var entry = getLog(key);
-        var value = entry ? (entry.time || '') : '';
-        var hasEntry = !!entry;
         var crossValue = state.crossType[key] || '';
 
         var classes = 'day-row';
@@ -1447,7 +1445,6 @@
               '<div class="day-plan">' + escapeHtml(label) + '</div>' +
               (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
-            (loggable ? '<input class="day-time' + (hasEntry ? ' has-value' : '') + '" placeholder="' + (race ? 'FINISH' : 'TIME') + '" value="' + escapeHtml(value) + '">' : '') +
           '</div>'
         );
 
@@ -1462,17 +1459,9 @@
         }
 
         if (loggable) {
-          var input = row.querySelector('.day-time');
-          input.addEventListener('change', function () {
-            logAndCelebrate(key, { time: input.value.trim() || null }, dayData.type, weeks);
-            input.classList.toggle('has-value', !!getLog(key));
-            refreshLoggedCount();
-          });
-
           var doneCheck = row.querySelector('.day-done-check');
           doneCheck.addEventListener('change', function () {
             logAndCelebrate(key, { done: doneCheck.checked ? true : null }, dayData.type, weeks);
-            input.classList.toggle('has-value', !!getLog(key));
             refreshLoggedCount();
           });
         }

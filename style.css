@@ -398,22 +398,6 @@ body {
 .cross-select.chosen { border-style: solid; border-color: var(--accent); color: var(--accent); }
 .cross-select:focus { outline: none; border-color: var(--accent); }
 
-.day-time {
-  flex: none;
-  width: 92px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: var(--font);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  padding: 9px 6px;
-}
-.day-time::placeholder { color: var(--text-faint); }
-.day-time:focus { outline: none; border-color: var(--accent); }
-.day-time.has-value { border-color: var(--border-active); color: var(--accent); font-weight: 600; }
 
 .day-done-check {
   flex: none;
@@ -632,5 +616,4 @@ dl.wd-info dd {
 @media (max-width: 420px) {
   #app { padding: 22px 14px 40px; }
   .hd-title { font-size: 26px; }
-  .day-time { width: 78px; }
 }
