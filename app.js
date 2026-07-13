@@ -19,8 +19,8 @@
   var GOALS = ['finish', 'improve', 'pr', 'aggressive'];
   var GOAL_LABEL = { finish: 'Finish', improve: 'Improve', pr: 'PR', aggressive: 'Aggressive PR' };
   var GOAL_FACTOR = { finish: 0.85, improve: 1.0, pr: 1.05, aggressive: 1.12 };
-  var TERRAINS = ['road', 'trail', 'hills', 'mountain'];
-  var TERRAIN_LABEL = { road: 'Road', trail: 'Trail', hills: 'Hills', mountain: 'Mountain' };
+  var TERRAINS = ['road', 'trail', 'hills', 'mountain', 'treadmill'];
+  var TERRAIN_LABEL = { road: 'Road', trail: 'Trail', hills: 'Hills', mountain: 'Mountain', treadmill: 'Treadmill' };
   var CROSS_OPTIONS = ['Bike', 'Swim', 'Elliptical', 'Row', 'Hike', 'Strength', 'Yoga', 'Other', 'None'];
 
   var INCREASE_PCT = { beginner: 0.04, novice: 0.06, intermediate: 0.08, advanced: 0.10 };
@@ -1161,6 +1161,18 @@
           if (!draft.raceDate) { document.getElementById('f_raceDate').focus(); return; }
           if (!draft.startDate) { document.getElementById('f_startDate').focus(); return; }
           if (parseDate(draft.startDate) >= parseDate(draft.raceDate)) { document.getElementById('f_startDate').focus(); return; }
+          // A start date already in the past has no real meaning -- clamp to
+          // today so plan length/calendar placement are computed from where
+          // training actually begins, not a stale date. Otherwise choosePlanLength's
+          // cap (at ~1.6x the event's ideal weeks) can make the real plan far
+          // shorter than the raw start-to-race gap, and since the calendar
+          // anchors to race day and counts backward by that (uncapped) gap,
+          // week 1 silently lands on some date with no relation to either
+          // today or what the runner actually typed.
+          (function () {
+            var todayClamp = new Date(); todayClamp.setHours(0, 0, 0, 0);
+            if (parseDate(draft.startDate) < todayClamp) draft.startDate = dateToISO(todayClamp);
+          })();
         } else if (steps[step] === 'logistics') {
           var goalChanged = isEdit && (draft.event !== state.raceGoal.event || draft.raceDate !== state.raceGoal.raceDate || draft.startDate !== state.raceGoal.startDate);
           if (goalChanged) renderGoalChangeConfirm(draft);
