@@ -102,6 +102,26 @@
     'Eating-disorder behaviors'
   ];
 
+  // Short inline hints for calendar labels that read as cryptic on their own
+  // (unlike e.g. "6 x 400m @ 5K pace", which already explains itself). Matched
+  // by substring so they still show up if the label is combined with a
+  // terrain note. Deliberately much shorter than GLOSSARY_WORKOUTS' full
+  // paragraphs -- those are for the dedicated Glossary screen, this is a
+  // one-line hint that fits the calendar row.
+  var CALENDAR_HINTS = [
+    ['Easy + strides', 'Easy pace, then 4-6 x ~20 sec quick-but-controlled pickups, full recovery between'],
+    ['Medium-long run', 'Longer than an easy run, shorter than your weekly long run'],
+    ['Back-to-back long runs', 'Two long-ish runs on consecutive days, to train running on tired legs'],
+    ['Time-on-feet long run', 'Paced by duration, not distance -- hiking the tough parts is fine'],
+    ['Gear + fueling rehearsal', 'Practice your actual race-day gear, food, and drink on this run']
+  ];
+  function calendarHint(label) {
+    for (var i = 0; i < CALENDAR_HINTS.length; i++) {
+      if (label.indexOf(CALENDAR_HINTS[i][0]) !== -1) return CALENDAR_HINTS[i][1];
+    }
+    return null;
+  }
+
   var GLOSSARY_WORKOUTS = [
     ['Easy run', 'Comfortable, conversational pace. Most of your weekly running should feel like this — it\'s not a warm-up, it\'s the actual point.'],
     ['Long run', 'Your longest run of the week, done slower than race pace. Builds the endurance and mental toughness that shorter runs can\'t.'],
@@ -1443,6 +1463,7 @@
             '<div class="day-date"><span class="day-dow">' + DOW_FULL[d.getDay()] + '</span><span class="day-dom">' + d.getDate() + '</span></div>' +
             '<div class="day-main">' +
               '<div class="day-plan">' + escapeHtml(label) + '</div>' +
+              (calendarHint(label) ? '<div class="day-hint">' + escapeHtml(calendarHint(label)) + '</div>' : '') +
               (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
           '</div>'

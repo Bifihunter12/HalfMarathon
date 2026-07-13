@@ -368,6 +368,7 @@ body {
 .day-plan:hover { border-bottom-color: var(--text-faint); }
 .day-row.is-race .day-plan { color: var(--accent); font-weight: 700; }
 .day-row.is-rest .day-plan { font-style: italic; color: var(--text-dim); }
+.day-hint { font-size: 12px; line-height: 1.4; color: var(--text-faint); }
 
 .day-plan-edit {
   width: 100%;
