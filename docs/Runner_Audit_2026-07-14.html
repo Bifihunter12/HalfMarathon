@@ -1,0 +1,561 @@
+<title>Runner Full Audit</title>
+<style>
+  :root{
+    --bg:#0b0b0c;
+    --surface:#17171a;
+    --surface-2:#1e1e22;
+    --border:#2a2a2e;
+    --text:#ece9e4;
+    --muted:#9a978f;
+    --muted-2:#716f6a;
+    --ember:#d97742;
+    --ember-light:#e0935f;
+    --sev-critical:#e2453f;
+    --sev-high:#e2933c;
+    --sev-medium:#c9a227;
+    --sev-low:#5f8f78;
+    --good:#5fa87a;
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f4ef;
+    --surface:#ffffff;
+    --surface-2:#efeae2;
+    --border:#ddd6c9;
+    --text:#211f1c;
+    --muted:#5c5850;
+    --muted-2:#847f74;
+    --ember:#b8592a;
+    --ember-light:#c96a34;
+    --sev-critical:#c0392f;
+    --sev-high:#b06a1c;
+    --sev-medium:#96791a;
+    --sev-low:#3f7059;
+    --good:#3f7c5c;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f7f4ef;
+      --surface:#ffffff;
+      --surface-2:#efeae2;
+      --border:#ddd6c9;
+      --text:#211f1c;
+      --muted:#5c5850;
+      --muted-2:#847f74;
+      --ember:#b8592a;
+      --ember-light:#c96a34;
+      --sev-critical:#c0392f;
+      --sev-high:#b06a1c;
+      --sev-medium:#96791a;
+      --sev-low:#3f7059;
+      --good:#3f7c5c;
+    }
+  }
+
+  *{box-sizing:border-box;}
+  body{margin:0;}
+  .audit{
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;
+    padding:0 0 80px;
+  }
+  .mono{
+    font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  .wrap{
+    max-width:860px;
+    margin:0 auto;
+    padding:0 28px;
+  }
+
+  /* ── Masthead ───────────────────────────────────────────── */
+  .masthead{
+    border-bottom:1px solid var(--border);
+    padding:44px 0 32px;
+    margin-bottom:40px;
+  }
+  .masthead-row{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    margin-bottom:22px;
+  }
+  .ring{
+    width:34px;height:34px;flex:none;
+  }
+  .brandline{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:12.5px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .brandline b{color:var(--ember-light);font-weight:700;}
+  h1{
+    font-size:clamp(28px,4.4vw,40px);
+    line-height:1.12;
+    margin:0 0 10px;
+    font-weight:800;
+    letter-spacing:-0.01em;
+    text-wrap:balance;
+  }
+  .dek{
+    color:var(--muted);
+    font-size:16px;
+    max-width:56ch;
+    margin:0;
+  }
+  .meta-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px 22px;
+    margin-top:22px;
+    font-size:13px;
+    color:var(--muted-2);
+  }
+  .meta-row span b{color:var(--text);font-weight:600;}
+
+  /* ── Section scaffolding ────────────────────────────────── */
+  section{margin-bottom:52px;}
+  .eyebrow{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ember-light);
+    display:flex;
+    align-items:baseline;
+    gap:10px;
+    margin-bottom:10px;
+  }
+  .eyebrow .idx{color:var(--muted-2);}
+  h2{
+    font-size:23px;
+    margin:0 0 16px;
+    font-weight:700;
+    letter-spacing:-0.005em;
+    text-wrap:balance;
+  }
+  h3{
+    font-size:15px;
+    margin:26px 0 10px;
+    font-weight:700;
+    color:var(--text);
+  }
+  p{margin:0 0 14px;color:var(--text);}
+  section > p:first-of-type{font-size:16.5px;}
+  ul.plain{margin:0 0 14px;padding-left:20px;}
+  ul.plain li{margin-bottom:6px;}
+
+  /* ── Executive assessment lead ──────────────────────────── */
+  .lead{
+    font-size:18px;
+    color:var(--text);
+    max-width:64ch;
+  }
+  .verdict-inline{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:12.5px;
+    letter-spacing:.06em;
+    padding:3px 9px;
+    border-radius:100px;
+    background:var(--surface-2);
+    border:1px solid var(--border);
+    color:var(--ember-light);
+    font-weight:600;
+  }
+
+  /* ── Strength / weakness cards ──────────────────────────── */
+  .grid2{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+    margin:20px 0 8px;
+  }
+  @media (max-width:640px){.grid2{grid-template-columns:1fr;}}
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:18px 20px;
+  }
+  .card h4{
+    margin:0 0 10px;
+    font-size:12.5px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    font-weight:700;
+  }
+  .card.good h4{color:var(--good);}
+  .card.bad h4{color:var(--sev-critical);}
+  .card ul{margin:0;padding-left:18px;}
+  .card li{margin-bottom:8px;font-size:14.5px;color:var(--muted);}
+  .card li b{color:var(--text);}
+
+  /* ── Severity pills ─────────────────────────────────────── */
+  .sev{
+    display:inline-block;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    padding:2.5px 8px;
+    border-radius:5px;
+    white-space:nowrap;
+  }
+  .sev-critical{background:color-mix(in srgb, var(--sev-critical) 20%, transparent);color:var(--sev-critical);}
+  .sev-high{background:color-mix(in srgb, var(--sev-high) 20%, transparent);color:var(--sev-high);}
+  .sev-medium{background:color-mix(in srgb, var(--sev-medium) 20%, transparent);color:var(--sev-medium);}
+  .sev-low{background:color-mix(in srgb, var(--sev-low) 20%, transparent);color:var(--sev-low);}
+
+  /* ── Gap analysis table ─────────────────────────────────── */
+  .tablewrap{
+    overflow-x:auto;
+    border:1px solid var(--border);
+    border-radius:10px;
+    background:var(--surface);
+  }
+  table{
+    border-collapse:collapse;
+    width:100%;
+    min-width:760px;
+    font-size:13.5px;
+  }
+  thead th{
+    text-align:left;
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--muted-2);
+    padding:12px 14px;
+    border-bottom:1px solid var(--border);
+    background:var(--surface-2);
+  }
+  tbody td{
+    padding:13px 14px;
+    border-bottom:1px solid var(--border);
+    vertical-align:top;
+    color:var(--muted);
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  tbody td.req{color:var(--text);font-weight:600;}
+  tbody td.num{font-variant-numeric:tabular-nums;}
+
+  /* ── Roadmap ─────────────────────────────────────────────── */
+  .road{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .road-row{
+    display:grid;
+    grid-template-columns:150px 1fr;
+    gap:18px;
+    padding:16px 0;
+    border-bottom:1px solid var(--border);
+  }
+  .road-row:last-child{border-bottom:none;}
+  @media (max-width:600px){.road-row{grid-template-columns:1fr;gap:6px;}}
+  .road-label{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:11.5px;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    color:var(--ember-light);
+    padding-top:2px;
+  }
+  .road-row ul{margin:0;padding-left:18px;}
+  .road-row li{margin-bottom:7px;font-size:14.5px;}
+
+  /* ── Verification checklist ─────────────────────────────── */
+  .vlist{list-style:none;margin:0;padding:0;}
+  .vlist li{
+    display:flex;
+    gap:11px;
+    align-items:flex-start;
+    margin-bottom:11px;
+    font-size:14.5px;
+  }
+  .vmark{
+    flex:none;
+    width:18px;height:18px;
+    border-radius:5px;
+    margin-top:2px;
+    display:flex;align-items:center;justify-content:center;
+    font-size:11px;
+    font-weight:800;
+  }
+  .vmark.pass{background:color-mix(in srgb, var(--good) 22%, transparent);color:var(--good);}
+  .vmark.fail{background:color-mix(in srgb, var(--sev-critical) 22%, transparent);color:var(--sev-critical);}
+  .vmark.unk{background:color-mix(in srgb, var(--muted-2) 25%, transparent);color:var(--muted-2);}
+
+  /* ── Release stamp ──────────────────────────────────────── */
+  .stamp{
+    border:1px solid var(--border);
+    border-radius:14px;
+    background:var(--surface);
+    padding:30px 32px;
+    position:relative;
+    overflow:hidden;
+  }
+  .stamp::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background:radial-gradient(circle at 85% 0%, color-mix(in srgb, var(--ember) 14%, transparent), transparent 60%);
+    pointer-events:none;
+  }
+  .stamp-label{
+    font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+    font-size:12px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--muted-2);
+    margin-bottom:8px;
+  }
+  .stamp-verdict{
+    font-size:clamp(24px,4vw,32px);
+    font-weight:800;
+    color:var(--ember-light);
+    margin-bottom:14px;
+    letter-spacing:-0.01em;
+  }
+  .stamp p{max-width:60ch;color:var(--muted);margin-bottom:0;}
+  .stamp p + p{margin-top:12px;}
+
+  footer{
+    max-width:860px;
+    margin:0 auto;
+    padding:0 28px;
+    color:var(--muted-2);
+    font-size:12.5px;
+  }
+</style>
+
+<div class="audit">
+  <div class="wrap">
+    <div class="masthead">
+      <div class="masthead-row">
+        <svg class="ring" viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#d97742"/>
+              <stop offset="100%" stop-color="#e0935f"/>
+            </linearGradient>
+          </defs>
+          <rect width="192" height="192" rx="42" fill="#0b0b0c"/>
+          <circle cx="96" cy="96" r="76" fill="none" stroke="#1c1c1f" stroke-width="11"/>
+          <circle cx="96" cy="96" r="76" fill="none" stroke="url(#g1)" stroke-width="11" stroke-linecap="round" stroke-dasharray="358 120" transform="rotate(-90 96 96)"/>
+          <text x="96" y="96" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-weight="800" font-size="80" fill="url(#g1)">R</text>
+        </svg>
+        <div class="brandline"><b>Zaera Labs</b> &middot; Runner</div>
+      </div>
+      <h1>Full Product &amp; Codebase Audit</h1>
+      <p class="dek">Every section of the Runner Master Prompt, checked against what's actually implemented in <span class="mono">HalfMarathon/</span> today &mdash; not what the docs claim.</p>
+      <div class="meta-row">
+        <span>Prepared <b>July 14, 2026</b></span>
+        <span>Scope <b>app.js &middot; 7 Netlify functions &middot; index.html &middot; privacy.html</b></span>
+        <span>Method <b>static code review, section-by-section</b></span>
+      </div>
+    </div>
+
+    <!-- A. Executive assessment -->
+    <section>
+      <div class="eyebrow"><span class="idx">A</span> Executive assessment</div>
+      <h2>Solid coaching core, missing release paperwork</h2>
+      <p class="lead">Runner's adaptive-coaching engine &mdash; the part of the spec that actually matters &mdash; is built with real rigor: the AI never invents a number, every model output is validated server-side before it touches a plan, and a genuine near-miss bug (the coach once defaulting a casual "I want to run" into a hard interval session) was caught and fixed rather than shipped. <span class="verdict-inline">Closed beta &middot; not production-ready</span></p>
+      <p>What's missing isn't architecture or safety logic &mdash; it's the surrounding infrastructure a real release needs: legal/medical disclaimer language, a notification layer, and an automated test suite that can catch a future regression the way this session's manual testing caught the last one.</p>
+
+      <div class="grid2">
+        <div class="card good">
+          <h4>Where it's strongest</h4>
+          <ul>
+            <li><b>Never-invent-numbers is enforced, not just prompted.</b> <span class="mono">coach.js</span> clamps <span class="mono">reduce_intensity</span> to 0.5&ndash;0.9, restricts it to easy/long days, and rejects any action referencing a day key that doesn't exist &mdash; server-side, regardless of what the model returns.</li>
+            <li><b>Red flags physically cannot carry a workout.</b> <span class="mono">riskLevel:"red"</span> or <span class="mono">seek_medical_evaluation</span> hard-nulls the action field before it ever reaches the client.</li>
+            <li><b>Missed-workout logic matches the spec's safeguards almost line for line</b> &mdash; &gt;60% missed dampens future volume ~15%, a missed long run shortens (never doubles) the next one.</li>
+            <li><b>Illness/vacation mode</b> converts affected days to rest automatically and they're excluded from the missed-workout ratio for free.</li>
+          </ul>
+        </div>
+        <div class="card bad">
+          <h4>Where it falls short</h4>
+          <ul>
+            <li><b>No medical/legal disclaimer text exists anywhere</b> &mdash; not on the intro screen, not in the Safety panel, not in <span class="mono">privacy.html</span>. Section 29 is a flat requirement and it's currently a zero.</li>
+            <li><b>Zero automated tests.</b> Every verification claim in project history was a manual, one-session spot-check against live OpenAI output &mdash; nothing stops a future prompt edit from silently reintroducing the exact bug that was already caught once.</li>
+            <li><b>No notification layer at all</b> &mdash; today's-workout reminders, missed-workout check-ins, race countdowns: none of it exists yet.</li>
+            <li><b>A collected field (<span class="mono">recentRaceTime</span>) is dead code</b> &mdash; onboarding asks for it, nothing ever reads it, pace guidance stays RPE-only even when real pace data would be available.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- B. Gap analysis -->
+    <section>
+      <div class="eyebrow"><span class="idx">B</span> Gap analysis</div>
+      <h2>Requirement by requirement</h2>
+      <p>Every row below is something the Master Prompt specifies. Severity reflects impact if shipped as-is, not effort to fix.</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>Requirement</th><th>Current state</th><th>Problem</th><th>Severity</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="req">§29 &mdash; Legal &amp; safety language</td>
+              <td>Safety panel lists red-flag symptoms only</td>
+              <td>No "not a medical provider," no diagnosis disclaimer, no AI/wearable-imperfection notice, anywhere in the app</td>
+              <td><span class="sev sev-critical">Critical</span></td>
+            </tr>
+            <tr>
+              <td class="req">§34&ndash;35 &mdash; QA suite &amp; acceptance criteria</td>
+              <td>Manual, ad hoc, one session at a time (per project history)</td>
+              <td>No automated regression coverage for the AI safety invariants (red flags, never-invent-numbers, pain triage)</td>
+              <td><span class="sev sev-high">High</span></td>
+            </tr>
+            <tr>
+              <td class="req">§18 &mdash; Notifications</td>
+              <td>None implemented</td>
+              <td>No workout reminders, missed-workout check-ins, race countdown, or plan-adjustment alerts</td>
+              <td><span class="sev sev-high">High</span></td>
+            </tr>
+            <tr>
+              <td class="req">§7 &mdash; Onboarding: long-run day + pace data</td>
+              <td>Long run hardcoded to template slot; <span class="mono">recentRaceTime</span> collected but never read</td>
+              <td>No "preferred long-run day" input; pace guidance stays RPE-only even when real race-time data exists</td>
+              <td><span class="sev sev-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td class="req">§21 &mdash; Nutrition guidance</td>
+              <td>A single "+ fueling practice" label tag on long runs &gt;90min</td>
+              <td>No actual educational content on pre-run fueling, hydration, or carbohydrate needs</td>
+              <td><span class="sev sev-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td class="req">§20 &mdash; Strength &amp; mobility detail</td>
+              <td>Generic "+ strength" label with a per-phase session budget</td>
+              <td>No structured exercise content the way running workouts get via <span class="mono">WORKOUT_DETAIL</span></td>
+              <td><span class="sev sev-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td class="req">§23 &mdash; Today screen affordances</td>
+              <td>Label, status, log/view button, "Ask your coach" button</td>
+              <td>No separate purpose/intensity surfaced, no standalone modification button, no explicit tomorrow preview, no direct pain check-in entry point</td>
+              <td><span class="sev sev-medium">Medium</span></td>
+            </tr>
+            <tr>
+              <td class="req">§30 &mdash; Monetization</td>
+              <td>Entirely free today, no tier gating</td>
+              <td>Not an MVP blocker per §31, but the pricing hypothesis is untested</td>
+              <td><span class="sev sev-low">Low</span></td>
+            </tr>
+            <tr>
+              <td class="req">§6.7 &mdash; Post-race recovery as a plan family</td>
+              <td>Handled implicitly via the "race" phase + missed-workout dampening</td>
+              <td>Not a selectable onboarding goal type of its own</td>
+              <td><span class="sev sev-low">Low</span></td>
+            </tr>
+            <tr>
+              <td class="req">§25 &mdash; Server hardening</td>
+              <td><span class="mono">netlify.toml</span> only declares the functions directory</td>
+              <td>No CSP / security headers configured, worth adding now that the app handles auth tokens and OAuth redirects</td>
+              <td><span class="sev sev-low">Low</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- C. Architecture assessment -->
+    <section>
+      <div class="eyebrow"><span class="idx">C</span> Architecture assessment</div>
+      <h2>Simple, and correctly separated where it counts</h2>
+      <p>Vanilla JS, no build step, no framework &mdash; <span class="mono">app.js</span> (2,462 lines) plus seven small Netlify Functions. This is a deliberate choice per §25 ("don't introduce a framework merely because it is popular"), and it's held up: the required three-way system separation is genuinely present in the code, not just described in comments.</p>
+      <ul class="plain">
+        <li><b>Deterministic plan engine</b> &mdash; <span class="mono">EVENT_TABLE</span>, <span class="mono">buildStructuredWeeks</span>, <span class="mono">computeWeeklyVolumes</span> own every number: phase length, volume progression, cutback weeks, taper curves, safety scaling for compressed timelines.</li>
+        <li><b>AI interpretation layer</b> &mdash; <span class="mono">coach.js</span>'s system prompt encodes the full red/yellow/green triage, missed-workout rules, and taper/illness/fatigue logic, but only ever outputs a category + optional scale factor.</li>
+        <li><b>Validation layer</b> &mdash; every AI response is re-checked against real day keys, real types, and a clamped factor range before it's allowed to touch the plan; red-flag responses are hard-blocked from carrying an action regardless of model output.</li>
+      </ul>
+      <p>Data lives in <span class="mono">localStorage</span> by default; Supabase sync is fully optional and merges with a sensible last-modified-wins-for-scalars / union-for-collections strategy. OAuth tokens are deliberately kept out of the synced blob. Account deletion goes through a service-role Netlify function since it needs privileges the client can't hold. This is good privacy hygiene and matches §28 closely.</p>
+      <p><b>Technical debt worth naming:</b> a single 2,462-line file is still "simple" by the letter of §25, but findability is starting to cost real time &mdash; several of this audit's gaps (the dead <span class="mono">recentRaceTime</span> field, the missing Today-screen affordances) are the kind of thing that hides easily in a file this size. Not urgent, but worth a section-boundary pass (e.g. splitting the plan engine, the AI/coach UI, and cloud sync into separate files) before the codebase grows further.</p>
+    </section>
+
+    <!-- D. Implementation roadmap -->
+    <section>
+      <div class="eyebrow"><span class="idx">D</span> Implementation roadmap</div>
+      <h2>What to do, in order</h2>
+      <div class="road">
+        <div class="road-row">
+          <div class="road-label">Immediate</div>
+          <ul>
+            <li>Add §29's legal/safety disclaimer language to the intro screen, Safety panel, and <span class="mono">privacy.html</span> &mdash; this is the one gap that should block any wider release on its own.</li>
+            <li>Either wire <span class="mono">recentRaceTime</span> into real pace guidance, or remove the onboarding field entirely &mdash; a collected-but-unused field is exactly the "placeholder logic called complete" §36 warns against.</li>
+          </ul>
+        </div>
+        <div class="road-row">
+          <div class="road-label">MVP completion</div>
+          <ul>
+            <li>Add a "preferred long-run day" onboarding input.</li>
+            <li>Turn the handful of scenarios already manually verified this session (red flags, fatigue downgrade, extra-motivation decline, missed-week rebuild, malformed-JSON handling, invented-distance rejection) into a real fixture-based regression suite for <span class="mono">coach.js</span>.</li>
+            <li>Give strength/mobility sessions real structured content instead of a generic label.</li>
+            <li>Add baseline nutrition-education content per §21.</li>
+          </ul>
+        </div>
+        <div class="road-row">
+          <div class="road-label">Pre-release hardening</div>
+          <ul>
+            <li>Rule-based notifications: today's-workout reminder, missed-workout check-in, and race countdown at minimum.</li>
+            <li>Security headers in <span class="mono">netlify.toml</span>.</li>
+            <li>Today screen: surface purpose/intensity directly, add a standalone pain/fatigue check-in entry point.</li>
+          </ul>
+        </div>
+        <div class="road-row">
+          <div class="road-label">Post-launch</div>
+          <ul>
+            <li>Monetization/subscription tier (pricing hypothesis from §30 still needs validating).</li>
+            <li>Post-race recovery as its own selectable plan family.</li>
+            <li>Google Play distribution via TWA wrapper (already planned per project history, not started).</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- E. Code changes -->
+    <section>
+      <div class="eyebrow"><span class="idx">E</span> Code changes</div>
+      <h2>Not made in this pass</h2>
+      <p>This audit was scoped as a read-only assessment. No code was modified. Say the word and I'll start on the Immediate-fixes row above &mdash; the disclaimer copy and the dead-field decision are both small, self-contained changes.</p>
+    </section>
+
+    <!-- F. Verification -->
+    <section>
+      <div class="eyebrow"><span class="idx">F</span> Verification</div>
+      <h2>What this audit actually checked</h2>
+      <ul class="vlist">
+        <li><span class="vmark pass">&#10003;</span> Read all 7 Netlify functions end-to-end for prompt-injection safety, hard validation logic, and the never-invent-numbers rule.</li>
+        <li><span class="vmark pass">&#10003;</span> Read the deterministic engine's phase assignment, volume progression, and safety-scaling math against §8/§11's rules.</li>
+        <li><span class="vmark pass">&#10003;</span> Read the missed-workout and difficulty-adjustment adaptive layers against §11's explicit safeguard list.</li>
+        <li><span class="vmark fail">&#10007;</span> Grepped for legal-disclaimer text, notification infrastructure, subscription/paywall code, and test files &mdash; confirmed absent, not just unfound.</li>
+        <li><span class="vmark unk">?</span> Did not start the dev server or exercise the live UI/coach conversation this session &mdash; no live OpenAI calls were made; this was a static read, not a runtime test.</li>
+        <li><span class="vmark unk">?</span> Accessibility specifics (contrast ratios, touch-target sizing, screen-reader labels &mdash; §24) were not audited against the actual rendered DOM/CSS.</li>
+        <li><span class="vmark unk">?</span> The full §34 scenario matrix (16 user profiles &times; ~25 scenarios) has not been run as a suite &mdash; only a handful of scenarios were manually spot-checked in a past session per project history.</li>
+      </ul>
+    </section>
+
+    <!-- G. Release recommendation -->
+    <section>
+      <div class="eyebrow"><span class="idx">G</span> Release recommendation</div>
+      <div class="stamp">
+        <div class="stamp-label">Verdict</div>
+        <div class="stamp-verdict">Closed beta</div>
+        <p>Not production-ready &mdash; the missing legal/safety disclaimer language is a real blocker on its own, independent of everything else. Not limited-internal-only either: the adaptive-coaching loop, the safety-triage logic, and the data-deletion flows are genuinely solid and already exceed what most first passes at this pattern get right.</p>
+        <p>Brutally honest: the gaps that remain are legal-text, notification-infrastructure, and content-depth gaps &mdash; not architecture or safety-logic gaps. That's the right kind of gap to have at this stage.</p>
+      </div>
+    </section>
+  </div>
+  <footer>Runner &middot; Zaera Labs &middot; audit against docs/Runner_Master_Prompt.md</footer>
+</div>
