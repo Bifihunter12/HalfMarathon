@@ -1062,6 +1062,7 @@
         '<input class="ob-input" type="text" id="introName" placeholder="e.g. Sarah" value="' + escapeHtml(state.userName || '') + '">' +
         '<button class="ob-btn" id="introStartBtn">Build My Plan</button>' +
         '<div class="intro-footer">No account required, no ads — your data stays on this device unless you turn on sync.</div>' +
+        '<div class="intro-disclaimer">Runner is a training tool, not a medical provider — it doesn\'t diagnose injuries or illness. See the shield icon for when to stop and see a doctor.</div>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -1802,6 +1803,11 @@
         '<ul class="red-flag-list">' +
           RED_FLAGS.map(function (f) { return '<li>' + escapeHtml(f) + '</li>'; }).join('') +
         '</ul>' +
+        '<div class="legal-notice">' +
+          '<p><strong>Runner is not a medical provider.</strong> It does not diagnose injuries, illness, or any medical condition, and nothing in this app — including the AI coach — is medical advice. Seek care from a qualified professional for any concerning symptom.</p>' +
+          '<p>A training plan, even one that adjusts carefully to how you\'re doing, cannot eliminate the risk of injury. You\'re responsible for choosing safe routes and environments — outdoor conditions and traffic require your own judgment.</p>' +
+          '<p>Data imported from wearables can be inaccurate, and AI coaching recommendations may occasionally be imperfect. When in doubt, choose the more conservative option or see a doctor.</p>' +
+        '</div>' +
         '<button class="ob-btn" id="safetyBackBtn">Back to plan</button>' +
       '</div>'
     );
