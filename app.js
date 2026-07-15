@@ -272,6 +272,7 @@
     if (!s.logs) s.logs = {};
     if (!s.overrides) s.overrides = {};
     if (!s.crossType) s.crossType = {};
+    if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
@@ -438,6 +439,7 @@
     return {
       userName: prefer.userName,
       units: prefer.units,
+      notifications: prefer.notifications || { enabled: false },
       raceGoal: prefer.raceGoal,
       profile: prefer.profile,
       planMeta: prefer.planMeta,
@@ -658,6 +660,156 @@
         if (!res.ok || data.error) return { error: (data && data.error) || 'Request failed' };
         return { sessions: data.sessions || [] };
       } catch (e) { return { error: String((e && e.message) || e) }; }
+    }
+  };
+
+  // ── Rule-based notifications (roadmap §18) ────────────────────────────
+  // Deliberately local-only, no push server: this fires while the app/PWA is
+  // open or briefly resumed in the background, never while fully closed --
+  // an honest limitation of a local-first app with no backend to hold push
+  // subscriptions. Every rule here is deterministic (never AI, per §18/§27)
+  // and every kind is deduped in its own bookkeeping log so re-running this
+  // constantly -- every render, plus a timer -- can't double-fire the same
+  // real-world event twice.
+  var NOTIF_LOG_KEY = 'runner_notif_log';
+  function loadNotifLog() {
+    try { return JSON.parse(localStorage.getItem(NOTIF_LOG_KEY) || '{}'); } catch (e) { return {}; }
+  }
+  function saveNotifLog(log) { localStorage.setItem(NOTIF_LOG_KEY, JSON.stringify(log)); }
+
+  function showAppNotification(title, body, tag) {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready.then(function (reg) {
+      reg.showNotification(title, { body: body, tag: tag, icon: 'icons/icon-192.svg', badge: 'icons/icon-192.svg' });
+    }).catch(function () {});
+  }
+
+  var Notifications = {
+    get supported() { return 'Notification' in window && 'serviceWorker' in navigator; },
+    get permission() { return this.supported ? Notification.permission : 'unsupported'; },
+
+    async requestPermission() {
+      if (!this.supported) return 'unsupported';
+      return Notification.requestPermission();
+    },
+
+    // Called right when the user flips the Settings toggle on -- marks
+    // "already seen" for anything that could otherwise dump a backlog of
+    // stale-feeling notifications (e.g. a weekly recap from several weeks
+    // ago) the moment permission is granted, without suppressing same-day
+    // info like today's workout or the plan's current adjustment note.
+    markBaseline() {
+      if (!state.raceGoal || !state.planMeta) return;
+      var today = new Date(); today.setHours(0, 0, 0, 0);
+      var raceDate = parseDate(state.raceGoal.raceDate);
+      var currentWeekIdx = findCurrentWeekIdx(raceDate, state.planMeta.planLengthWeeks, today);
+      var log = loadNotifLog();
+      log.lastRecapNotifiedWeek = currentWeekIdx - 1;
+      saveNotifLog(log);
+    },
+
+    // Runs on every app render/boot, plus a periodic timer while the tab or
+    // installed PWA stays open. Every branch below is a plain rule over data
+    // the plan engine already computed -- nothing here is AI-generated.
+    check() {
+      if (!state.notifications || !state.notifications.enabled) return;
+      if (this.permission !== 'granted') return;
+      if (!state.raceGoal || !state.profile || !state.planMeta) return;
+
+      var today = new Date(); today.setHours(0, 0, 0, 0);
+      var todayIso = dateToISO(today);
+      var yesterday = new Date(today.getTime() - 86400000);
+      var tomorrow = new Date(today.getTime() + 86400000);
+      var raceDate = parseDate(state.raceGoal.raceDate);
+      var planLengthWeeks = state.planMeta.planLengthWeeks;
+      var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+      var weeks = result.weeks;
+      var log = loadNotifLog();
+      var changed = false;
+
+      var todayKey = null, todayLabel = null;
+      var yesterdayKey = null, yesterdayLabel = null;
+      var tomorrowLabel = null, tomorrowDay = null;
+      weeks.forEach(function (wk) {
+        wk.days.forEach(function (day, di) {
+          var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+          var key = wk.weekNum + '-' + di;
+          var label = state.overrides[key] || day.label;
+          if (sameDate(d, today)) { todayKey = key; todayLabel = label; }
+          if (sameDate(d, yesterday)) { yesterdayKey = key; yesterdayLabel = label; }
+          if (sameDate(d, tomorrow)) { tomorrowLabel = label; tomorrowDay = day; }
+        });
+      });
+      var hour = new Date().getHours();
+
+      // Today's workout reminder, or a gentle rest-day note -- evening only, once a day.
+      if (todayKey && hour >= 17 && log.lastTodayNoteDate !== todayIso) {
+        if (isLoggable(todayLabel)) {
+          if (!getLog(todayKey)) showAppNotification("Today's run", "Haven't logged it yet: " + todayLabel + '.', 'today-reminder');
+        } else {
+          showAppNotification('Rest day', "Today's a scheduled rest day -- that's part of the plan, not a gap in it.", 'rest-reminder');
+        }
+        log.lastTodayNoteDate = todayIso;
+        changed = true;
+      }
+
+      // Missed-workout check-in -- gentle, once per missed day, checked any time the day after.
+      if (yesterdayKey && isLoggable(yesterdayLabel) && !getLog(yesterdayKey) && log.lastMissedCheckinDate !== todayIso) {
+        showAppNotification('Yesterday', "Looks like yesterday's session didn't happen -- no problem. Tell the coach what's going on if you want the plan to adjust.", 'missed-checkin');
+        log.lastMissedCheckinDate = todayIso;
+        changed = true;
+      }
+
+      // Hydration/prep reminder for tomorrow's long run, evening before -- same >=90min
+      // threshold buildStructuredWeeks already uses for the "+ fueling practice" label.
+      if (tomorrowDay && tomorrowDay.type === 'long' && tomorrowDay.miles * 11 >= 90 && hour >= 17 && log.lastHydrationReminderDate !== todayIso) {
+        showAppNotification('Tomorrow: long run', 'Hydrate today and lay out your gear -- ' + tomorrowLabel + '.', 'hydration-reminder');
+        log.lastHydrationReminderDate = todayIso;
+        changed = true;
+      }
+
+      // Race countdown -- fire once per milestone, not every day.
+      var daysToRace = daysBetween(today, raceDate);
+      if ([14, 7, 3, 1, 0].indexOf(daysToRace) !== -1) {
+        var announcedCountdowns = log.announcedCountdowns || [];
+        if (announcedCountdowns.indexOf(daysToRace) === -1) {
+          var countdownText = daysToRace === 0 ? 'Race day is today.' : daysToRace + ' day' + (daysToRace === 1 ? '' : 's') + ' to race day.';
+          showAppNotification('Race countdown', countdownText, 'race-countdown-' + daysToRace);
+          announcedCountdowns.push(daysToRace);
+          log.announcedCountdowns = announcedCountdowns;
+          changed = true;
+        }
+      }
+
+      // Plan-adjustment alert -- mirrors the in-app warning banner, fired once per distinct note.
+      if (result.note && log.lastPlanAdjustmentNote !== result.note) {
+        showAppNotification('Plan updated', result.note, 'plan-adjustment');
+        log.lastPlanAdjustmentNote = result.note;
+        changed = true;
+      }
+
+      // Return-after-break -- once per unavailable range, the day after it ends.
+      (state.unavailable || []).forEach(function (r) {
+        if (r.end !== dateToISO(yesterday)) return;
+        var rangeId = r.start + '|' + r.end;
+        var announcedBreaks = log.announcedBreakEnds || [];
+        if (announcedBreaks.indexOf(rangeId) === -1) {
+          showAppNotification('Welcome back', "Your plan's been adjusted for the time off -- today picks back up gently.", 'return-from-break');
+          announcedBreaks.push(rangeId);
+          log.announcedBreakEnds = announcedBreaks;
+          changed = true;
+        }
+      });
+
+      // Weekly recap ready -- once per week transition, not every render.
+      var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
+      if (currentWeekIdx > 1 && log.lastRecapNotifiedWeek !== currentWeekIdx - 1) {
+        showAppNotification('Weekly recap ready', 'Week ' + (currentWeekIdx - 1) + ' wrapped up -- see how it went.', 'weekly-recap');
+        log.lastRecapNotifiedWeek = currentWeekIdx - 1;
+        changed = true;
+      }
+
+      if (changed) saveNotifLog(log);
     }
   };
 
@@ -1562,6 +1714,8 @@
         setTimeout(function () { todayRow.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 150);
       }
     }
+
+    Notifications.check();
   }
 
   // ── AI coach chat -- a real multi-turn conversation, not a single ask-and-forget box ──
@@ -2137,6 +2291,19 @@
           '<p class="recap-empty">Connect Google Health (Fitbit) to import completed runs into your log. Fully optional &mdash; read-only, and the connection stays on this device only.</p>' +
           '<button class="ob-btn ob-btn-secondary" id="ghConnectBtn">Connect Google Health</button>'
         ) + '</div>' +
+        '<div class="ob-label" style="margin-top:26px">Notifications</div>' +
+        '<div id="notificationsSection">' + (
+          !Notifications.supported ?
+            '<p class="recap-empty">Not supported in this browser.</p>'
+          : Notifications.permission === 'denied' ?
+            '<p class="recap-empty">Notifications are blocked for this site in your browser settings &mdash; enable them there to turn this on.</p>'
+          : (state.notifications.enabled && Notifications.permission === 'granted') ?
+            '<p class="recap-empty">On &mdash; today\'s workout reminders, missed-workout check-ins, race countdown, and plan updates. Rule-based, never AI. Only fires while Runner is open or running in the background &mdash; exact timing depends on your browser.</p>' +
+            '<button class="ob-btn ob-btn-secondary" id="notifDisableBtn">Turn off</button>'
+          :
+            '<p class="recap-empty">Get a nudge for today\'s workout, a missed-session check-in, race countdown, and plan updates. Fully optional and rule-based &mdash; never AI &mdash; and only fires while Runner is open or running in the background.</p>' +
+            '<button class="ob-btn ob-btn-secondary" id="notifEnableBtn">Enable notifications</button>'
+        ) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -2243,6 +2410,31 @@
     } else {
       document.getElementById('ghConnectBtn').addEventListener('click', function () {
         GoogleHealth.connect();
+      });
+    }
+
+    var notifEnableBtn = document.getElementById('notifEnableBtn');
+    if (notifEnableBtn) {
+      notifEnableBtn.addEventListener('click', function () {
+        notifEnableBtn.disabled = true;
+        notifEnableBtn.textContent = 'Requesting...';
+        Notifications.requestPermission().then(function (perm) {
+          if (perm === 'granted') {
+            state.notifications.enabled = true;
+            saveState(state);
+            Notifications.markBaseline();
+            Notifications.check();
+          }
+          renderSettings();
+        });
+      });
+    }
+    var notifDisableBtn = document.getElementById('notifDisableBtn');
+    if (notifDisableBtn) {
+      notifDisableBtn.addEventListener('click', function () {
+        state.notifications.enabled = false;
+        saveState(state);
+        renderSettings();
       });
     }
 
@@ -2465,4 +2657,10 @@
   GoogleHealth.handleOAuthRedirect().then(function () {
     if (document.getElementById('googleHealthSection')) renderSettings();
   });
+
+  // Re-check notification rules periodically while the tab/installed PWA
+  // stays open -- catches e.g. the evening today's-workout reminder even if
+  // the runner doesn't reopen the app between morning and evening. Has no
+  // effect once the app is fully closed; there's no push server behind this.
+  setInterval(function () { Notifications.check(); }, 30 * 60 * 1000);
 })();

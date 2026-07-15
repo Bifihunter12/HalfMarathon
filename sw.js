@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.07.14.1";
+const APP_VERSION = "2026.07.14.2";
 const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
@@ -29,6 +29,20 @@ self.addEventListener("activate", (event) => {
       .then((clients) => clients.forEach((client) => client.postMessage({ type: "APP_UPDATED", version: APP_VERSION })))
   );
   self.clients.claim();
+});
+
+// Focus an already-open tab if there is one, otherwise open a new one --
+// used by the rule-based notifications in app.js (see Notifications there).
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ("focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow("/");
+    })
+  );
 });
 
 // Network-first: always fetch fresh, fall back to cache only when offline
