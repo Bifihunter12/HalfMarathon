@@ -42,7 +42,7 @@ var SYSTEM_PROMPT = [
   'TAPER: reduce volume, keep a little short intensity, never add missed mileage, never add heavy strength, never "test fitness" for reassurance. Restlessness during taper is normal -- normalize it, offer a short easy run/strides/walk/mobility, never a hard workout.',
   'STRENGTH TRAINING: for durability, not exhaustion -- typically 2x/week base and build, 1x/week peak, very light or none race week. Avoid heavy lower-body work the day before intervals or a long run, during acute pain, or during race week.',
   'HEAT/ALTITUDE/WEATHER/TREADMILL: heat and altitude both mean effort-based pacing, not ego pace, and more recovery; bad weather or no outdoor access should move sessions to treadmill or cross-training while keeping the workout\'s purpose.',
-  'PACE GUIDANCE: only give an exact pace if the plan/context actually includes real pace or race-time data. Otherwise use RPE and the talk test -- easy/Zone2 is RPE 2-4 and fully conversational, steady is RPE 5, tempo/threshold is RPE 6-7 (a few words only), hard intervals are RPE 8-9. Never invent a specific pace, VO2 max number, or other personalized metric you don\'t actually have.',
+  'PACE GUIDANCE: only give a pace if the plan/context actually includes real pace or race-time data. If "easyPaceRangeSecPerMi" is present in the plan context, quote it only as the range it is (e.g. "somewhere around 10:15-11:45/mi") for easy or long days -- never narrow it to one falsely-precise number, never apply it to quality/interval/tempo days. If that field is absent, use RPE and the talk test instead -- easy/Zone2 is RPE 2-4 and fully conversational, steady is RPE 5, tempo/threshold is RPE 6-7 (a few words only), hard intervals are RPE 8-9. Never invent a specific pace, VO2 max number, or other personalized metric you don\'t actually have.',
 
   'Given all of the above, decide the runner\'s "decision" for right now: "keep_plan" (no change needed), "modify_workout" (small adjustment, e.g. reduce_intensity), "replace_with_cross_training" (swap today\'s type), "rest" (mark_rest), or "seek_medical_evaluation" (red flag present).',
   'Decide whether the runner is clearly requesting or agreeing to a concrete change to ONE specific day from the provided list. If so, include an "action" matching the decision above. Otherwise action must be null.',
@@ -119,6 +119,14 @@ exports.handler = async function (event) {
     event: plan.event, goal: plan.goal, experienceLevel: plan.experienceLevel,
     phase: plan.phase, currentWeek: plan.currentWeek, totalWeeks: plan.totalWeeks
   };
+  // Only present when the runner supplied a real recent race result -- the
+  // client computes this deterministically (Riegel projection), never the
+  // model. A real range, not a single number, so the model can't quote it
+  // with more precision than the data supports.
+  if (Array.isArray(plan.easyPaceRangeSecPerMi) && plan.easyPaceRangeSecPerMi.length === 2) {
+    var lo = Number(plan.easyPaceRangeSecPerMi[0]), hi = Number(plan.easyPaceRangeSecPerMi[1]);
+    if (!isNaN(lo) && !isNaN(hi)) context.easyPaceRangeSecPerMi = [Math.round(lo), Math.round(hi)];
+  }
 
   // Prior turns give the model conversational memory -- capped and sanitized
   // to plain role/content pairs so a bad client payload can't inject

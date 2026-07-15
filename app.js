@@ -22,6 +22,8 @@
   var TERRAINS = ['road', 'trail', 'hills', 'mountain', 'treadmill'];
   var TERRAIN_LABEL = { road: 'Road', trail: 'Trail', hills: 'Hills', mountain: 'Mountain', treadmill: 'Treadmill' };
   var CROSS_OPTIONS = ['Bike', 'Swim', 'Elliptical', 'Row', 'Hike', 'Strength', 'Yoga', 'Other', 'None'];
+  var RACE_RESULT_DISTANCES = ['none', '5k', '10k', 'half', 'marathon'];
+  var RACE_RESULT_LABEL = { none: 'None', '5k': '5K', '10k': '10K', half: 'Half', marathon: 'Marathon' };
 
   var INCREASE_PCT = { beginner: 0.04, novice: 0.06, intermediate: 0.08, advanced: 0.10 };
   var CUTBACK_PCT = { beginner: 0.20, novice: 0.17, intermediate: 0.15, advanced: 0.12 };
@@ -254,6 +256,45 @@
     return toUnit(miles) + ' ' + unitLabel() + ' long run' + (terrainNote ? ' (' + terrainNote + ')' : '') + (miles * 11 >= 90 ? ' + fueling practice' : '');
   }
   function formatEasyRunLabel(miles) { return toUnit(miles) + ' ' + unitLabel() + ' easy run'; }
+
+  // ── Pace guidance from a real recent race result (roadmap §10) ─────────
+  // Only ever surfaced when the runner actually supplied a recent race
+  // distance + time -- otherwise pace guidance stays RPE/talk-test-only
+  // everywhere else in the app. Never a single falsely-precise number: a
+  // wide, clearly-labeled range, since one data point can't support more
+  // than that (§4.5).
+  var RACE_DISTANCE_MILES = { '5k': 3.10686, '10k': 6.21371, half: 13.10938, marathon: 26.21875 };
+  // mm:ss or h:mm:ss (races 10K and up are commonly reported with an hour part).
+  function parseRaceTimeToMinutes(str) {
+    if (!str) return null;
+    var m = str.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    var hours = m[1] ? parseInt(m[1], 10) : 0;
+    var mins = parseInt(m[2], 10), secs = parseInt(m[3], 10);
+    return hours * 60 + mins + secs / 60;
+  }
+  function formatPace(secPerMi) {
+    var m = Math.floor(secPerMi / 60), s = Math.round(secPerMi % 60);
+    if (s === 60) { m++; s = 0; }
+    return m + ':' + String(s).padStart(2, '0');
+  }
+  // Projects the runner's real result onto an equivalent 5K effort via
+  // Riegel's race-time-prediction formula (T2 = T1 * (D2/D1)^1.06 -- a
+  // standard, openly-published exercise-science formula, not any specific
+  // coach's proprietary calculator), then applies a conservative, widely
+  // used rule of thumb that easy/long-run pace runs well behind current
+  // 5K race pace. Returns per-mile seconds regardless of display unit --
+  // convert at render time the same way distances do.
+  function computeEasyPaceRange(profile) {
+    if (!profile || !profile.recentRaceDistance || !profile.recentRaceTime) return null;
+    var fromMiles = RACE_DISTANCE_MILES[profile.recentRaceDistance];
+    var raceMins = parseRaceTimeToMinutes(profile.recentRaceTime);
+    if (!fromMiles || !raceMins) return null;
+    var fiveKMiles = RACE_DISTANCE_MILES['5k'];
+    var equivalent5kMins = raceMins * Math.pow(fiveKMiles / fromMiles, 1.06);
+    var refSecPerMi = (equivalent5kMins * 60) / fiveKMiles;
+    return { loSecPerMi: Math.round(refSecPerMi + 90), hiSecPerMi: Math.round(refSecPerMi + 135) };
+  }
 
   // ── State ──────────────────────────────────────────────────────────────
   function loadState() {
@@ -1233,7 +1274,7 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], userName: state.userName };
+    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName };
     var step = 0;
     var steps = ['event', 'race', 'fitness', 'logistics'];
 
@@ -1267,7 +1308,11 @@
           '<div class="ob-label">Runs per week right now</div>' +
           '<input class="ob-input" type="number" min="0" max="7" step="1" id="f_runDaysPerWeek" value="' + draft.runDaysPerWeek + '">' +
           '<div class="ob-label">Experience level</div>' +
-          '<div class="chip-grid">' + chipsHtml('experienceLevel', LEVELS, LEVEL_LABEL, draft.experienceLevel, false) + '</div>';
+          '<div class="chip-grid">' + chipsHtml('experienceLevel', LEVELS, LEVEL_LABEL, draft.experienceLevel, false) + '</div>' +
+          '<div class="ob-label" style="margin-top:18px">Recent race result (optional)</div>' +
+          '<div class="chip-grid">' + chipsHtml('recentRaceDistance', RACE_RESULT_DISTANCES, RACE_RESULT_LABEL, draft.recentRaceDistance || 'none', false) + '</div>' +
+          '<input class="ob-input" type="text" id="f_recentRaceTime" placeholder="Finish time, e.g. 24:30 or 1:45:30" value="' + escapeHtml(draft.recentRaceTime || '') + '">' +
+          '<p class="ob-hint">Used only to suggest an easy-pace range &mdash; skip it and the app sticks to effort/RPE guidance instead.</p>';
       } else if (steps[step] === 'logistics') {
         body =
           '<div class="ob-title">Logistics</div>' +
@@ -1309,6 +1354,8 @@
         if (ad) draft.availableDays = parseInt(ad.value, 10) || 4;
         var un = document.getElementById('f_userName');
         if (un) draft.userName = un.value;
+        var rrt = document.getElementById('f_recentRaceTime');
+        if (rrt) draft.recentRaceTime = rrt.value.trim();
       }
       wrap.querySelectorAll('.ob-input').forEach(function (input) {
         input.addEventListener('input', syncFieldsToDraft);
@@ -1425,10 +1472,15 @@
   }
 
   function finishWizard(draft, isEdit) {
+    // Only kept if it actually parses -- a distance picked with an unparseable
+    // or blank time is the same as not having supplied a result at all.
+    var raceResultValid = draft.recentRaceDistance && draft.recentRaceDistance !== 'none' && parseRaceTimeToMinutes(draft.recentRaceTime);
     var profile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
       experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, availableDays: draft.availableDays,
-      terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'], recentRaceTime: ''
+      terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'],
+      recentRaceDistance: raceResultValid ? draft.recentRaceDistance : null,
+      recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : ''
     };
     var raceGoal = { event: draft.event, raceDate: draft.raceDate, startDate: draft.startDate, goal: draft.goal };
     var raceUnchanged = isEdit && state.raceGoal && state.raceGoal.event === raceGoal.event
@@ -1474,7 +1526,9 @@
         event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
         experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, availableDays: state.profile.availableDays,
-        terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(), userName: state.userName
+        terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
+        recentRaceDistance: state.profile.recentRaceDistance || 'none', recentRaceTime: state.profile.recentRaceTime || '',
+        userName: state.userName
       });
     });
     document.getElementById('gearBtn').addEventListener('click', renderSettings);
@@ -1907,11 +1961,19 @@
           request: req,
           today: dateToISO(today),
           days: daysPayload,
-          plan: {
-            event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level,
-            phase: weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : null,
-            currentWeek: currentWeek, totalWeeks: planLengthWeeks
-          },
+          plan: (function () {
+            var p = {
+              event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level,
+              phase: weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : null,
+              currentWeek: currentWeek, totalWeeks: planLengthWeeks
+            };
+            // Real pace data, only when the runner actually supplied a recent race
+            // result -- coach.js is instructed to use this instead of guessing at
+            // a pace, and to stay RPE-only when it's absent (roadmap §10).
+            var paceRange = computeEasyPaceRange(state.profile);
+            if (paceRange) p.easyPaceRangeSecPerMi = [paceRange.loSecPerMi, paceRange.hiSecPerMi];
+            return p;
+          })(),
           history: history
         })
       }).then(function (res) {
@@ -2012,11 +2074,26 @@
     var detail = WORKOUT_DETAIL[dayData.type] || null;
     var entry = getLog(key) || {};
 
+    // Only shown for easy/long days, and only when the runner actually supplied
+    // a recent race result -- otherwise this stays RPE/talk-test-only like
+    // every other workout type, per the roadmap's "avoid false precision" rule.
+    var paceRow = '';
+    if (dayData.type === 'easy' || dayData.type === 'long') {
+      var paceRange = computeEasyPaceRange(state.profile);
+      if (paceRange) {
+        var loDisplay = state.units === 'km' ? paceRange.loSecPerMi / KM_PER_MI : paceRange.loSecPerMi;
+        var hiDisplay = state.units === 'km' ? paceRange.hiSecPerMi / KM_PER_MI : paceRange.hiSecPerMi;
+        paceRow = '<dt>Estimated pace</dt><dd>' + formatPace(loDisplay) + '&ndash;' + formatPace(hiDisplay) + ' /' + unitLabel() +
+          ' &mdash; a range from your recent ' + RACE_RESULT_LABEL[state.profile.recentRaceDistance] + ' time, not a target. Go by feel first.</dd>';
+      }
+    }
+
     var detailHtml = detail ? (
       '<dl class="wd-info">' +
         '<dt>What</dt><dd>' + escapeHtml(detail.what) + '</dd>' +
         '<dt>Why</dt><dd>' + escapeHtml(detail.why) + '</dd>' +
         '<dt>How hard</dt><dd>' + escapeHtml(detail.howHard) + '</dd>' +
+        paceRow +
         '<dt>If I can&rsquo;t</dt><dd>' + escapeHtml(detail.ifCant) + '</dd>' +
         '<dt>Common mistake</dt><dd>' + escapeHtml(detail.mistakes) + '</dd>' +
       '</dl>'
