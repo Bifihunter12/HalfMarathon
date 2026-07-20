@@ -18,7 +18,7 @@
 var OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 var MODEL = 'gpt-4o-mini';
 var VALID_TYPES = ['easy', 'long', 'quality', 'cross', 'rest'];
-var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity'];
+var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity', 'substitute_side_quest'];
 var VALID_RISK = ['green', 'yellow', 'red'];
 var VALID_DECISION = ['keep_plan', 'modify_workout', 'replace_with_cross_training', 'rest', 'seek_medical_evaluation'];
 var REDUCE_MIN = 0.5, REDUCE_MAX = 0.9;
@@ -38,6 +38,7 @@ var SYSTEM_PROMPT = [
   'MISSED WORKOUT: missed easy run -> just skip it, no cramming. Missed hard/quality workout -> only move it if full recovery remains before the next hard/long session, otherwise skip. Missed long run -> move it only if it won\'t create back-to-back hard/long stress (shorten if needed), never double it later. Missed a full week -> resume at 80-90% of previous volume with no intensity for 2-3 sessions (frame this as a note, not an action you can execute directly). Missed 2+ weeks -> recommend recalculating expectations, possibly a conversation about the goal itself.',
   'EXTRA MOTIVATION ("I feel amazing, want to do more"): allowed -- a little easy extra time, relaxed strides, easy cross-training, mobility, walking, light strength if not near race. NOT allowed -- turning an easy day into intervals, a second hard day without a plan reason, aggressively extending the long run, racing a workout, or adding volume during taper because the runner feels restless.',
   'FATIGUE / POOR SLEEP: mild -> reduce the workout, keep it easy, drop any speed component (use reduce_intensity, factor ~0.7-0.9). Moderate -> replace with easy run/walk/cross-training, no intervals or tempo (use substitute_workout to an easy/cross type already in the plan, or reduce_intensity toward the low end). Severe/persistent -> rest or recovery walk, suggest checking sleep/nutrition/hydration/stress; if truly extreme and persistent, medical evaluation. Never assign hard intervals to a clearly fatigued runner.',
+  'SIDE QUESTS (docs/Runner_SideQuest_Spec.md): when the core issue is mental staleness, boredom, or just not feeling like running today -- NOT pain, NOT illness, NOT real injury risk -- and the day in question is "easy" or "cross" type ONLY (never "long"/"quality"/"race"), consider "substitute_side_quest" instead of reduce_intensity/mark_rest so the runner still gets a session, just a different one. Only ever choose a sideQuestId that is present in the provided side-quest catalog for that message, and only for a day whose type is listed in that quest\'s "replaces" array -- never invent a quest not in the catalog. If the runner describes physical tiredness, soreness, or fatigue (not just mental boredom), only choose a quest with trainingLoad 2 or lower and never category "strength" -- same conservative rule as the fatigue guidance above, applied to which quest you pick. Long run, quality/threshold, and race day stay off-limits for this action -- if the runner is bored of one of those, say it\'s protected and offer reduce_intensity, mark_rest, or moving the conversation toward "keep_plan" instead.',
   'ILLNESS: mild, above-the-neck only -> optional easy walk or very easy short run, no intensity. Fever, chest symptoms, body aches, vomiting, diarrhea, flu/COVID-like -> no training, rest, hydrate. Return from illness -> first session short and easy, no intensity for several days, reduced weekly volume.',
   'TAPER: reduce volume, keep a little short intensity, never add missed mileage, never add heavy strength, never "test fitness" for reassurance. Restlessness during taper is normal -- normalize it, offer a short easy run/strides/walk/mobility, never a hard workout.',
   'STRENGTH TRAINING: for durability, not exhaustion -- typically 2x/week base and build, 1x/week peak, very light or none race week. Avoid heavy lower-body work the day before intervals or a long run, during acute pain, or during race week.',
@@ -51,7 +52,8 @@ var SYSTEM_PROMPT = [
   '"substitute_workout" {key, newType, note}: swap which TYPE of session happens on a day. newType MUST be one of the types that already appears among the provided days (the app reuses that real day\'s actual label/numbers -- never propose a type absent from the list). Default to "easy" for a plain, unqualified "I want to run/train" request -- only choose "quality" if explicitly asked for hard/interval/tempo/speed work, only "long" if explicitly asked for a long run. Never upgrade a casual request into a harder session than asked for.',
   '"log_unplanned_activity" {key, note}: runner did something different and wants it recorded as what actually happened -- never changes the future plan.',
   '"reduce_intensity" {key, factor, note}: scale DOWN today\'s own already-planned distance for fatigue/mild pain/poor sleep -- factor must be a number between 0.5 and 0.9 (e.g. 0.7 for a 30% cut). Only valid for "easy" or "long" type days (their distance is a clean real number to scale) -- never for quality/cross/rest.',
-  'CRITICAL: no action type can ever set a distance/duration/pace the runner names as a specific number (e.g. "make it 3 miles") -- if no real day of the needed type has that number, or the requested change isn\'t one of the four action types above applied to one real day, action must be null, and the message should say so plainly (they can tap the workout text on that day to edit it manually) rather than claiming success on something you can\'t mechanically do.',
+  '"substitute_side_quest" {key, sideQuestId, note}: swap a day for one of the entries in the provided side-quest catalog (hike/strength/core/cross/mobility alternatives). sideQuestId MUST be an id from that catalog, and only valid for a day whose type appears in that quest\'s "replaces" list -- never for long/quality/race days, never an id not in the catalog.',
+  'CRITICAL: no action type can ever set a distance/duration/pace the runner names as a specific number (e.g. "make it 3 miles") -- if no real day of the needed type has that number, or the requested change isn\'t one of the five action types above applied to one real day, action must be null, and the message should say so plainly (they can tap the workout text on that day to edit it manually) rather than claiming success on something you can\'t mechanically do.',
 
   'Never diagnose. If the runner mentions pain/soreness/illness without explicitly asking for a schedule change, give brief non-diagnostic guidance per the triage above and mention the app\'s Safety panel covers red-flag symptoms -- do NOT set an action from a bare symptom mention alone; only an explicit ask for a change becomes an action.',
   'Never suggest exceeding what the plan already prescribes, never use guilt or shame.',
@@ -59,7 +61,7 @@ var SYSTEM_PROMPT = [
   'If the runner\'s message mentions any red-flag symptom (see list above), also populate "redFlags" with the specific symptom(s) mentioned, in the runner\'s own terms.',
   'Populate "avoidToday" with 0-3 short concrete things to avoid today if relevant (e.g. "hills", "speedwork", "heavy lower-body lifting") -- empty array if nothing specific applies.',
 
-  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity>", "key": "<key>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "note": "<short reason>"}.'
+  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity|substitute_side_quest>", "key": "<key>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "sideQuestId": "<only for substitute_side_quest, an id from the provided catalog>", "note": "<short reason>"}.'
 ].join(' ');
 
 exports.handler = async function (event) {
@@ -115,6 +117,23 @@ exports.handler = async function (event) {
     typeByKey[d.key] = d.type;
   });
 
+  // Side-quest catalog -- the client sends its own canonical SIDE_QUESTS list
+  // (docs/Runner_SideQuest_Spec.md); the model may only ever pick an id from
+  // here, never invent one. Sanitized the same way `days` is above.
+  var sideQuests = Array.isArray(payload.sideQuests) ? payload.sideQuests.slice(0, 20) : [];
+  var cleanSideQuests = sideQuests.map(function (q) {
+    return {
+      id: String(q.id), name: typeof q.name === 'string' ? q.name.slice(0, 60) : '',
+      category: typeof q.category === 'string' ? q.category : '',
+      description: typeof q.description === 'string' ? q.description.slice(0, 200) : '',
+      estimatedMinutes: typeof q.estimatedMinutes === 'number' ? q.estimatedMinutes : null,
+      trainingLoad: typeof q.trainingLoad === 'number' ? q.trainingLoad : null,
+      replaces: Array.isArray(q.replaces) ? q.replaces.filter(function (t) { return typeof t === 'string'; }) : []
+    };
+  }).filter(function (q) { return q.id && q.name; });
+  var sideQuestById = {};
+  cleanSideQuests.forEach(function (q) { sideQuestById[q.id] = q; });
+
   var context = {
     event: plan.event, goal: plan.goal, experienceLevel: plan.experienceLevel,
     phase: plan.phase, currentWeek: plan.currentWeek, totalWeeks: plan.totalWeeks
@@ -139,6 +158,7 @@ exports.handler = async function (event) {
   var userPrompt = 'Today\'s date: ' + today +
     '\n\nRunner\'s plan: ' + JSON.stringify(context) +
     '\n\nUpcoming/recent days with any logged training (JSON): ' + JSON.stringify(cleanDays) +
+    (cleanSideQuests.length ? '\n\nAvailable side-quest catalog (JSON) -- only source for substitute_side_quest: ' + JSON.stringify(cleanSideQuests) : '') +
     '\n\nRunner\'s message: ' + request;
 
   try {
@@ -206,6 +226,11 @@ exports.handler = async function (event) {
       if (isNaN(factor) || factor < REDUCE_MIN || factor > REDUCE_MAX) validAction = false;
       if (dayType !== 'easy' && dayType !== 'long') validAction = false;
     }
+    if (validAction && action.type === 'substitute_side_quest') {
+      var quest = sideQuestById[action.sideQuestId];
+      var qDayType = typeByKey[action.key];
+      if (!quest || quest.replaces.indexOf(qDayType) === -1) validAction = false;
+    }
 
     if (!validAction) {
       return {
@@ -228,6 +253,7 @@ exports.handler = async function (event) {
           key: String(action.key),
           newType: action.type === 'substitute_workout' ? action.newType : undefined,
           factor: action.type === 'reduce_intensity' ? Math.round(Number(action.factor) * 100) / 100 : undefined,
+          sideQuestId: action.type === 'substitute_side_quest' ? String(action.sideQuestId) : undefined,
           note: typeof action.note === 'string' ? action.note.slice(0, 200) : ''
         }
       })

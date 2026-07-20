@@ -1911,6 +1911,15 @@
       saveState(state);
       return true;
     }
+    // Reuses the same applySideQuest the deterministic "Not feeling this
+    // run?" button flow uses -- one shared apply path for both, not two.
+    function applySideQuestChat(key, sideQuestId) {
+      var day = daysByKey[key];
+      var quest = SIDE_QUESTS.filter(function (q) { return q.id === sideQuestId; })[0];
+      if (!day || !quest || quest.replaces.indexOf(day.type) === -1) return false;
+      applySideQuest(key, quest, day.baseLabel);
+      return true;
+    }
 
     // Returns { text, confirmable } -- confirmable:false means show the text
     // as an explanatory note with no Confirm button, since acting on it would
@@ -1935,6 +1944,16 @@
         if (day.miles == null) return { text: "Can't scale that day down — it doesn't have a plain distance to reduce.", confirmable: false };
         var newMiles = round1(day.miles * action.factor);
         return { text: 'Cut ' + DOW_FULL[day.date.getDay()] + ' from ' + toUnit(day.miles) + ' to about ' + toUnit(newMiles) + ' ' + unitLabel() + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
+      }
+      if (action.type === 'substitute_side_quest') {
+        var quest = SIDE_QUESTS.filter(function (q) { return q.id === action.sideQuestId; })[0];
+        if (!quest || quest.replaces.indexOf(day.type) === -1) {
+          return { text: "That option doesn't fit today's workout — tap Not feeling this run? on the day itself to see real options.", confirmable: false };
+        }
+        if (quest.name === day.effectiveLabel) {
+          return { text: DOW_FULL[day.date.getDay()] + ' is already ' + escapeHtml(quest.name) + ' — nothing to change there.', confirmable: false };
+        }
+        return { text: 'Swap ' + DOW_FULL[day.date.getDay()] + ' (' + escapeHtml(day.effectiveLabel) + ') for ' + escapeHtml(quest.name) + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
       }
       return null;
     }
@@ -1994,6 +2013,7 @@
         else if (turn.action.type === 'substitute_workout') ok = applySubstitute(turn.action.key, turn.action.newType);
         else if (turn.action.type === 'log_unplanned_activity') applyLogUnplanned(turn.action.key, turn.action.note);
         else if (turn.action.type === 'reduce_intensity') ok = applyReduceIntensity(turn.action.key, turn.action.factor);
+        else if (turn.action.type === 'substitute_side_quest') ok = applySideQuestChat(turn.action.key, turn.action.sideQuestId);
         turn.resolved = ok ? 'confirmed' : 'failed';
         renderCoachChat();
       });
@@ -2042,6 +2062,7 @@
             if (paceRange) p.easyPaceRangeSecPerMi = [paceRange.loSecPerMi, paceRange.hiSecPerMi];
             return p;
           })(),
+          sideQuests: SIDE_QUESTS,
           history: history
         })
       }).then(function (res) {
