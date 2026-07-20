@@ -101,6 +101,19 @@ body {
   margin-top: 4px;
 }
 .ob-cancel:hover { color: var(--text-dim); }
+.ob-btn:disabled { opacity: 0.4; cursor: default; }
+
+.quest-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: var(--surface);
+}
+.quest-name { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.quest-desc { font-size: 13.5px; color: var(--text-dim); margin-bottom: 8px; }
+.quest-meta { font-size: 12px; color: var(--text-faint); letter-spacing: 0.02em; margin-bottom: 4px; }
+.quest-replaces { font-size: 12px; color: var(--text-faint); font-style: italic; margin-bottom: 10px; }
+.quest-btn { margin-top: 0; }
 
 .intro-title {
   font-size: 32px;

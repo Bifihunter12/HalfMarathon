@@ -217,6 +217,67 @@
     }
   };
 
+  // ── Side Quests (docs/Runner_SideQuest_Spec.md) ─────────────────────────
+  // Deterministic substitution catalog for "Not feeling this run?" -- the
+  // filter picks from this fixed list by reason + day type; nothing here is
+  // AI-generated or AI-invented, matching the spec's "deterministic rules
+  // first" principle.
+  var SIDE_QUEST_REASONS = ['mental_boredom', 'physical_fatigue', 'short_on_time', 'want_hike', 'want_strength', 'pain', 'want_different'];
+  var SIDE_QUEST_REASON_LABEL = {
+    mental_boredom: "I'm mentally tired of running", physical_fatigue: 'My legs feel physically tired',
+    short_on_time: "I'm short on time", want_hike: 'I want to hike instead', want_strength: 'I want to strength train',
+    pain: 'I have pain or discomfort', want_different: 'I just want something different'
+  };
+  // trainingLoad is a rough 1-5 scale (spec §15); replaces lists which day
+  // types this quest may stand in for -- kept intentionally trimmed vs. the
+  // spec's full schema (no equipment/muscle_groups/progression yet -- that's
+  // Phase 2 territory once quest tracks exist).
+  var SIDE_QUESTS = [
+    { id: 'hike_60', name: '60-Minute Hike', category: 'hike', description: 'An easy-paced hike, roughly an hour.', estimatedMinutes: 60, trainingLoad: 3, rewardPoints: 120, replaces: ['easy', 'cross'] },
+    { id: 'hike_90', name: '90-Minute Hike', category: 'hike', description: 'A longer hike on easier terrain than a run.', estimatedMinutes: 90, trainingLoad: 4, rewardPoints: 160, replaces: ['easy', 'cross'] },
+    { id: 'incline_walk', name: '35-Minute Incline Walk', category: 'hike', description: 'A brisk walk on an incline or treadmill grade -- low-impact aerobic work.', estimatedMinutes: 35, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
+    { id: 'upper_body_builder', name: 'Upper Body Builder', category: 'strength', description: 'A full upper-body strength session -- push, pull, and core.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
+    { id: 'core_10', name: 'Core 10', category: 'core', description: '10 minutes of focused core work.', estimatedMinutes: 10, trainingLoad: 1, rewardPoints: 50, replaces: ['easy', 'cross'] },
+    { id: 'core_20', name: 'Core 20', category: 'core', description: '20 minutes of focused core work.', estimatedMinutes: 20, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
+    { id: 'kb_swing_100', name: 'Kettlebell 100', category: 'strength', description: 'Complete 100 controlled kettlebell swings.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
+    { id: 'pushup_ladder', name: 'Push-Up Ladder', category: 'strength', description: 'A push-up ladder set -- build to your max in rungs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
+    { id: 'squat_century', name: 'Squat Century', category: 'strength', description: '100 bodyweight squats, broken into manageable sets.', estimatedMinutes: 20, trainingLoad: 3, rewardPoints: 100, replaces: ['cross'] },
+    { id: 'row_5k', name: '5K Row', category: 'cross', description: 'Row 5,000 meters at a steady effort.', estimatedMinutes: 25, trainingLoad: 3, rewardPoints: 110, replaces: ['easy', 'cross'] },
+    { id: 'easy_cycle', name: 'Easy 30-Minute Cycle', category: 'cross', description: 'A relaxed, conversational-pace bike ride.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 80, replaces: ['easy', 'cross'] },
+    { id: 'mobility_reset', name: 'Mobility Reset', category: 'mobility', description: '15 minutes of hips, ankles, and thoracic mobility work.', estimatedMinutes: 15, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
+    { id: 'farmer_carry', name: 'Farmer Carry Challenge', category: 'strength', description: 'Loaded carries for distance or time -- grip, core, and legs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
+    { id: 'stair_climb', name: 'Stair Climb', category: 'cross', description: 'Repeated stair or step climbing at a steady effort.', estimatedMinutes: 20, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
+    { id: 'new_route_run', name: 'New-Route Run', category: 'run', description: "Keep the run, but explore a route you haven't tried before.", estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 70, replaces: ['easy'] }
+  ];
+  var SIDE_QUEST_LOAD_LABEL = { 1: 'Very light', 2: 'Light', 3: 'Moderate', 4: 'Moderate-hard', 5: 'Hard' };
+
+  // Reason -> filter. Never returns an unsafe pairing (e.g. hard strength
+  // when physically fatigued) -- these guardrails are the point, not the
+  // catalog itself.
+  function questsForReason(reason, dayType) {
+    var pool = SIDE_QUESTS.filter(function (q) { return q.replaces.indexOf(dayType) !== -1; });
+    if (reason === 'physical_fatigue') {
+      pool = pool.filter(function (q) { return q.trainingLoad <= 2 && q.category !== 'strength'; });
+    } else if (reason === 'short_on_time') {
+      pool = pool.filter(function (q) { return q.estimatedMinutes <= 20; });
+    } else if (reason === 'want_hike') {
+      pool = pool.filter(function (q) { return q.category === 'hike'; });
+    } else if (reason === 'want_strength') {
+      pool = pool.filter(function (q) { return q.category === 'strength'; });
+    } else {
+      // mental_boredom / want_different -- a broad variety mix, deliberately
+      // excluding the "run" category since the point is a break from running.
+      pool = pool.filter(function (q) { return q.category !== 'run'; });
+    }
+    return pool.slice(0, 4);
+  }
+
+  function applySideQuest(key, quest, baseLabel) {
+    if (quest.name === baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
+    state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
+    saveState(state);
+  }
+
   var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
   // Never diagnoses -- only routes toward "keep going / back off / get it checked."
   function painGuidance(severity, worsens, canWalk) {
@@ -314,6 +375,7 @@
     if (!s.overrides) s.overrides = {};
     if (!s.crossType) s.crossType = {};
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
+    if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
@@ -477,6 +539,11 @@
       unavailableMap[r.start + '|' + r.end + '|' + r.reason] = r;
     });
 
+    var sideQuestMap = {};
+    (remote.sideQuestLog || []).concat(local.sideQuestLog || []).forEach(function (r) {
+      sideQuestMap[r.date + '|' + r.key + '|' + r.id] = r;
+    });
+
     return {
       userName: prefer.userName,
       units: prefer.units,
@@ -488,6 +555,7 @@
       overrides: mergeMap(local.overrides, remote.overrides),
       crossType: mergeMap(local.crossType, remote.crossType),
       unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
+      sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };
   }
@@ -2136,12 +2204,18 @@
         '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
         detailHtml +
         (detail ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiWhyBtn">Ask AI: why this workout?</button><div class="ai-why-result" id="aiWhyResult" style="display:none"></div></div>' : '') +
+        ((dayData.type === 'easy' || dayData.type === 'cross') ? '<div class="pain-toggle" id="switchItUpBtn">Not feeling this run?</div>' : '') +
         logHtml +
         (loggable ? '<button class="ob-btn" id="wdSaveBtn">Save</button>' : '') +
         '<div class="ob-cancel" id="wdBackBtn">Back to plan</div>' +
       '</div>'
     );
     app.appendChild(wrap);
+
+    var switchItUpBtn = document.getElementById('switchItUpBtn');
+    if (switchItUpBtn) {
+      switchItUpBtn.addEventListener('click', function () { renderSwitchItUp(weekNum, dayIdx); });
+    }
 
     if (detail) {
       var aiWhyBtn = document.getElementById('aiWhyBtn');
@@ -2324,6 +2398,100 @@
       });
     }
     document.getElementById('wdBackBtn').addEventListener('click', renderMain);
+  }
+
+  // ── Side Quests: "Not feeling this run?" flow (docs/Runner_SideQuest_Spec.md) ──
+  // Fully deterministic -- no AI call. Ask why, filter the fixed catalog by
+  // reason + day type, offer real substitutions, apply one if chosen.
+  function renderSwitchItUp(weekNum, dayIdx) {
+    var app = document.getElementById('app');
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var raceDate = parseDate(state.raceGoal.raceDate);
+    var planLengthWeeks = state.planMeta.planLengthWeeks;
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var dayData = result.weeks[weekNum - 1].days[dayIdx];
+    var key = weekNum + '-' + dayIdx;
+    var baseLabel = state.overrides[key] || dayData.label;
+    var selectedReason = null;
+    var showingOptions = false;
+
+    function render() {
+      app.innerHTML = '';
+      app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
+      wireHeaderIcons();
+
+      var body;
+      if (!showingOptions) {
+        body =
+          '<div class="ob-title">Not feeling this run?</div>' +
+          '<div class="ob-sub">Why do you want to change today&rsquo;s workout?</div>' +
+          '<div class="chip-grid">' + chipsHtml('switchReason', SIDE_QUEST_REASONS, SIDE_QUEST_REASON_LABEL, selectedReason, false) + '</div>' +
+          '<button class="ob-btn" id="seeOptionsBtn"' + (selectedReason ? '' : ' disabled') + '>See options</button>' +
+          '<div class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</div>';
+      } else if (selectedReason === 'pain') {
+        body =
+          '<div class="ob-title">Let&rsquo;s log that properly</div>' +
+          '<div class="ob-sub">Pain and discomfort get a real pain report, not a side quest swap.</div>' +
+          '<button class="ob-btn" id="goToPainBtn">Report pain or discomfort</button>' +
+          '<div class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</div>';
+      } else {
+        var quests = questsForReason(selectedReason, dayData.type);
+        body =
+          '<div class="ob-title">Choose today&rsquo;s side quest</div>' +
+          '<div class="ob-sub">Still training for your race &mdash; just a different way today.</div>' +
+          (quests.length ? quests.map(function (q, i) {
+            return '<div class="quest-card">' +
+              '<div class="quest-name">' + escapeHtml(q.name) + '</div>' +
+              '<div class="quest-desc">' + escapeHtml(q.description) + '</div>' +
+              '<div class="quest-meta">' + q.estimatedMinutes + ' min &middot; ' + (SIDE_QUEST_LOAD_LABEL[q.trainingLoad] || '') + ' effort &middot; ' + q.rewardPoints + ' pts</div>' +
+              '<div class="quest-replaces">Replaces: today&rsquo;s ' + escapeHtml(baseLabel) + '</div>' +
+              '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-quest-idx="' + i + '">Replace today&rsquo;s workout</button>' +
+            '</div>';
+          }).join('') : '<p class="recap-empty">No good options for that reason right now &mdash; keeping today as scheduled is the safest call.</p>') +
+          '<div class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</div>';
+      }
+
+      var wrap = el('<div class="ob">' + body + '</div>');
+      app.appendChild(wrap);
+
+      var backBtn = document.getElementById('switchBackBtn');
+      if (backBtn) backBtn.addEventListener('click', function () { renderWorkoutDetail(weekNum, dayIdx); });
+
+      if (!showingOptions) {
+        wrap.querySelectorAll('.chip[data-group="switchReason"]').forEach(function (chip) {
+          chip.addEventListener('click', function () {
+            selectedReason = chip.getAttribute('data-value');
+            render();
+          });
+        });
+        var seeOptionsBtn = document.getElementById('seeOptionsBtn');
+        if (seeOptionsBtn) seeOptionsBtn.addEventListener('click', function () {
+          if (!selectedReason) return;
+          showingOptions = true;
+          render();
+        });
+      } else if (selectedReason === 'pain') {
+        document.getElementById('goToPainBtn').addEventListener('click', function () {
+          renderWorkoutDetail(weekNum, dayIdx);
+          var toggle = document.getElementById('painToggle');
+          var form = document.getElementById('painForm');
+          if (toggle && form) { form.style.display = 'block'; toggle.textContent = 'Update pain report'; }
+          showToast("Let's log that as pain instead.");
+        });
+      } else {
+        var quests2 = questsForReason(selectedReason, dayData.type);
+        wrap.querySelectorAll('.quest-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var quest = quests2[parseInt(btn.getAttribute('data-quest-idx'), 10)];
+            applySideQuest(key, quest, baseLabel);
+            renderMain();
+            showToast('Swapped in: ' + quest.name + '.');
+          });
+        });
+      }
+    }
+
+    render();
   }
 
   function renderSettings() {
@@ -2617,6 +2785,7 @@
         '<dt>Distance so far</dt><dd>' + toUnit(round1(totalDistance)) + ' ' + unitLabel() + '</dd>' +
         '<dt>Longest run</dt><dd>' + (longestRun ? toUnit(longestRun) + ' ' + unitLabel() : '&mdash;') + '</dd>' +
         '<dt>Sessions completed</dt><dd>' + completedCount + ' of ' + scheduledSoFar + ' scheduled so far</dd>' +
+        '<dt>Side quests completed</dt><dd>' + state.sideQuestLog.length + '</dd>' +
       '</dl>';
 
     var lastWeekHtml = '<p class="recap-empty">No completed week yet.</p>';
