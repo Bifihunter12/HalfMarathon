@@ -277,6 +277,81 @@
     state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
     saveState(state);
   }
+  // Not tied to a specific calendar day -- for the Quests tab's "Go explore"
+  // and "Quick wins" one-tap logging, as opposed to applySideQuest above
+  // which replaces one specific scheduled workout.
+  function logQuickWinQuest(quest) {
+    state.sideQuestLog.push({ id: quest.id, key: null, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
+    saveState(state);
+    showToast('Logged: ' + quest.name + '.');
+  }
+
+  // ── Quest Tracks (docs/Runner_Quests_Tab_Spec.md) ───────────────────────
+  // Multiweek strength programs, separate from the single-session
+  // SIDE_QUESTS catalog above. Core idea: "every body can strength train,
+  // every exercise can be scaled" -- movements with a real beginner/
+  // standard/advanced version are named once here and reused across tracks,
+  // never duplicated per track.
+  var MOVEMENT_VARIANTS = {
+    squat: { beginner: 'Chair squat', standard: 'Bodyweight squat', advanced: 'Goblet squat' },
+    push: { beginner: 'Wall push-up', standard: 'Incline push-up', advanced: 'Floor push-up' },
+    pull: { beginner: 'Band row', standard: 'Dumbbell row', advanced: 'Renegade row' },
+    hinge: { beginner: 'Supported hip hinge', standard: 'Dumbbell deadlift', advanced: 'Kettlebell swing' },
+    core: { beginner: 'Dead bug', standard: 'Side plank', advanced: 'Loaded carry' },
+    lunge: { beginner: 'Supported split squat', standard: 'Reverse lunge', advanced: 'Weighted lunge' }
+  };
+  var DIFFICULTY_LEVELS = ['beginner', 'standard', 'advanced'];
+  var DIFFICULTY_LABEL = { beginner: 'Beginner', standard: 'Standard', advanced: 'Advanced' };
+
+  var QUEST_TRACKS = [
+    {
+      id: 'strong_start', name: 'Strong Start', hasDifficulty: false, weeks: 4, sessionsPerWeek: 2, sessionMinutes: 20,
+      equipment: 'None required', runningInterference: 'Low', beginnerFriendly: true,
+      description: 'A gentle intro to strength training -- no experience needed.',
+      exercises: [{ fixed: 'Chair Squat' }, { fixed: 'Wall Push-Up' }, { fixed: 'Band or Dumbbell Row' }, { fixed: 'Glute Bridge' }, { fixed: 'Dead Bug' }, { fixed: 'Farmer Carry' }]
+    },
+    {
+      id: 'upper_body_builder_track', name: 'Upper Body Builder', hasDifficulty: true, weeks: 4, sessionsPerWeek: 2, sessionMinutes: 28,
+      equipment: 'Optional dumbbells or bands', runningInterference: 'Low', beginnerFriendly: true,
+      description: 'Build stronger shoulders, arms, chest, and back without exhausting your running legs.',
+      exercises: [{ movement: 'push' }, { movement: 'pull' }, { fixed: 'Overhead Press' }, { fixed: 'Lat Pull or Pullover' }, { fixed: 'Biceps & Triceps Finisher' }, { fixed: 'Carry' }, { movement: 'core' }]
+    },
+    {
+      id: 'strong_runner_track', name: 'Strong Runner', hasDifficulty: true, weeks: 4, sessionsPerWeek: 2, sessionMinutes: 25,
+      equipment: 'Optional dumbbells', runningInterference: 'Low', beginnerFriendly: true,
+      description: 'The default strength track for runners -- durability without exhaustion.',
+      exercises: [{ movement: 'squat' }, { movement: 'hinge' }, { fixed: 'Step-Up' }, { fixed: 'Calf Raise' }, { movement: 'pull' }, { movement: 'push' }, { fixed: 'Carry' }, { movement: 'core', label: 'Anti-rotation core' }]
+    }
+  ];
+
+  function resolveExercise(ex, difficulty) {
+    if (ex.fixed) return ex.fixed;
+    return ex.label ? ex.label + ' (' + MOVEMENT_VARIANTS[ex.movement][difficulty || 'standard'] + ')' : MOVEMENT_VARIANTS[ex.movement][difficulty || 'standard'];
+  }
+  function questTrackById(id) { return QUEST_TRACKS.filter(function (t) { return t.id === id; })[0] || null; }
+  function questTrackTotalSessions(track) { return track.weeks * track.sessionsPerWeek; }
+
+  function startQuestTrack(trackId, difficulty) {
+    state.activeQuestTrack = { trackId: trackId, difficulty: difficulty || 'standard', startedDate: dateToISO(new Date()), completedSessions: 0 };
+    saveState(state);
+  }
+  function stopQuestTrack() {
+    state.activeQuestTrack = null;
+    saveState(state);
+  }
+  // Reuses the same sideQuestLog ledger the single-session quests use, so
+  // the Progress panel's existing "Side quests completed" count picks up
+  // quest-track sessions automatically -- no separate ledger to keep in sync.
+  function completeQuestTrackSession() {
+    var active = state.activeQuestTrack;
+    var track = active && questTrackById(active.trackId);
+    if (!track) return;
+    var total = questTrackTotalSessions(track);
+    if (active.completedSessions >= total) return;
+    active.completedSessions++;
+    state.sideQuestLog.push({ id: track.id + '-session-' + active.completedSessions, key: null, date: dateToISO(new Date()), category: 'strength', rewardPoints: 40 });
+    saveState(state);
+  }
 
   var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
   // Never diagnoses -- only routes toward "keep going / back off / get it checked."
@@ -435,6 +510,7 @@
     if (!s.crossType) s.crossType = {};
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
+    if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
@@ -607,6 +683,7 @@
       userName: prefer.userName,
       units: prefer.units,
       notifications: prefer.notifications || { enabled: false },
+      activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
       raceGoal: prefer.raceGoal,
       profile: prefer.profile,
       planMeta: prefer.planMeta,
@@ -1639,6 +1716,7 @@
     return (
       '<div class="hd-actions">' +
         '<i class="' + cls('progressBtn') + ' ti-chart-line" id="progressBtn" title="Progress"></i>' +
+        '<i class="' + cls('questsBtn') + ' ti-trophy" id="questsBtn" title="Quests"></i>' +
         '<i class="' + cls('glossaryBtn') + ' ti-book-2" id="glossaryBtn" title="What this all means"></i>' +
         '<i class="' + cls('safetyBtn') + ' ti-shield-check" id="safetyBtn" title="Safety info"></i>' +
         '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
@@ -1662,6 +1740,7 @@
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
     document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
     document.getElementById('progressBtn').addEventListener('click', renderProgressPanel);
+    document.getElementById('questsBtn').addEventListener('click', renderQuestsHome);
     var installBtn = document.getElementById('installBtn');
     if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
     installBtn.addEventListener('click', function () {
@@ -1672,6 +1751,139 @@
         installBtn.style.display = 'none';
       });
     });
+  }
+
+  // ── Quests home (docs/Runner_Quests_Tab_Spec.md) ──────────────────────
+  function renderQuestsHome() {
+    var app = document.getElementById('app');
+    var expandedTrackId = null;
+    var chosenDifficulty = 'standard';
+
+    function render() {
+      app.innerHTML = '';
+      app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
+      wireHeaderIcons();
+
+      var active = state.activeQuestTrack;
+      var activeTrack = active ? questTrackById(active.trackId) : null;
+      var activeHtml;
+      if (active && activeTrack) {
+        var total = questTrackTotalSessions(activeTrack);
+        var weekNum = Math.min(activeTrack.weeks, Math.floor(active.completedSessions / activeTrack.sessionsPerWeek) + 1);
+        var done = active.completedSessions >= total;
+        var exercisesHtml = '<ul class="recap-list">' + activeTrack.exercises.map(function (ex) {
+          return '<li>' + escapeHtml(resolveExercise(ex, active.difficulty)) + '</li>';
+        }).join('') + '</ul>';
+        activeHtml =
+          '<div class="quest-card">' +
+            '<div class="quest-name">' + escapeHtml(activeTrack.name) + (activeTrack.hasDifficulty ? ' &middot; ' + DIFFICULTY_LABEL[active.difficulty] : '') + '</div>' +
+            '<div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.weeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' sessions completed</div>' +
+            '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="questProgressFill"></div></div>' +
+            (done ? '<p class="recap-empty">Quest complete -- nice work. Start another below whenever you\'re ready.</p>' : exercisesHtml) +
+            (done ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeSessionBtn">Mark session complete</button>') +
+            '<div class="ob-cancel" id="stopQuestBtn">Stop this quest</div>' +
+          '</div>';
+      } else {
+        activeHtml = '<p class="recap-empty">No active quest yet -- pick one below to get started.</p>';
+      }
+
+      var strengthHtml = QUEST_TRACKS.map(function (track) {
+        var isExpanded = expandedTrackId === track.id;
+        return '<div class="quest-card">' +
+          '<div class="quest-name">' + escapeHtml(track.name) + '</div>' +
+          '<div class="quest-desc">' + escapeHtml(track.description) + '</div>' +
+          '<div class="quest-meta">' + track.weeks + ' weeks &middot; ' + track.sessionsPerWeek + 'x/week &middot; ' + track.sessionMinutes + ' min &middot; ' + escapeHtml(track.equipment) + '</div>' +
+          (isExpanded && track.hasDifficulty ?
+            '<div class="chip-grid" id="difficultyChips" style="margin:8px 0">' + chipsHtml('trackDifficulty', DIFFICULTY_LEVELS, DIFFICULTY_LABEL, chosenDifficulty, false) + '</div>' +
+            '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-begin-track="' + track.id + '">Begin</button>'
+          : '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-track-id="' + track.id + '">Start quest</button>') +
+        '</div>';
+      }).join('');
+
+      function questListHtml(quests) {
+        return quests.map(function (q) {
+          return '<div class="quest-card">' +
+            '<div class="quest-name">' + escapeHtml(q.name) + '</div>' +
+            '<div class="quest-desc">' + escapeHtml(q.description) + '</div>' +
+            '<div class="quest-meta">' + q.estimatedMinutes + ' min &middot; ' + (SIDE_QUEST_LOAD_LABEL[q.trainingLoad] || '') + ' effort</div>' +
+            '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-log-quest="' + q.id + '">Log it</button>' +
+          '</div>';
+        }).join('');
+      }
+      var exploreQuests = SIDE_QUESTS.filter(function (q) { return q.category === 'hike'; });
+      var quickWinQuests = SIDE_QUESTS.filter(function (q) { return q.category !== 'hike' && q.category !== 'run'; });
+
+      var wrap = el(
+        '<div class="ob">' +
+          '<div class="ob-title">Quests</div>' +
+          '<div class="ob-sub">Active quest</div>' +
+          activeHtml +
+          '<div class="ob-sub" style="margin-top:20px">Build strength</div>' +
+          strengthHtml +
+          '<div class="ob-sub" style="margin-top:20px">Go explore</div>' +
+          questListHtml(exploreQuests) +
+          '<div class="ob-sub" style="margin-top:20px">Quick wins</div>' +
+          questListHtml(quickWinQuests) +
+          '<div class="ob-sub" style="margin-top:20px">Completed</div>' +
+          '<p class="recap-empty">' + state.sideQuestLog.length + ' quests logged so far.</p>' +
+          '<div class="ob-cancel" id="questsBackBtn">Back to plan</div>' +
+        '</div>'
+      );
+      app.appendChild(wrap);
+
+      if (active && activeTrack) {
+        var fillEl = document.getElementById('questProgressFill');
+        if (fillEl) {
+          var total2 = questTrackTotalSessions(activeTrack);
+          fillEl.style.width = (total2 ? 100 * active.completedSessions / total2 : 0) + '%';
+        }
+        var completeBtn = document.getElementById('completeSessionBtn');
+        if (completeBtn) completeBtn.addEventListener('click', function () { completeQuestTrackSession(); render(); });
+        document.getElementById('stopQuestBtn').addEventListener('click', function () { stopQuestTrack(); render(); });
+      }
+
+      wrap.querySelectorAll('[data-track-id]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var id = btn.getAttribute('data-track-id');
+          var track = questTrackById(id);
+          if (track.hasDifficulty) {
+            expandedTrackId = id;
+            chosenDifficulty = 'standard';
+            render();
+          } else {
+            startQuestTrack(id, null);
+            render();
+          }
+        });
+      });
+      wrap.querySelectorAll('[data-begin-track]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          startQuestTrack(btn.getAttribute('data-begin-track'), chosenDifficulty);
+          expandedTrackId = null;
+          render();
+        });
+      });
+      var difficultyChips = document.getElementById('difficultyChips');
+      if (difficultyChips) {
+        difficultyChips.querySelectorAll('.chip').forEach(function (chip) {
+          chip.addEventListener('click', function () {
+            chosenDifficulty = chip.getAttribute('data-value');
+            render();
+          });
+        });
+      }
+
+      wrap.querySelectorAll('[data-log-quest]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var quest = SIDE_QUESTS.filter(function (q) { return q.id === btn.getAttribute('data-log-quest'); })[0];
+          if (quest) { logQuickWinQuest(quest); render(); }
+        });
+      });
+
+      document.getElementById('questsBackBtn').addEventListener('click', renderMain);
+    }
+
+    render();
   }
 
   function renderMain() {
