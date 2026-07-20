@@ -141,6 +141,20 @@ test('an action referencing a day key not in the provided list is rejected', asy
   assert.equal(result.body.action, null);
 });
 
+test('a well-formed qualityPaceZonesSecPerMi is accepted without error', async function () {
+  mockOpenAI({ message: 'ok', riskLevel: 'green', decision: 'keep_plan', avoidToday: [], redFlags: [], action: null });
+  var result = await callHandler({ plan: { qualityPaceZonesSecPerMi: { '10k': [420, 436], threshold: [430, 446] } } });
+  assert.equal(result.status, 200);
+});
+
+test('a malformed qualityPaceZonesSecPerMi (wrong shape) is ignored, not a crash', async function () {
+  mockOpenAI({ message: 'ok', riskLevel: 'green', decision: 'keep_plan', avoidToday: [], redFlags: [], action: null });
+  var result1 = await callHandler({ plan: { qualityPaceZonesSecPerMi: 'not an object' } });
+  assert.equal(result1.status, 200);
+  var result2 = await callHandler({ plan: { qualityPaceZonesSecPerMi: { '10k': ['not', 'numbers'], madeUpZone: [1, 2] } } });
+  assert.equal(result2.status, 200);
+});
+
 test('malformed JSON from the model returns a 502, not a crash', async function () {
   mockOpenAI(null, { rawOverride: 'this is not json' });
   var result = await callHandler();

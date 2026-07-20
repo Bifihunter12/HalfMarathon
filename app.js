@@ -339,22 +339,81 @@
     if (s === 60) { m++; s = 0; }
     return m + ':' + String(s).padStart(2, '0');
   }
-  // Projects the runner's real result onto an equivalent 5K effort via
-  // Riegel's race-time-prediction formula (T2 = T1 * (D2/D1)^1.06 -- a
-  // standard, openly-published exercise-science formula, not any specific
-  // coach's proprietary calculator), then applies a conservative, widely
-  // used rule of thumb that easy/long-run pace runs well behind current
-  // 5K race pace. Returns per-mile seconds regardless of display unit --
-  // convert at render time the same way distances do.
-  function computeEasyPaceRange(profile) {
+  // Projects the runner's real result onto an equivalent time at any other
+  // distance via Riegel's race-time-prediction formula (T2 = T1*(D2/D1)^1.06
+  // -- a standard, openly-published exercise-science formula, not any
+  // specific coach's proprietary calculator). Returns per-mile seconds at
+  // `targetMiles`, or null if no valid recent race result exists.
+  function computeEquivalentPaceSecPerMi(profile, targetMiles) {
     if (!profile || !profile.recentRaceDistance || !profile.recentRaceTime) return null;
     var fromMiles = RACE_DISTANCE_MILES[profile.recentRaceDistance];
     var raceMins = parseRaceTimeToMinutes(profile.recentRaceTime);
     if (!fromMiles || !raceMins) return null;
-    var fiveKMiles = RACE_DISTANCE_MILES['5k'];
-    var equivalent5kMins = raceMins * Math.pow(fiveKMiles / fromMiles, 1.06);
-    var refSecPerMi = (equivalent5kMins * 60) / fiveKMiles;
+    var projectedMins = raceMins * Math.pow(targetMiles / fromMiles, 1.06);
+    return (projectedMins * 60) / targetMiles;
+  }
+  // Easy/long-run pace: a conservative, widely used rule of thumb that this
+  // effort runs well behind current 5K race pace. Returns per-mile seconds
+  // regardless of display unit -- convert at render time the same way
+  // distances do.
+  function computeEasyPaceRange(profile) {
+    var refSecPerMi = computeEquivalentPaceSecPerMi(profile, RACE_DISTANCE_MILES['5k']);
+    if (!refSecPerMi) return null;
     return { loSecPerMi: Math.round(refSecPerMi + 90), hiSecPerMi: Math.round(refSecPerMi + 135) };
+  }
+
+  // Quality/interval pace zones -- matched by the same kind of label
+  // substring the calendar already uses (see CALENDAR_HINTS/calendarHint).
+  // Deliberately excludes effort-based work (Fartlek, hill repeats) since
+  // those are "by feel," never a pace target, per GLOSSARY_WORKOUTS/roadmap
+  // §10. "threshold" has no single real race distance behind it, so it's
+  // approximated as the midpoint between equivalent 10K and half-marathon
+  // pace -- a common, generic coaching rule of thumb, not a precise value;
+  // still surfaced only as a range, same as everywhere else pace shows up.
+  var QUALITY_PACE_ZONE_MATCHERS = [
+    ['@ 5K pace', '5k'], ['@ 5K effort', '5k'],
+    ['@ 10K pace', '10k'], ['@ 10K effort', '10k'],
+    ['@ half-marathon pace', 'half'],
+    ['@ marathon pace', 'marathon'],
+    ['threshold', 'threshold'], ['Tempo', 'threshold']
+  ];
+  var QUALITY_PACE_ZONE_LABEL = { '5k': '5K', '10k': '10K', half: 'half-marathon', marathon: 'marathon', threshold: 'threshold' };
+
+  function paceZoneForLabel(label) {
+    for (var i = 0; i < QUALITY_PACE_ZONE_MATCHERS.length; i++) {
+      if (label.indexOf(QUALITY_PACE_ZONE_MATCHERS[i][0]) !== -1) return QUALITY_PACE_ZONE_MATCHERS[i][1];
+    }
+    return null;
+  }
+  function computeZonePaceSecPerMi(profile, zone) {
+    if (zone === 'threshold') {
+      var tenK = computeEquivalentPaceSecPerMi(profile, RACE_DISTANCE_MILES['10k']);
+      var half = computeEquivalentPaceSecPerMi(profile, RACE_DISTANCE_MILES.half);
+      if (!tenK || !half) return null;
+      return (tenK + half) / 2;
+    }
+    if (!RACE_DISTANCE_MILES[zone]) return null;
+    return computeEquivalentPaceSecPerMi(profile, RACE_DISTANCE_MILES[zone]);
+  }
+  // A narrower band than easy/long's -- these are already a specific goal
+  // pace named in the label itself, not a broad effort zone -- but still a
+  // range, never one falsely-precise number.
+  function computeQualityPaceRange(profile, label) {
+    var zone = paceZoneForLabel(label);
+    if (!zone) return null;
+    var refSecPerMi = computeZonePaceSecPerMi(profile, zone);
+    if (!refSecPerMi) return null;
+    return { zone: zone, loSecPerMi: Math.round(refSecPerMi - 8), hiSecPerMi: Math.round(refSecPerMi + 8) };
+  }
+  // All named zones at once, for contexts (the AI coach) that need to match
+  // a zone against whichever day's label comes up, not just one known day.
+  function computeAllQualityPaceZones(profile) {
+    var out = {};
+    ['5k', '10k', 'half', 'marathon', 'threshold'].forEach(function (zone) {
+      var ref = computeZonePaceSecPerMi(profile, zone);
+      if (ref) out[zone] = [Math.round(ref - 8), Math.round(ref + 8)];
+    });
+    return Object.keys(out).length ? out : null;
   }
 
   // ── State ──────────────────────────────────────────────────────────────
@@ -2060,6 +2119,12 @@
             // a pace, and to stay RPE-only when it's absent (roadmap §10).
             var paceRange = computeEasyPaceRange(state.profile);
             if (paceRange) p.easyPaceRangeSecPerMi = [paceRange.loSecPerMi, paceRange.hiSecPerMi];
+            // All named quality/interval pace zones at once (5K/10K/half/
+            // marathon/threshold) -- the model matches a zone against
+            // whichever day's own label it's discussing, it never picks one
+            // itself, so this isn't tied to any single day in the payload.
+            var qualityZones = computeAllQualityPaceZones(state.profile);
+            if (qualityZones) p.qualityPaceZonesSecPerMi = qualityZones;
             return p;
           })(),
           sideQuests: SIDE_QUESTS,
@@ -2163,9 +2228,9 @@
     var detail = WORKOUT_DETAIL[dayData.type] || null;
     var entry = getLog(key) || {};
 
-    // Only shown for easy/long days, and only when the runner actually supplied
-    // a recent race result -- otherwise this stays RPE/talk-test-only like
-    // every other workout type, per the roadmap's "avoid false precision" rule.
+    // Only shown when the runner actually supplied a recent race result --
+    // otherwise this stays RPE/talk-test-only like every other workout type,
+    // per the roadmap's "avoid false precision" rule.
     var paceRow = '';
     if (dayData.type === 'easy' || dayData.type === 'long') {
       var paceRange = computeEasyPaceRange(state.profile);
@@ -2174,6 +2239,18 @@
         var hiDisplay = state.units === 'km' ? paceRange.hiSecPerMi / KM_PER_MI : paceRange.hiSecPerMi;
         paceRow = '<dt>Estimated pace</dt><dd>' + formatPace(loDisplay) + '&ndash;' + formatPace(hiDisplay) + ' /' + unitLabel() +
           ' &mdash; a range from your recent ' + RACE_RESULT_LABEL[state.profile.recentRaceDistance] + ' time, not a target. Go by feel first.</dd>';
+      }
+    } else if (dayData.type === 'quality') {
+      // Only for labels that actually name a pace zone (e.g. "@ 10K pace",
+      // "Tempo: ... @ threshold") -- effort-based work like Fartlek or hill
+      // repeats never gets a pace quoted, matching GLOSSARY_WORKOUTS' own
+      // description of those as "by feel," not a pace target.
+      var qualityRange = computeQualityPaceRange(state.profile, label);
+      if (qualityRange) {
+        var qLoDisplay = state.units === 'km' ? qualityRange.loSecPerMi / KM_PER_MI : qualityRange.loSecPerMi;
+        var qHiDisplay = state.units === 'km' ? qualityRange.hiSecPerMi / KM_PER_MI : qualityRange.hiSecPerMi;
+        paceRow = '<dt>Estimated pace</dt><dd>' + formatPace(qLoDisplay) + '&ndash;' + formatPace(qHiDisplay) + ' /' + unitLabel() +
+          ' &mdash; estimated ' + QUALITY_PACE_ZONE_LABEL[qualityRange.zone] + ' pace from your recent ' + RACE_RESULT_LABEL[state.profile.recentRaceDistance] + ' time, not a target. Go by feel first.</dd>';
       }
     }
 

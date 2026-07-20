@@ -43,7 +43,7 @@ var SYSTEM_PROMPT = [
   'TAPER: reduce volume, keep a little short intensity, never add missed mileage, never add heavy strength, never "test fitness" for reassurance. Restlessness during taper is normal -- normalize it, offer a short easy run/strides/walk/mobility, never a hard workout.',
   'STRENGTH TRAINING: for durability, not exhaustion -- typically 2x/week base and build, 1x/week peak, very light or none race week. Avoid heavy lower-body work the day before intervals or a long run, during acute pain, or during race week.',
   'HEAT/ALTITUDE/WEATHER/TREADMILL: heat and altitude both mean effort-based pacing, not ego pace, and more recovery; bad weather or no outdoor access should move sessions to treadmill or cross-training while keeping the workout\'s purpose.',
-  'PACE GUIDANCE: only give a pace if the plan/context actually includes real pace or race-time data. If "easyPaceRangeSecPerMi" is present in the plan context, quote it only as the range it is (e.g. "somewhere around 10:15-11:45/mi") for easy or long days -- never narrow it to one falsely-precise number, never apply it to quality/interval/tempo days. If that field is absent, use RPE and the talk test instead -- easy/Zone2 is RPE 2-4 and fully conversational, steady is RPE 5, tempo/threshold is RPE 6-7 (a few words only), hard intervals are RPE 8-9. Never invent a specific pace, VO2 max number, or other personalized metric you don\'t actually have.',
+  'PACE GUIDANCE: only give a pace if the plan/context actually includes real pace or race-time data. If "easyPaceRangeSecPerMi" is present, quote it only as the range it is (e.g. "somewhere around 10:15-11:45/mi") for easy or long days -- never narrow it to one falsely-precise number. If "qualityPaceZonesSecPerMi" is present, it has one range per named zone (5k/10k/half/marathon/threshold, sec/mi) -- for a quality/interval day, match the zone to what the day\'s own label actually says (a label with "@ 10K pace" -> zone "10k", "@ threshold" or "Tempo" -> zone "threshold", etc.) and quote ONLY that zone\'s range; never invent a zone the label doesn\'t name, never quote a pace for effort-based work like Fartlek or hill repeats (those stay RPE-only, "by feel"). If neither field is present or no zone matches, use RPE and the talk test instead -- easy/Zone2 is RPE 2-4 and fully conversational, steady is RPE 5, tempo/threshold is RPE 6-7 (a few words only), hard intervals are RPE 8-9. Never invent a specific pace, VO2 max number, or other personalized metric you don\'t actually have.',
 
   'Given all of the above, decide the runner\'s "decision" for right now: "keep_plan" (no change needed), "modify_workout" (small adjustment, e.g. reduce_intensity), "replace_with_cross_training" (swap today\'s type), "rest" (mark_rest), or "seek_medical_evaluation" (red flag present).',
   'Decide whether the runner is clearly requesting or agreeing to a concrete change to ONE specific day from the provided list. If so, include an "action" matching the decision above. Otherwise action must be null.',
@@ -145,6 +145,22 @@ exports.handler = async function (event) {
   if (Array.isArray(plan.easyPaceRangeSecPerMi) && plan.easyPaceRangeSecPerMi.length === 2) {
     var lo = Number(plan.easyPaceRangeSecPerMi[0]), hi = Number(plan.easyPaceRangeSecPerMi[1]);
     if (!isNaN(lo) && !isNaN(hi)) context.easyPaceRangeSecPerMi = [Math.round(lo), Math.round(hi)];
+  }
+  // Same deal, one range per named quality/interval pace zone -- the model
+  // matches a zone to whichever day's label it's discussing (e.g. a label
+  // containing "@ 10K pace" -> zone "10k"), it never invents a zone or a
+  // number itself.
+  var VALID_PACE_ZONES = ['5k', '10k', 'half', 'marathon', 'threshold'];
+  if (plan.qualityPaceZonesSecPerMi && typeof plan.qualityPaceZonesSecPerMi === 'object') {
+    var cleanZones = {};
+    VALID_PACE_ZONES.forEach(function (zone) {
+      var range = plan.qualityPaceZonesSecPerMi[zone];
+      if (Array.isArray(range) && range.length === 2) {
+        var zLo = Number(range[0]), zHi = Number(range[1]);
+        if (!isNaN(zLo) && !isNaN(zHi)) cleanZones[zone] = [Math.round(zLo), Math.round(zHi)];
+      }
+    });
+    if (Object.keys(cleanZones).length) context.qualityPaceZonesSecPerMi = cleanZones;
   }
 
   // Prior turns give the model conversational memory -- capped and sanitized
