@@ -353,6 +353,74 @@
     saveState(state);
   }
 
+  // ── Weekly Challenges (docs/Runner_SideQuest_Spec.md §2B) ───────────────
+  // Session-COUNT targets within the current Mon-Sun week, not raw rep/
+  // distance totals (those need per-log quantity tracking sideQuestLog
+  // doesn't have yet). Progress is always computed from the existing log,
+  // never stored separately -- it can't drift out of sync.
+  var WEEKLY_CHALLENGES = [
+    { id: 'weekly_strength_3', name: '3 Strength Sessions', description: 'Complete 3 strength-category sessions this week.', target: 3, matchCategories: ['strength'] },
+    { id: 'weekly_quests_5', name: '5 Quests This Week', description: 'Complete any 5 quests this week.', target: 5, matchCategories: null },
+    { id: 'weekly_hike_2', name: '2 Hikes This Week', description: 'Log 2 hikes this week.', target: 2, matchCategories: ['hike'] },
+    { id: 'weekly_core_3', name: '3 Core/Mobility Sessions', description: 'Complete 3 core or mobility sessions this week.', target: 3, matchCategories: ['core', 'mobility'] }
+  ];
+  function weeklyChallengeById(id) { return WEEKLY_CHALLENGES.filter(function (c) { return c.id === id; })[0] || null; }
+  function weeklyChallengeProgress(challenge, weekStartIso) {
+    var weekStart = parseDate(weekStartIso);
+    var weekEnd = new Date(weekStart.getTime() + 6 * 86400000);
+    var count = state.sideQuestLog.filter(function (entry) {
+      var d = parseDate(entry.date);
+      if (d < weekStart || d > weekEnd) return false;
+      return !challenge.matchCategories || challenge.matchCategories.indexOf(entry.category) !== -1;
+    }).length;
+    return Math.min(count, challenge.target);
+  }
+  // Clears a challenge that's rolled past its own week -- no silent carry-over.
+  function expireWeeklyChallengeIfStale() {
+    var active = state.activeWeeklyChallenge;
+    if (!active) return;
+    var todayMonday = dateToISO(mondayOfWeek(new Date()));
+    if (todayMonday !== active.weekStartIso) { state.activeWeeklyChallenge = null; saveState(state); }
+  }
+  function startWeeklyChallenge(challengeId) {
+    state.activeWeeklyChallenge = { challengeId: challengeId, weekStartIso: dateToISO(mondayOfWeek(new Date())) };
+    saveState(state);
+  }
+  function dropWeeklyChallenge() {
+    state.activeWeeklyChallenge = null;
+    saveState(state);
+  }
+
+  // ── Boredom detection / Variety Week suggestion (§6/§7) ─────────────────
+  // A plain weekly feeling check-in -- deliberately separate from physical
+  // fatigue/pain, which are already handled elsewhere (painGuidance, the AI
+  // coach's fatigue triage). Only mental staleness (bored/dreading) two
+  // weeks running suggests a Variety Week; exhausted/pain are recorded but
+  // never trigger it, matching the spec's own boredom-vs-fatigue split.
+  var RUNNING_FEELINGS = ['excited', 'fine', 'neutral', 'bored', 'dreading', 'exhausted', 'pain'];
+  var RUNNING_FEELING_LABEL = {
+    excited: 'Excited', fine: 'Fine', neutral: 'Neutral', bored: 'Getting bored',
+    dreading: 'Dreading it', exhausted: 'Physically exhausted', pain: 'In pain'
+  };
+  function currentWeekFeelingEntry() {
+    var weekStartIso = dateToISO(mondayOfWeek(new Date()));
+    return state.runningFeelingLog.filter(function (e) { return e.weekStartIso === weekStartIso; })[0] || null;
+  }
+  function saveRunningFeeling(feeling) {
+    var weekStartIso = dateToISO(mondayOfWeek(new Date()));
+    var existing = state.runningFeelingLog.filter(function (e) { return e.weekStartIso === weekStartIso; })[0];
+    if (existing) existing.feeling = feeling;
+    else state.runningFeelingLog.push({ weekStartIso: weekStartIso, feeling: feeling });
+    saveState(state);
+  }
+  // The two most recent DISTINCT weeks on record, both bored/dreading.
+  function varietyWeekSuggested() {
+    var sorted = state.runningFeelingLog.slice().sort(function (a, b) { return a.weekStartIso < b.weekStartIso ? 1 : -1; });
+    if (sorted.length < 2) return false;
+    var isStale = function (e) { return e.feeling === 'bored' || e.feeling === 'dreading'; };
+    return isStale(sorted[0]) && isStale(sorted[1]);
+  }
+
   var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
   // Never diagnoses -- only routes toward "keep going / back off / get it checked."
   function painGuidance(severity, worsens, canWalk) {
@@ -511,6 +579,8 @@
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
+    if (s.activeWeeklyChallenge === undefined) s.activeWeeklyChallenge = null; // { challengeId, weekStartIso }
+    if (!s.runningFeelingLog) s.runningFeelingLog = []; // [{ weekStartIso, feeling }]
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
@@ -679,11 +749,23 @@
       sideQuestMap[r.date + '|' + r.key + '|' + r.id] = r;
     });
 
+    // Unlike unavailable/sideQuestLog (append-only), a week's feeling can be
+    // overwritten via "Change" -- so this needs real last-write-wins per
+    // week key, not just "whichever side happened to list it," hence
+    // reusing mergeMap's local-newer-wins logic instead of a plain union.
+    function toWeekMap(arr) {
+      var out = {};
+      (arr || []).forEach(function (e) { out[e.weekStartIso] = e; });
+      return out;
+    }
+    var feelingMap = mergeMap(toWeekMap(local.runningFeelingLog), toWeekMap(remote.runningFeelingLog));
+
     return {
       userName: prefer.userName,
       units: prefer.units,
       notifications: prefer.notifications || { enabled: false },
       activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
+      activeWeeklyChallenge: prefer.activeWeeklyChallenge !== undefined ? prefer.activeWeeklyChallenge : null,
       raceGoal: prefer.raceGoal,
       profile: prefer.profile,
       planMeta: prefer.planMeta,
@@ -692,6 +774,7 @@
       crossType: mergeMap(local.crossType, remote.crossType),
       unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
       sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
+      runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };
   }
@@ -1054,6 +1137,16 @@
         changed = true;
       }
 
+      // Variety Week suggestion -- once when two consecutive bored/dreading
+      // check-ins first appear, not every render (dedup'd on the week key
+      // itself, same as the other notifications above).
+      var thisMonday = dateToISO(mondayOfWeek(today));
+      if (varietyWeekSuggested() && log.lastVarietyWeekNotifiedWeek !== thisMonday) {
+        showAppNotification('Consider a Variety Week', "You've mentioned feeling bored of running two weeks running -- check Quests for a change of pace.", 'variety-week');
+        log.lastVarietyWeekNotifiedWeek = thisMonday;
+        changed = true;
+      }
+
       if (changed) saveNotifLog(log);
     }
   };
@@ -1103,6 +1196,16 @@
   }
   function sameDate(a, b) {
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+  // A plain Monday-anchored calendar week -- deliberately independent of the
+  // race plan's race-day-anchored weeks (weeksBetween/dateForSlot). Weekly
+  // challenges and the running-feeling check-in are a personal habit-tracking
+  // week, not a training week.
+  function mondayOfWeek(date) {
+    var d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    var diff = (d.getDay() + 6) % 7; // 0 for Monday ... 6 for Sunday
+    d.setDate(d.getDate() - diff);
+    return d;
   }
   function fmtRange(d1, d2) {
     return MONTHS[d1.getMonth()] + ' ' + d1.getDate() + ' – ' + MONTHS[d2.getMonth()] + ' ' + d2.getDate();
@@ -1763,6 +1866,29 @@
       app.innerHTML = '';
       app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
       wireHeaderIcons();
+      expireWeeklyChallengeIfStale();
+
+      var activeChallenge = state.activeWeeklyChallenge;
+      var challenge = activeChallenge ? weeklyChallengeById(activeChallenge.challengeId) : null;
+      var weeklyChallengeHtml;
+      if (activeChallenge && challenge) {
+        var progress = weeklyChallengeProgress(challenge, activeChallenge.weekStartIso);
+        weeklyChallengeHtml =
+          '<div class="quest-card">' +
+            '<div class="quest-name">' + escapeHtml(challenge.name) + '</div>' +
+            '<div class="quest-meta">' + progress + ' of ' + challenge.target + ' this week</div>' +
+            '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="weeklyChallengeFill"></div></div>' +
+            (progress >= challenge.target ? '<p class="recap-empty">Challenge complete -- nice work.</p>' : '') +
+            '<div class="ob-cancel" id="dropChallengeBtn">Drop this challenge</div>' +
+          '</div>';
+      } else {
+        weeklyChallengeHtml = '<div class="quest-card">' +
+          '<p class="recap-empty" style="margin-bottom:10px">No weekly challenge active.</p>' +
+          WEEKLY_CHALLENGES.map(function (c) {
+            return '<button type="button" class="ob-btn ob-btn-secondary quest-btn" style="margin-bottom:8px" data-weekly-id="' + c.id + '">' + escapeHtml(c.name) + '</button>';
+          }).join('') +
+        '</div>';
+      }
 
       var active = state.activeQuestTrack;
       var activeTrack = active ? questTrackById(active.trackId) : null;
@@ -1818,6 +1944,8 @@
           '<div class="ob-title">Quests</div>' +
           '<div class="ob-sub">Active quest</div>' +
           activeHtml +
+          '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' +
+          weeklyChallengeHtml +
           '<div class="ob-sub" style="margin-top:20px">Build strength</div>' +
           strengthHtml +
           '<div class="ob-sub" style="margin-top:20px">Go explore</div>' +
@@ -1840,6 +1968,22 @@
         var completeBtn = document.getElementById('completeSessionBtn');
         if (completeBtn) completeBtn.addEventListener('click', function () { completeQuestTrackSession(); render(); });
         document.getElementById('stopQuestBtn').addEventListener('click', function () { stopQuestTrack(); render(); });
+      }
+
+      if (activeChallenge && challenge) {
+        var weeklyFillEl = document.getElementById('weeklyChallengeFill');
+        if (weeklyFillEl) {
+          var progressNow = weeklyChallengeProgress(challenge, activeChallenge.weekStartIso);
+          weeklyFillEl.style.width = (challenge.target ? 100 * progressNow / challenge.target : 0) + '%';
+        }
+        document.getElementById('dropChallengeBtn').addEventListener('click', function () { dropWeeklyChallenge(); render(); });
+      } else {
+        wrap.querySelectorAll('[data-weekly-id]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            startWeeklyChallenge(btn.getAttribute('data-weekly-id'));
+            render();
+          });
+        });
       }
 
       wrap.querySelectorAll('[data-track-id]').forEach(function (btn) {
@@ -3053,6 +3197,23 @@
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('progressBtn') + '</div>'));
     wireHeaderIcons();
 
+    // Boredom detection / Variety Week (docs/Runner_SideQuest_Spec.md §6/§7) --
+    // a plain weekly check-in, answered at most once per Monday-week. Both
+    // the answered-summary and the form render into the DOM together and
+    // toggle visibility on click, same pattern as the pain-report toggle in
+    // renderWorkoutDetail (painToggle/painForm) -- no extra render() closure needed.
+    var existingFeeling = currentWeekFeelingEntry();
+    var feelingSummaryHtml = existingFeeling ?
+      '<p class="recap-empty" id="feelingSummary">This week: ' + escapeHtml(RUNNING_FEELING_LABEL[existingFeeling.feeling]) + ' &mdash; <span class="pain-toggle" id="changeFeelingBtn" style="display:inline">change</span></p>' : '';
+    var feelingFormHtml =
+      '<div id="feelingForm" style="display:' + (existingFeeling ? 'none' : 'block') + '">' +
+        '<div class="ob-label">How are you feeling about running this week?</div>' +
+        '<div class="chip-grid" id="feelingChips">' + chipsHtml('feeling', RUNNING_FEELINGS, RUNNING_FEELING_LABEL, existingFeeling ? existingFeeling.feeling : null, false) + '</div>' +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="saveFeelingBtn" style="margin-top:8px">Save</button>' +
+      '</div>';
+    var varietyBannerHtml = varietyWeekSuggested() ?
+      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week -- swap an easy run for a side quest, add a strength session, and keep your long run and key workout as-is. <span class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Quests</span></span></div>' : '';
+
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
     var planLengthWeeks = state.planMeta.planLengthWeeks;
@@ -3157,7 +3318,10 @@
     var wrap = el(
       '<div class="ob">' +
         '<div class="ob-title">Progress</div>' +
-        '<div class="ob-sub">This far</div>' +
+        varietyBannerHtml +
+        feelingSummaryHtml +
+        feelingFormHtml +
+        '<div class="ob-sub" style="margin-top:20px">This far</div>' +
         overallHtml +
         '<div class="ob-sub" style="margin-top:20px">Last week</div>' +
         lastWeekHtml +
@@ -3168,6 +3332,30 @@
       '</div>'
     );
     app.appendChild(wrap);
+
+    var chosenFeeling = existingFeeling ? existingFeeling.feeling : null;
+    wrap.querySelectorAll('#feelingChips .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chosenFeeling = chip.getAttribute('data-value');
+        wrap.querySelectorAll('#feelingChips .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === chosenFeeling);
+        });
+      });
+    });
+    document.getElementById('saveFeelingBtn').addEventListener('click', function () {
+      if (!chosenFeeling) return;
+      saveRunningFeeling(chosenFeeling);
+      renderProgressPanel();
+    });
+    var changeFeelingBtn = document.getElementById('changeFeelingBtn');
+    if (changeFeelingBtn) {
+      changeFeelingBtn.addEventListener('click', function () {
+        document.getElementById('feelingSummary').style.display = 'none';
+        document.getElementById('feelingForm').style.display = 'block';
+      });
+    }
+    var varietyOpenQuestsBtn = document.getElementById('varietyOpenQuestsBtn');
+    if (varietyOpenQuestsBtn) varietyOpenQuestsBtn.addEventListener('click', renderQuestsHome);
 
     if (aiRecapContext) {
       var aiRecapBtn = document.getElementById('aiRecapBtn');
