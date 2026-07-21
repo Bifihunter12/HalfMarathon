@@ -2,6 +2,7 @@
   'use strict';
 
   var STORAGE_KEY = 'training_plan_v1';
+  var SideQuestDomain = window.RACRSideQuests || {};
   var DOW_FULL = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
   var MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
@@ -277,14 +278,6 @@
     state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
     saveState(state);
   }
-  // Not tied to a specific calendar day -- for the Quests tab's "Go explore"
-  // and "Quick wins" one-tap logging, as opposed to applySideQuest above
-  // which replaces one specific scheduled workout.
-  function logQuickWinQuest(quest) {
-    state.sideQuestLog.push({ id: quest.id, key: null, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
-    saveState(state);
-    showToast('Logged: ' + quest.name + '.');
-  }
 
   // ── Quest Tracks (docs/Runner_Quests_Tab_Spec.md) ───────────────────────
   // Multiweek strength programs, separate from the single-session
@@ -331,26 +324,175 @@
   function questTrackById(id) { return QUEST_TRACKS.filter(function (t) { return t.id === id; })[0] || null; }
   function questTrackTotalSessions(track) { return track.weeks * track.sessionsPerWeek; }
 
+  // Removes any calendar placements the currently-active track scheduled --
+  // needed before both stopping and (re)starting a track, otherwise
+  // restarting/switching leaves the old placements sitting in
+  // sideQuestCalendar untouched while scheduleActiveQuestTrack just finds
+  // new empty slots for the new run, silently doubling up stale entries
+  // (confirmed live: 8 real placements became 16 after one restart).
+  function clearScheduledQuestTrackCalendar() {
+    var active = state.activeQuestTrack;
+    if (!active || !active.scheduledMissionKeys) return;
+    Object.keys(active.scheduledMissionKeys).forEach(function (key) {
+      if (state.sideQuestCalendar && state.sideQuestCalendar[key] === active.scheduledMissionKeys[key]) {
+        delete state.sideQuestCalendar[key];
+      }
+    });
+  }
+
   function startQuestTrack(trackId, difficulty) {
-    state.activeQuestTrack = { trackId: trackId, difficulty: difficulty || 'standard', startedDate: dateToISO(new Date()), completedSessions: 0 };
+    var domainTrack = SideQuestDomain.questTrackById && SideQuestDomain.questTrackById(trackId);
+    var gate = SideQuestDomain.canStartSideQuest ? SideQuestDomain.canStartSideQuest(state, trackId) : { ok: true };
+    if (!gate.ok) {
+      showToast('Finish or stop your active Side Quest before starting another track.');
+      return false;
+    }
+    clearScheduledQuestTrackCalendar();
+    if (domainTrack) {
+      state.activeQuestTrack = {
+        trackId: trackId,
+        difficulty: difficulty || 'base',
+        startedDate: dateToISO(new Date()),
+        completedSessions: 0,
+        scheduledMissionKeys: {}
+      };
+      scheduleActiveQuestTrack(new Date());
+    } else {
+      state.activeQuestTrack = { trackId: trackId, difficulty: difficulty || 'standard', startedDate: dateToISO(new Date()), completedSessions: 0 };
+    }
     saveState(state);
+    return true;
   }
   function stopQuestTrack() {
+    clearScheduledQuestTrackCalendar();
     state.activeQuestTrack = null;
     saveState(state);
   }
   // Reuses the same sideQuestLog ledger the single-session quests use, so
   // the Progress panel's existing "Side quests completed" count picks up
   // quest-track sessions automatically -- no separate ledger to keep in sync.
-  function completeQuestTrackSession() {
+  function completeQuestTrackSession(key) {
     var active = state.activeQuestTrack;
+    var domainTrack = active && SideQuestDomain.questTrackById && SideQuestDomain.questTrackById(active.trackId);
+    if (domainTrack) {
+      var domainTotal = SideQuestDomain.questTrackTotalMissions(domainTrack);
+      if (active.completedSessions >= domainTotal) return;
+      var missionId = domainTrack.missionIds[active.completedSessions] || domainTrack.missionIds[domainTrack.missionIds.length - 1];
+      var mission = SideQuestDomain.missionById(missionId);
+      active.completedSessions++;
+      state.sideQuestLog.push({
+        id: missionId,
+        trackId: domainTrack.id,
+        key: null,
+        date: dateToISO(new Date()),
+        category: mission ? mission.category : domainTrack.category,
+        rewardPoints: mission ? mission.xpReward : 80,
+        relationship: mission ? mission.relationshipLabel : 'Supports Main Quest'
+      });
+      state.xp += mission ? mission.xpReward : 80;
+      if (key && state.sideQuestCalendar[key] === missionId) delete state.sideQuestCalendar[key];
+      if (active.completedSessions >= domainTotal) {
+        state.completedQuestTracks.push({ trackId: domainTrack.id, date: dateToISO(new Date()), badgeId: 'strong_runner' });
+        if (state.badges.indexOf('Strong Runner') === -1) state.badges.push('Strong Runner');
+      }
+      saveState(state);
+      return;
+    }
     var track = active && questTrackById(active.trackId);
     if (!track) return;
     var total = questTrackTotalSessions(track);
     if (active.completedSessions >= total) return;
     active.completedSessions++;
     state.sideQuestLog.push({ id: track.id + '-session-' + active.completedSessions, key: null, date: dateToISO(new Date()), category: 'strength', rewardPoints: 40 });
+    state.xp += 40;
     saveState(state);
+  }
+
+  function missionById(id) {
+    return SideQuestDomain.missionById ? SideQuestDomain.missionById(id) : SIDE_QUESTS.filter(function (q) { return q.id === id; })[0] || null;
+  }
+
+  function completionCategory(mission) {
+    if (!mission) return 'quest';
+    return mission.category || mission.subcategory || 'quest';
+  }
+
+  function completeMission(missionId, key, feedback) {
+    var mission = missionById(missionId);
+    if (!mission) return false;
+    state.sideQuestLog.push({
+      id: mission.id,
+      key: key || null,
+      date: dateToISO(new Date()),
+      category: completionCategory(mission),
+      rewardPoints: mission.xpReward || mission.rewardPoints || 0,
+      relationship: mission.relationshipLabel || '',
+      difficulty: feedback && feedback.difficulty || null,
+      pain: feedback && feedback.pain || null
+    });
+    state.xp += mission.xpReward || mission.rewardPoints || 0;
+    if (mission.badgeId && state.badges.indexOf(mission.badgeId) === -1) state.badges.push(mission.badgeId);
+    if (key && state.sideQuestCalendar[key] === mission.id) delete state.sideQuestCalendar[key];
+    saveState(state);
+    showToast('Side Quest complete: ' + mission.name + '.');
+    return true;
+  }
+
+  function buildCurrentWeeks() {
+    if (!state.raceGoal || !state.profile || !state.planMeta) return [];
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    return generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today).weeks;
+  }
+
+  function findCalendarDayByKey(key, weeks) {
+    var parts = String(key || '').split('-');
+    var weekNum = parseInt(parts[0], 10), dayIdx = parseInt(parts[1], 10);
+    if (!weekNum || isNaN(dayIdx)) return null;
+    var week = weeks[weekNum - 1];
+    return week && week.days[dayIdx] ? { week: week, day: week.days[dayIdx], dayIdx: dayIdx, key: key } : null;
+  }
+
+  function addMissionToCalendar(missionId, key) {
+    var mission = missionById(missionId);
+    var weeks = buildCurrentWeeks();
+    var found = findCalendarDayByKey(key, weeks);
+    if (!mission || !found) return { ok: false, reason: 'missing' };
+    var classInfo = SideQuestDomain.workoutClassification ? SideQuestDomain.workoutClassification(found.day.type, found.day.label) : { classification: 'movable' };
+    var subValue = SideQuestDomain.substitutionValue ? SideQuestDomain.substitutionValue(found.day.type, mission) : 'complementary';
+    var conflict = SideQuestDomain.detectCalendarConflict ? SideQuestDomain.detectCalendarConflict(mission, found.dayIdx, found.week.days) : { ok: true };
+    if (classInfo.classification === 'protected' && subValue === 'full_replacement') return { ok: false, reason: 'protected' };
+    if (!conflict.ok) return conflict;
+    state.sideQuestCalendar[key] = mission.id;
+    saveState(state);
+    return { ok: true, reason: null };
+  }
+
+  function scheduleActiveQuestTrack(startDate) {
+    if (!state.activeQuestTrack || !SideQuestDomain.questTrackById) return;
+    var track = SideQuestDomain.questTrackById(state.activeQuestTrack.trackId);
+    if (!track) return;
+    var weeks = buildCurrentWeeks();
+    var missionIdx = 0;
+    state.sideQuestCalendar = state.sideQuestCalendar || {};
+    weeks.forEach(function (week) {
+      if (missionIdx >= track.missionIds.length) return;
+      var placedThisWeek = 0;
+      week.days.forEach(function (day, di) {
+        if (missionIdx >= track.missionIds.length || placedThisWeek >= track.missionsPerWeek) return;
+        var mission = missionById(track.missionIds[missionIdx]);
+        var date = dateForSlot(parseDate(state.raceGoal.raceDate), state.planMeta.planLengthWeeks, week.weekNum, di);
+        if (startDate && date < startDate) return;
+        if (day.type !== 'rest' && day.type !== 'easy' && day.type !== 'cross') return;
+        var conflict = SideQuestDomain.detectCalendarConflict ? SideQuestDomain.detectCalendarConflict(mission, di, week.days) : { ok: true };
+        if (!conflict.ok) return;
+        var key = week.weekNum + '-' + di;
+        if (state.sideQuestCalendar[key]) return;
+        state.sideQuestCalendar[key] = mission.id;
+        state.activeQuestTrack.scheduledMissionKeys[key] = mission.id;
+        missionIdx++;
+        placedThisWeek++;
+      });
+    });
   }
 
   // ── Weekly Challenges (docs/Runner_SideQuest_Spec.md §2B) ───────────────
@@ -580,6 +722,11 @@
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
     if (s.activeWeeklyChallenge === undefined) s.activeWeeklyChallenge = null; // { challengeId, weekStartIso }
+    if (!s.sideQuestOnboarding) s.sideQuestOnboarding = null; // { completed, strengthExperience, equipment, preferredDuration, interest, limitations }
+    if (!s.sideQuestCalendar) s.sideQuestCalendar = {}; // { dayKey: missionId }
+    if (!s.completedQuestTracks) s.completedQuestTracks = []; // [{ trackId, date, badgeId }]
+    if (!s.badges) s.badges = [];
+    if (!s.xp) s.xp = 0;
     if (!s.runningFeelingLog) s.runningFeelingLog = []; // [{ weekStartIso, feeling }]
     if (!s.lastModified) s.lastModified = 0;
     return s;
@@ -760,12 +907,33 @@
     }
     var feelingMap = mergeMap(toWeekMap(local.runningFeelingLog), toWeekMap(remote.runningFeelingLog));
 
+    // Same union-by-natural-key treatment as unavailable/sideQuestLog above --
+    // these are append-only records too, never overwritten in place.
+    var completedTracksMap = {};
+    (remote.completedQuestTracks || []).concat(local.completedQuestTracks || []).forEach(function (r) {
+      completedTracksMap[r.trackId + '|' + r.date] = r;
+    });
+    var badgesUnion = (local.badges || []).concat(remote.badges || []).filter(function (b, i, arr) { return arr.indexOf(b) === i; });
+    // sideQuestCalendar is a plain dayKey->missionId map, same shape as
+    // logs/overrides/crossType above -- reuse mergeMap directly.
+    var sideQuestCalendarMerged = mergeMap(local.sideQuestCalendar, remote.sideQuestCalendar);
+
     return {
       userName: prefer.userName,
       units: prefer.units,
       notifications: prefer.notifications || { enabled: false },
       activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
       activeWeeklyChallenge: prefer.activeWeeklyChallenge !== undefined ? prefer.activeWeeklyChallenge : null,
+      sideQuestOnboarding: prefer.sideQuestOnboarding !== undefined ? prefer.sideQuestOnboarding : null,
+      sideQuestCalendar: sideQuestCalendarMerged,
+      completedQuestTracks: Object.keys(completedTracksMap).map(function (k) { return completedTracksMap[k]; }),
+      badges: badgesUnion,
+      // Additive counter -- prefer-newer (like every other scalar here) isn't
+      // perfectly reconciled across two devices earning XP while both
+      // offline, but it's a correct, simple fix for the real bug this
+      // replaced: xp was missing from this object entirely, so it was
+      // silently wiped back to whatever the losing side had on every sync.
+      xp: typeof prefer.xp === 'number' ? prefer.xp : 0,
       raceGoal: prefer.raceGoal,
       profile: prefer.profile,
       planMeta: prefer.planMeta,
@@ -1857,177 +2025,271 @@
   }
 
   // ── Quests home (docs/Runner_Quests_Tab_Spec.md) ──────────────────────
-  function renderQuestsHome() {
-    var app = document.getElementById('app');
-    var expandedTrackId = null;
-    var chosenDifficulty = 'standard';
+  var SQ_EXPERIENCE_LABEL = {
+    new_strength: 'I am new to strength training',
+    occasional: 'I train occasionally',
+    regular: 'I strength train regularly',
+    barbells_kettlebells: 'I am experienced with barbells or kettlebells'
+  };
+  var SQ_EQUIPMENT_LABEL = {
+    no_equipment: 'No equipment',
+    chair_or_bench: 'Chair or bench',
+    resistance_bands: 'Resistance bands',
+    dumbbells: 'Dumbbells',
+    kettlebells: 'Kettlebells',
+    barbell_and_rack: 'Barbell and rack',
+    cable_machine: 'Cable machine',
+    pull_up_bar: 'Pull-up bar',
+    trx: 'TRX or suspension trainer',
+    gym_access: 'Gym access',
+    rowing_machine: 'Rowing machine',
+    stationary_bike: 'Stationary bike',
+    treadmill: 'Treadmill',
+    stair_machine: 'Stair machine',
+    pool: 'Pool'
+  };
+  var SQ_DURATION_LABEL = { short: '10-15 minutes', medium: '20-30 minutes', long: '30-45 minutes', extended: '45-60 minutes' };
+  var SQ_INTEREST_LABEL = { strength: 'Build strength', upper_body: 'Build upper-body strength', core: 'Improve core strength', running: 'Support my running', explore: 'Hike and explore', kettlebells: 'Learn kettlebells', mobility: 'Improve mobility', cross_training: 'Try cross-training', variety: 'Give me variety' };
+  var SQ_LIMITATION_LABEL = { knee_pain: 'Knee pain', back_pain: 'Back pain', hip_pain: 'Hip pain', ankle_foot_pain: 'Ankle or foot pain', shoulder_pain: 'Shoulder pain', wrist_pain: 'Wrist pain', no_current_limitations: 'No current limitations' };
 
-    function render() {
+  function durationText(mission) {
+    if (!mission) return '';
+    if (mission.durationMinutesMin === mission.durationMinutesMax) return mission.durationMinutesMin + ' min';
+    return mission.durationMinutesMin + '-' + mission.durationMinutesMax + ' min';
+  }
+
+  function renderSideQuestOnboarding() {
+    var app = document.getElementById('app');
+    var draft = { strengthExperience: 'new_strength', equipment: ['no_equipment'], preferredDuration: 'medium', interest: 'running', limitations: ['no_current_limitations'] };
+    function renderStep(step) {
       app.innerHTML = '';
       app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
       wireHeaderIcons();
-      expireWeeklyChallengeIfStale();
-
-      var activeChallenge = state.activeWeeklyChallenge;
-      var challenge = activeChallenge ? weeklyChallengeById(activeChallenge.challengeId) : null;
-      var weeklyChallengeHtml;
-      if (activeChallenge && challenge) {
-        var progress = weeklyChallengeProgress(challenge, activeChallenge.weekStartIso);
-        weeklyChallengeHtml =
-          '<div class="quest-card">' +
-            '<div class="quest-name">' + escapeHtml(challenge.name) + '</div>' +
-            '<div class="quest-meta">' + progress + ' of ' + challenge.target + ' this week</div>' +
-            '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="weeklyChallengeFill"></div></div>' +
-            (progress >= challenge.target ? '<p class="recap-empty">Challenge complete -- nice work.</p>' : '') +
-            '<div class="ob-cancel" id="dropChallengeBtn">Drop this challenge</div>' +
-          '</div>';
-      } else {
-        weeklyChallengeHtml = '<div class="quest-card">' +
-          '<p class="recap-empty" style="margin-bottom:10px">No weekly challenge active.</p>' +
-          WEEKLY_CHALLENGES.map(function (c) {
-            return '<button type="button" class="ob-btn ob-btn-secondary quest-btn" style="margin-bottom:8px" data-weekly-id="' + c.id + '">' + escapeHtml(c.name) + '</button>';
-          }).join('') +
-        '</div>';
-      }
-
-      var active = state.activeQuestTrack;
-      var activeTrack = active ? questTrackById(active.trackId) : null;
-      var activeHtml;
-      if (active && activeTrack) {
-        var total = questTrackTotalSessions(activeTrack);
-        var weekNum = Math.min(activeTrack.weeks, Math.floor(active.completedSessions / activeTrack.sessionsPerWeek) + 1);
-        var done = active.completedSessions >= total;
-        var exercisesHtml = '<ul class="recap-list">' + activeTrack.exercises.map(function (ex) {
-          return '<li>' + escapeHtml(resolveExercise(ex, active.difficulty)) + '</li>';
-        }).join('') + '</ul>';
-        activeHtml =
-          '<div class="quest-card">' +
-            '<div class="quest-name">' + escapeHtml(activeTrack.name) + (activeTrack.hasDifficulty ? ' &middot; ' + DIFFICULTY_LABEL[active.difficulty] : '') + '</div>' +
-            '<div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.weeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' sessions completed</div>' +
-            '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="questProgressFill"></div></div>' +
-            (done ? '<p class="recap-empty">Quest complete -- nice work. Start another below whenever you\'re ready.</p>' : exercisesHtml) +
-            (done ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeSessionBtn">Mark session complete</button>') +
-            '<div class="ob-cancel" id="stopQuestBtn">Stop this quest</div>' +
-          '</div>';
-      } else {
-        activeHtml = '<p class="recap-empty">No active quest yet -- pick one below to get started.</p>';
-      }
-
-      var strengthHtml = QUEST_TRACKS.map(function (track) {
-        var isExpanded = expandedTrackId === track.id;
-        return '<div class="quest-card">' +
-          '<div class="quest-name">' + escapeHtml(track.name) + '</div>' +
-          '<div class="quest-desc">' + escapeHtml(track.description) + '</div>' +
-          '<div class="quest-meta">' + track.weeks + ' weeks &middot; ' + track.sessionsPerWeek + 'x/week &middot; ' + track.sessionMinutes + ' min &middot; ' + escapeHtml(track.equipment) + '</div>' +
-          (isExpanded && track.hasDifficulty ?
-            '<div class="chip-grid" id="difficultyChips" style="margin:8px 0">' + chipsHtml('trackDifficulty', DIFFICULTY_LEVELS, DIFFICULTY_LABEL, chosenDifficulty, false) + '</div>' +
-            '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-begin-track="' + track.id + '">Begin</button>'
-          : '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-track-id="' + track.id + '">Start quest</button>') +
-        '</div>';
-      }).join('');
-
-      function questListHtml(quests) {
-        return quests.map(function (q) {
-          return '<div class="quest-card">' +
-            '<div class="quest-name">' + escapeHtml(q.name) + '</div>' +
-            '<div class="quest-desc">' + escapeHtml(q.description) + '</div>' +
-            '<div class="quest-meta">' + q.estimatedMinutes + ' min &middot; ' + (SIDE_QUEST_LOAD_LABEL[q.trainingLoad] || '') + ' effort</div>' +
-            '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-log-quest="' + q.id + '">Log it</button>' +
-          '</div>';
-        }).join('');
-      }
-      var exploreQuests = SIDE_QUESTS.filter(function (q) { return q.category === 'hike'; });
-      var quickWinQuests = SIDE_QUESTS.filter(function (q) { return q.category !== 'hike' && q.category !== 'run'; });
-
-      var wrap = el(
-        '<div class="ob">' +
-          '<div class="ob-title">Quests</div>' +
-          '<div class="ob-sub">Active quest</div>' +
-          activeHtml +
-          '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' +
-          weeklyChallengeHtml +
-          '<div class="ob-sub" style="margin-top:20px">Build strength</div>' +
-          strengthHtml +
-          '<div class="ob-sub" style="margin-top:20px">Go explore</div>' +
-          questListHtml(exploreQuests) +
-          '<div class="ob-sub" style="margin-top:20px">Quick wins</div>' +
-          questListHtml(quickWinQuests) +
-          '<div class="ob-sub" style="margin-top:20px">Completed</div>' +
-          '<p class="recap-empty">' + state.sideQuestLog.length + ' quests logged so far.</p>' +
-          '<div class="ob-cancel" id="questsBackBtn">Back to plan</div>' +
-        '</div>'
-      );
+      var titles = ['Strength experience', 'Available equipment', 'Mission duration', 'Primary interest', 'Limitations'];
+      var body = '';
+      if (step === 0) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqExperience', Object.keys(SQ_EXPERIENCE_LABEL), SQ_EXPERIENCE_LABEL, draft.strengthExperience, false) + '</div>';
+      if (step === 1) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqEquipment', Object.keys(SQ_EQUIPMENT_LABEL), SQ_EQUIPMENT_LABEL, draft.equipment, true) + '</div>';
+      if (step === 2) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqDuration', Object.keys(SQ_DURATION_LABEL), SQ_DURATION_LABEL, draft.preferredDuration, false) + '</div>';
+      if (step === 3) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqInterest', Object.keys(SQ_INTEREST_LABEL), SQ_INTEREST_LABEL, draft.interest, false) + '</div>';
+      if (step === 4) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqLimitations', Object.keys(SQ_LIMITATION_LABEL), SQ_LIMITATION_LABEL, draft.limitations, true) + '</div>';
+      var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Quests</div><div class="ob-title">' + titles[step] + '</div><p class="intro-body">Every body can strength train. Every exercise can be scaled.</p>' + body + '<div class="step-nav">' + (step ? '<button type="button" class="ob-btn ob-btn-secondary" id="sqBack">Back</button>' : '') + '<button type="button" class="ob-btn" id="sqNext">' + (step === 4 ? 'Finish' : 'Next') + '</button></div></div>');
       app.appendChild(wrap);
-
-      if (active && activeTrack) {
-        var fillEl = document.getElementById('questProgressFill');
-        if (fillEl) {
-          var total2 = questTrackTotalSessions(activeTrack);
-          fillEl.style.width = (total2 ? 100 * active.completedSessions / total2 : 0) + '%';
-        }
-        var completeBtn = document.getElementById('completeSessionBtn');
-        if (completeBtn) completeBtn.addEventListener('click', function () { completeQuestTrackSession(); render(); });
-        document.getElementById('stopQuestBtn').addEventListener('click', function () { stopQuestTrack(); render(); });
-      }
-
-      if (activeChallenge && challenge) {
-        var weeklyFillEl = document.getElementById('weeklyChallengeFill');
-        if (weeklyFillEl) {
-          var progressNow = weeklyChallengeProgress(challenge, activeChallenge.weekStartIso);
-          weeklyFillEl.style.width = (challenge.target ? 100 * progressNow / challenge.target : 0) + '%';
-        }
-        document.getElementById('dropChallengeBtn').addEventListener('click', function () { dropWeeklyChallenge(); render(); });
-      } else {
-        wrap.querySelectorAll('[data-weekly-id]').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            startWeeklyChallenge(btn.getAttribute('data-weekly-id'));
-            render();
-          });
+      wrap.querySelectorAll('.chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var value = chip.getAttribute('data-value');
+          if (step === 0) draft.strengthExperience = value;
+          if (step === 1) {
+            if (value === 'no_equipment') draft.equipment = ['no_equipment'];
+            else {
+              draft.equipment = draft.equipment.filter(function (x) { return x !== 'no_equipment'; });
+              if (draft.equipment.indexOf(value) === -1) draft.equipment.push(value);
+              else draft.equipment = draft.equipment.filter(function (x) { return x !== value; });
+              if (!draft.equipment.length) draft.equipment = ['no_equipment'];
+            }
+          }
+          if (step === 2) draft.preferredDuration = value;
+          if (step === 3) draft.interest = value;
+          if (step === 4) {
+            if (value === 'no_current_limitations') draft.limitations = ['no_current_limitations'];
+            else {
+              draft.limitations = draft.limitations.filter(function (x) { return x !== 'no_current_limitations'; });
+              if (draft.limitations.indexOf(value) === -1) draft.limitations.push(value);
+              else draft.limitations = draft.limitations.filter(function (x) { return x !== value; });
+              if (!draft.limitations.length) draft.limitations = ['no_current_limitations'];
+            }
+          }
+          renderStep(step);
         });
-      }
+      });
+      var back = document.getElementById('sqBack');
+      if (back) back.addEventListener('click', function () { renderStep(step - 1); });
+      document.getElementById('sqNext').addEventListener('click', function () {
+        if (step < 4) renderStep(step + 1);
+        else {
+          draft.completed = true;
+          draft.completedDate = dateToISO(new Date());
+          state.sideQuestOnboarding = draft;
+          saveState(state);
+          renderQuestsHome();
+        }
+      });
+    }
+    renderStep(0);
+  }
 
-      wrap.querySelectorAll('[data-track-id]').forEach(function (btn) {
+  function renderMissionCard(mission, actionLabel, actionAttr) {
+    return '<div class="quest-card mission-card"><div class="quest-name">' + escapeHtml(mission.name) + '</div><div class="quest-desc">' + escapeHtml(mission.description) + '</div><div class="mission-tags"><span>' + durationText(mission) + '</span><span>Load ' + mission.trainingLoad + '</span><span>' + escapeHtml(mission.runningInterference) + ' interference</span></div><div class="quest-meta">' + escapeHtml(mission.relationshipLabel) + ' &middot; ' + mission.xpReward + ' XP</div><button type="button" class="ob-btn ob-btn-secondary quest-btn" ' + actionAttr + '="' + mission.id + '">' + actionLabel + '</button></div>';
+  }
+
+  function renderSideQuestsHomeNew() {
+    if (!state.sideQuestOnboarding || !state.sideQuestOnboarding.completed) { renderSideQuestOnboarding(); return; }
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
+    wireHeaderIcons();
+    var active = state.activeQuestTrack;
+    var activeTrack = active && SideQuestDomain.questTrackById ? SideQuestDomain.questTrackById(active.trackId) : null;
+    var activeHtml = '';
+    if (activeTrack) {
+      var total = SideQuestDomain.questTrackTotalMissions(activeTrack);
+      var weekNum = Math.min(activeTrack.durationWeeks, Math.floor(active.completedSessions / activeTrack.missionsPerWeek) + 1);
+      var nextMission = missionById(activeTrack.missionIds[Math.min(active.completedSessions, activeTrack.missionIds.length - 1)]);
+      activeHtml = '<div class="quest-card active-quest-card"><div class="quest-name">' + escapeHtml(activeTrack.name) + '</div><div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.durationWeeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' missions complete</div><div class="progress-track"><div class="progress-fill" style="width:' + (total ? Math.round(100 * active.completedSessions / total) : 0) + '%"></div></div><div class="quest-desc">' + (nextMission ? 'Next: ' + escapeHtml(nextMission.name) + ' &middot; ' + durationText(nextMission) : 'Quest Complete') + '</div>' + (nextMission ? '<button type="button" class="ob-btn quest-btn" id="resumeTrackBtn">Resume</button>' : '') + '<div class="ob-cancel" id="stopQuestBtn">Stop this quest</div></div>';
+    } else {
+      activeHtml = '<div class="quest-card"><div class="quest-name">No active Side Quest Track</div><div class="quest-desc">Start one progressive track. Your Main Quest keeps scheduling priority.</div></div>';
+    }
+
+    // Weekly challenge (docs/Runner_SideQuest_Spec.md §2B) -- restored here
+    // after this screen was rebuilt; see weeklyChallengeProgress/etc. above.
+    expireWeeklyChallengeIfStale();
+    var activeChallenge = state.activeWeeklyChallenge;
+    var challenge = activeChallenge ? weeklyChallengeById(activeChallenge.challengeId) : null;
+    var weeklyChallengeHtml;
+    if (activeChallenge && challenge) {
+      var wcProgress = weeklyChallengeProgress(challenge, activeChallenge.weekStartIso);
+      weeklyChallengeHtml =
+        '<div class="quest-card">' +
+          '<div class="quest-name">' + escapeHtml(challenge.name) + '</div>' +
+          '<div class="quest-meta">' + wcProgress + ' of ' + challenge.target + ' this week</div>' +
+          '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="weeklyChallengeFill"></div></div>' +
+          (wcProgress >= challenge.target ? '<p class="recap-empty">Challenge complete -- nice work.</p>' : '') +
+          '<div class="ob-cancel" id="dropChallengeBtn">Drop this challenge</div>' +
+        '</div>';
+    } else {
+      weeklyChallengeHtml = '<div class="quest-card">' +
+        '<p class="recap-empty" style="margin-bottom:10px">No weekly challenge active.</p>' +
+        WEEKLY_CHALLENGES.map(function (c) {
+          return '<button type="button" class="ob-btn ob-btn-secondary quest-btn" style="margin-bottom:8px" data-weekly-id="' + c.id + '">' + escapeHtml(c.name) + '</button>';
+        }).join('') +
+      '</div>';
+    }
+
+    var recommendations = SideQuestDomain.recommendMissions ? SideQuestDomain.recommendMissions({ onboarding: state.sideQuestOnboarding, feeling: currentWeekFeelingEntry() && currentWeekFeelingEntry().feeling }) : [];
+    var recommendedHtml = recommendations.map(function (m) { return renderMissionCard(m, 'Preview', 'data-mission-id'); }).join('');
+    var tracksHtml = (SideQuestDomain.QUEST_TRACKS || []).map(function (track) {
+      return '<div class="quest-card"><div class="quest-name">' + escapeHtml(track.name) + '</div><div class="quest-desc">' + escapeHtml(track.goal) + '</div><div class="quest-meta">' + track.durationWeeks + ' weeks &middot; ' + track.missionsPerWeek + 'x/week &middot; ' + track.estimatedMinutesPerMission.min + '-' + track.estimatedMinutesPerMission.max + ' min &middot; ' + escapeHtml(track.runningInterference) + ' interference</div><button type="button" class="ob-btn ob-btn-secondary quest-btn" data-start-track="' + track.id + '">Start track</button></div>';
+    }).join('');
+    var sectionsHtml = (SideQuestDomain.CATEGORY_SECTIONS || []).filter(function (section) { return section.id !== 'recommended'; }).map(function (section) {
+      var cards = section.missionIds.map(missionById).filter(Boolean).map(function (m) { return renderMissionCard(m, 'Preview', 'data-mission-id'); }).join('');
+      return '<div class="ob-sub" style="margin-top:20px">' + escapeHtml(section.name) + '</div>' + cards;
+    }).join('');
+    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>XP</dt><dd>' + state.xp + '</dd><dt>Side Quest missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(escapeHtml).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed quests, badges, personal records, and lifetime totals will appear here.</p>';
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Quests</div><div class="ob-title">Side Quests</div><p class="intro-body">Your Main Quest gets you to the starting line. Your Side Quests build the athlete you become along the way.</p><div class="ob-sub">Active Side Quest</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + '<div class="ob-sub" style="margin-top:20px">Recommended for you</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Quest Tracks</div>' + tracksHtml + sectionsHtml + '<div class="ob-sub" style="margin-top:20px">Completed Quests</div>' + completedHtml + '</div>');
+    app.appendChild(wrap);
+    var resume = document.getElementById('resumeTrackBtn');
+    if (resume && activeTrack) resume.addEventListener('click', function () { renderMissionDetail(activeTrack.missionIds[Math.min(active.completedSessions, activeTrack.missionIds.length - 1)], null); });
+    var stop = document.getElementById('stopQuestBtn');
+    if (stop) stop.addEventListener('click', function () { stopQuestTrack(); renderQuestsHome(); });
+    wrap.querySelectorAll('[data-start-track]').forEach(function (btn) {
+      btn.addEventListener('click', function () { if (startQuestTrack(btn.getAttribute('data-start-track'), 'base')) renderQuestsHome(); });
+    });
+    wrap.querySelectorAll('[data-mission-id]').forEach(function (btn) {
+      btn.addEventListener('click', function () { renderMissionDetail(btn.getAttribute('data-mission-id'), null); });
+    });
+    if (activeChallenge && challenge) {
+      var weeklyFillEl = document.getElementById('weeklyChallengeFill');
+      if (weeklyFillEl) {
+        var progressNow = weeklyChallengeProgress(challenge, activeChallenge.weekStartIso);
+        weeklyFillEl.style.width = (challenge.target ? 100 * progressNow / challenge.target : 0) + '%';
+      }
+      document.getElementById('dropChallengeBtn').addEventListener('click', function () { dropWeeklyChallenge(); renderQuestsHome(); });
+    } else {
+      wrap.querySelectorAll('[data-weekly-id]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          var id = btn.getAttribute('data-track-id');
-          var track = questTrackById(id);
-          if (track.hasDifficulty) {
-            expandedTrackId = id;
-            chosenDifficulty = 'standard';
-            render();
-          } else {
-            startQuestTrack(id, null);
-            render();
+          startWeeklyChallenge(btn.getAttribute('data-weekly-id'));
+          renderQuestsHome();
+        });
+      });
+    }
+  }
+
+  function renderMissionDetail(missionId, key) {
+    var mission = missionById(missionId);
+    if (!mission) return renderQuestsHome();
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
+    wireHeaderIcons();
+    var exercisesHtml = '<dl class="mission-exercises">' + (mission.exercises || []).map(function (ex) {
+      var variation = SideQuestDomain.resolveExercise ? SideQuestDomain.resolveExercise(ex, 'base') : (ex.fixed || '');
+      var name = ex.fixed || variation;
+      return '<dt>' + escapeHtml(name) + '</dt><dd>' + escapeHtml((ex.sets || '') + ' sets &middot; ' + (ex.reps || '') + ' &middot; RPE ' + (ex.rpe || 'easy-moderate')) + '<div class="quest-meta">Scale: ' + escapeHtml(variation) + '</div>' + (ex.cues ? '<div class="quest-meta">' + escapeHtml(ex.cues) + '</div>' : '') + '</dd>';
+    }).join('') + '</dl>';
+    var scheduleOptions = '';
+    if (!key) {
+      var weeks = buildCurrentWeeks();
+      var options = [];
+      weeks.slice(0, 2).forEach(function (week) {
+        week.days.forEach(function (day, di) {
+          if (options.length >= 5) return;
+          var candidateKey = week.weekNum + '-' + di;
+          var conflict = SideQuestDomain.detectCalendarConflict ? SideQuestDomain.detectCalendarConflict(mission, di, week.days) : { ok: true };
+          if ((day.type === 'rest' || day.type === 'easy' || day.type === 'cross') && conflict.ok) {
+            var date = dateForSlot(parseDate(state.raceGoal.raceDate), state.planMeta.planLengthWeeks, week.weekNum, di);
+            options.push('<button type="button" class="ob-btn ob-btn-secondary" data-add-key="' + candidateKey + '">' + DOW_FULL[date.getDay()] + ' &middot; ' + escapeHtml(day.label) + '</button>');
           }
         });
       });
-      wrap.querySelectorAll('[data-begin-track]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          startQuestTrack(btn.getAttribute('data-begin-track'), chosenDifficulty);
-          expandedTrackId = null;
-          render();
-        });
-      });
-      var difficultyChips = document.getElementById('difficultyChips');
-      if (difficultyChips) {
-        difficultyChips.querySelectorAll('.chip').forEach(function (chip) {
-          chip.addEventListener('click', function () {
-            chosenDifficulty = chip.getAttribute('data-value');
-            render();
-          });
-        });
-      }
-
-      wrap.querySelectorAll('[data-log-quest]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var quest = SIDE_QUESTS.filter(function (q) { return q.id === btn.getAttribute('data-log-quest'); })[0];
-          if (quest) { logQuickWinQuest(quest); render(); }
-        });
-      });
-
-      document.getElementById('questsBackBtn').addEventListener('click', renderMain);
+      scheduleOptions = options.length ? '<div class="ob-sub" style="margin-top:18px">Add to Calendar</div>' + options.join('') : '';
     }
+    var safetyText = (mission.avoidBeforeWorkoutTypes.length ? 'Avoid before ' + mission.avoidBeforeWorkoutTypes.join(' or ') + '. ' : '') + 'Stop for sharp, worsening, or unusual pain.';
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span><span>' + mission.xpReward + ' XP</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<div class="ob-cancel" id="missionBackBtn">Back to Side Quests</div></div>');
+    app.appendChild(wrap);
+    document.getElementById('startMissionBtn').addEventListener('click', function () { renderMissionPlayer(mission.id, key); });
+    var completeNow = document.getElementById('completeNowBtn');
+    if (completeNow) completeNow.addEventListener('click', function () { completeMission(mission.id, key, { difficulty: 'about_right', pain: 'no' }); renderQuestsHome(); });
+    wrap.querySelectorAll('[data-add-key]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var res = addMissionToCalendar(mission.id, btn.getAttribute('data-add-key'));
+        showToast(res.ok ? 'Added to calendar.' : 'That conflicts with a protected Main Quest workout.');
+        renderMain();
+      });
+    });
+    document.getElementById('missionBackBtn').addEventListener('click', renderQuestsHome);
+  }
 
-    render();
+  function renderMissionPlayer(missionId, key) {
+    var mission = missionById(missionId);
+    if (!mission) return renderQuestsHome();
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    var exerciseRows = (mission.exercises || []).map(function (ex, i) {
+      var name = ex.fixed || (SideQuestDomain.resolveExercise ? SideQuestDomain.resolveExercise(ex, 'base') : '');
+      return '<label class="mission-step"><input type="checkbox" data-step="' + i + '"><span><strong>' + escapeHtml(name) + '</strong><br>' + escapeHtml((ex.sets || '') + ' sets, ' + (ex.reps || '') + ', rest ' + (ex.restSeconds || 0) + ' sec') + '</span></label>';
+    }).join('');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Mission Player</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><div class="ob-sub">Warm-up</div><ul class="recap-list">' + (mission.warmup || []).map(function (w) { return '<li>' + escapeHtml(w) + '</li>'; }).join('') + '</ul><div class="ob-sub" style="margin-top:18px">Exercises</div>' + exerciseRows + '<div class="ob-sub" style="margin-top:18px">How difficult was this?</div><div class="chip-grid" id="missionDifficulty">' + chipsHtml('missionDifficulty', ['too_easy', 'about_right', 'hard', 'too_hard'], { too_easy: 'Too easy', about_right: 'About right', hard: 'Hard', too_hard: 'Too hard' }, 'about_right', false) + '</div><div class="ob-sub" style="margin-top:18px">Any pain or unusual discomfort?</div><div class="chip-grid" id="missionPain">' + chipsHtml('missionPain', ['no', 'yes'], { no: 'No', yes: 'Yes' }, 'no', false) + '</div><button type="button" class="ob-btn" id="finishMissionBtn">Complete Mission</button><button type="button" class="ob-btn ob-btn-secondary danger-btn" id="stopPainBtn">Stop because of pain</button></div>');
+    app.appendChild(wrap);
+    var difficulty = 'about_right';
+    var pain = 'no';
+    document.getElementById('missionDifficulty').querySelectorAll('.chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        difficulty = chip.getAttribute('data-value');
+        document.getElementById('missionDifficulty').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+      });
+    });
+    document.getElementById('missionPain').querySelectorAll('.chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        pain = chip.getAttribute('data-value');
+        document.getElementById('missionPain').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+      });
+    });
+    document.getElementById('finishMissionBtn').addEventListener('click', function () {
+      var activeTrack = state.activeQuestTrack && SideQuestDomain.questTrackById && SideQuestDomain.questTrackById(state.activeQuestTrack.trackId);
+      var expectedMissionId = activeTrack ? activeTrack.missionIds[Math.min(state.activeQuestTrack.completedSessions, activeTrack.missionIds.length - 1)] : null;
+      if (activeTrack && expectedMissionId === mission.id) completeQuestTrackSession(key);
+      else completeMission(mission.id, key, { difficulty: difficulty, pain: pain });
+      renderQuestsHome();
+    });
+    document.getElementById('stopPainBtn').addEventListener('click', function () {
+      state.sideQuestLog.push({ id: mission.id, key: key || null, date: dateToISO(new Date()), category: mission.category, rewardPoints: 0, stopped: true, reason: 'pain' });
+      saveState(state);
+      showToast('Mission stopped. Do not train through sharp or worsening pain.');
+      renderQuestsHome();
+    });
+  }
+
+  function renderQuestsHome() {
+    renderSideQuestsHomeNew();
   }
 
   function renderMain() {
@@ -2097,6 +2359,7 @@
       var todayKey = currentWeek + '-' + todayDayIdx;
       var todayDayData = weeks[currentWeek - 1].days[todayDayIdx];
       var todayLabel = state.overrides[todayKey] || todayDayData.label;
+      var todayMission = missionById(state.sideQuestCalendar[todayKey]);
       var todayLoggable = isLoggable(todayLabel);
       var todayEntry = getLog(todayKey);
       var todayLogged = !!todayEntry;
@@ -2115,8 +2378,10 @@
       var todayCard = el(
         '<div class="today-card' + (!todayLoggable ? ' is-rest' : '') + '">' +
           '<div class="today-eyebrow">TODAY</div>' +
+          '<div class="mission-label">Main Mission</div>' +
           '<div class="today-plan">' + escapeHtml(todayLabel) + '</div>' +
           todayStatusHtml +
+          (todayMission ? '<div class="today-side"><div class="mission-label">Side Mission</div><button type="button" class="side-mission-link" id="todaySideMissionBtn">' + escapeHtml(todayMission.name) + ' &middot; ' + todayMission.durationMinutesMin + '-' + todayMission.durationMinutesMax + ' min</button></div>' : '') +
           (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
           '<div class="ai-coach">' +
             '<div class="pain-toggle" id="aiCoachOpenBtn">Ask your coach</div>' +
@@ -2127,6 +2392,11 @@
       if (todayLoggable) {
         document.getElementById('todayDetailBtn').addEventListener('click', function () {
           renderWorkoutDetail(currentWeek, todayDayIdx);
+        });
+      }
+      if (todayMission) {
+        document.getElementById('todaySideMissionBtn').addEventListener('click', function () {
+          renderMissionDetail(todayMission.id, todayKey);
         });
       }
       document.getElementById('aiCoachOpenBtn').addEventListener('click', renderCoachChat);
@@ -2162,6 +2432,7 @@
         var isToday = sameDate(d, today);
         var entry = getLog(key);
         var crossValue = state.crossType[key] || '';
+        var scheduledMission = missionById(state.sideQuestCalendar[key]);
 
         var classes = 'day-row';
         if (isToday) classes += ' is-today';
@@ -2175,6 +2446,7 @@
             '<div class="day-main">' +
               '<div class="day-plan">' + escapeHtml(label) + '</div>' +
               (calendarHint(label) ? '<div class="day-hint">' + escapeHtml(calendarHint(label)) + '</div>' : '') +
+              (scheduledMission ? '<button type="button" class="calendar-side-mission" data-mission-id="' + scheduledMission.id + '">Side Mission: ' + escapeHtml(scheduledMission.name) + '</button>' : '') +
               (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
           '</div>'
@@ -2237,6 +2509,13 @@
             else if (e.key === 'Escape') { inputEl.value = currentText; inputEl.blur(); }
           });
         });
+
+        var scheduledBtn = row.querySelector('.calendar-side-mission');
+        if (scheduledBtn) {
+          scheduledBtn.addEventListener('click', function () {
+            renderMissionDetail(scheduledMission.id, key);
+          });
+        }
 
         dayList.appendChild(row);
       });
@@ -2330,9 +2609,13 @@
     // run?" button flow uses -- one shared apply path for both, not two.
     function applySideQuestChat(key, sideQuestId) {
       var day = daysByKey[key];
-      var quest = SIDE_QUESTS.filter(function (q) { return q.id === sideQuestId; })[0];
-      if (!day || !quest || quest.replaces.indexOf(day.type) === -1) return false;
-      applySideQuest(key, quest, day.baseLabel);
+      var quest = missionById(sideQuestId);
+      var replaces = quest && (quest.replaces || quest.canReplaceWorkoutTypes || []);
+      if (!day || !quest || replaces.indexOf(day.type) === -1) return false;
+      if (quest.name === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
+      state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), rewardPoints: quest.xpReward || quest.rewardPoints || 0, relationship: quest.relationshipLabel || 'Can replace an easy run' });
+      state.xp += quest.xpReward || quest.rewardPoints || 0;
+      saveState(state);
       return true;
     }
 
@@ -2361,8 +2644,9 @@
         return { text: 'Cut ' + DOW_FULL[day.date.getDay()] + ' from ' + toUnit(day.miles) + ' to about ' + toUnit(newMiles) + ' ' + unitLabel() + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
       }
       if (action.type === 'substitute_side_quest') {
-        var quest = SIDE_QUESTS.filter(function (q) { return q.id === action.sideQuestId; })[0];
-        if (!quest || quest.replaces.indexOf(day.type) === -1) {
+        var quest = missionById(action.sideQuestId);
+        var replaces = quest && (quest.replaces || quest.canReplaceWorkoutTypes || []);
+        if (!quest || replaces.indexOf(day.type) === -1) {
           return { text: "That option doesn't fit today's workout — tap Not feeling this run? on the day itself to see real options.", confirmable: false };
         }
         if (quest.name === day.effectiveLabel) {
@@ -2483,7 +2767,7 @@
             if (qualityZones) p.qualityPaceZonesSecPerMi = qualityZones;
             return p;
           })(),
-          sideQuests: SIDE_QUESTS,
+          sideQuests: SideQuestDomain.MISSION_CATALOG && SideQuestDomain.missionSummaryForCoach ? SideQuestDomain.MISSION_CATALOG.map(SideQuestDomain.missionSummaryForCoach) : SIDE_QUESTS,
           history: history
         })
       }).then(function (res) {

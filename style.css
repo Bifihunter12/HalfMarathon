@@ -114,6 +114,41 @@ body {
 .quest-meta { font-size: 12px; color: var(--text-faint); letter-spacing: 0.02em; margin-bottom: 4px; }
 .quest-replaces { font-size: 12px; color: var(--text-faint); font-style: italic; margin-bottom: 10px; }
 .quest-btn { margin-top: 0; }
+.sidequest-screen { justify-content: flex-start; min-height: auto; }
+.mission-card { margin-top: 8px; }
+.active-quest-card { border-color: rgba(217, 119, 66, 0.35); }
+.mission-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.mission-tags span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  padding: 5px 8px;
+}
+.mission-exercises { margin-top: 8px; }
+.mission-exercises dt { font-size: 13.5px; font-weight: 700; color: var(--text); margin-top: 12px; }
+.mission-exercises dd {
+  margin-top: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.mission-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.mission-step input { margin-top: 2px; width: 18px; height: 18px; accent-color: var(--accent); }
+.mission-step strong { color: var(--text); }
 
 .intro-title {
   font-size: 32px;
@@ -308,6 +343,42 @@ body {
   letter-spacing: -0.2px;
   color: var(--text);
 }
+.mission-label {
+  margin-top: 12px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.today-side {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.side-mission-link,
+.calendar-side-mission {
+  appearance: none;
+  width: fit-content;
+  max-width: 100%;
+  background: rgba(217, 119, 66, 0.08);
+  border: 1px solid rgba(217, 119, 66, 0.24);
+  border-radius: 7px;
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.25;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+.calendar-side-mission {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: var(--border);
+  color: var(--text-dim);
+}
+.side-mission-link:hover,
+.calendar-side-mission:hover { border-color: var(--accent); color: var(--accent); }
 .today-status {
   margin-top: 8px;
   font-size: 13px;

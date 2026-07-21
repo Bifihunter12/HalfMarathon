@@ -1,10 +1,11 @@
-const APP_VERSION = "2026.07.14.8";
+const APP_VERSION = "2026.07.20.1";
 const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
   "/index.html",
   `/manifest.json?v=${APP_VERSION}`,
   `/style.css?v=${APP_VERSION}`,
+  `/side-quests.js?v=${APP_VERSION}`,
   `/app.js?v=${APP_VERSION}`,
   `/app-version.json?v=${APP_VERSION}`,
   "/sw.js",
