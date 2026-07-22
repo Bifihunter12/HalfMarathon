@@ -656,7 +656,10 @@
   // the label has no "· X" segment to replace at all).
   function applyCrossOverride(label, crossValue) {
     if (!crossValue) return label;
-    var hasStrength = / \+ strength$/.test(label);
+    // Suppress the day's own "+ strength" bonus-work suffix when the chosen
+    // activity already *is* strength training -- otherwise picking
+    // "Strength" produces a redundant "Strength + strength".
+    var hasStrength = / \+ strength$/.test(label) && crossValue.toLowerCase() !== 'strength';
     var base = label.replace(/ \+ strength$/, '').replace(/ · .+$/, '');
     return base + ' · ' + crossValue + (hasStrength ? ' + strength' : '');
   }
