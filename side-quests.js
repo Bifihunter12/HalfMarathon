@@ -99,6 +99,149 @@
       badgeId: 'carry_strong', progression: 'Add total carry time before adding load.', logicalNextStep: 'Upper Body 20',
       warmup: ['Unloaded walk 2 minutes', 'Light carry 30 seconds each side'],
       exercises: [{ fixed: 'Farmer, suitcase, front-rack, or backpack carry', sets: 'as needed', reps: '10 total carry minutes', restSeconds: 30, rpe: '6-7', cues: 'Tall posture, controlled steps.' }]
+    },
+    {
+      id: 'single_leg_stability', name: 'Single-Leg Stability', slug: 'single-leg-stability', category: 'strength', subcategory: 'single_leg',
+      missionType: 'single_session', description: 'A short progression of single-leg balance and control work.',
+      trainingPurpose: ['single_leg_strength', 'balance', 'injury_resistance'], durationMinutesMin: 10, durationMinutesMax: 15,
+      difficultyLevels: ['foundation', 'base', 'strong', 'advanced'], equipmentOptions: ['bodyweight', 'dumbbells', 'kettlebells'],
+      impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 2, upperBodyFatigue: 0, coreFatigue: 1, runningInterference: 'low',
+      relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
+      canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
+      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 70,
+      badgeId: 'single_leg_strong', progression: 'Advance one level at a time: stand, then head turns, then reach, then a supported single-leg deadlift, then loaded.', logicalNextStep: 'Single-Leg Strength',
+      warmup: ['Ankle circles x 10 each way', 'Easy marching in place 30 seconds'],
+      exercises: [
+        { fixed: 'Single-leg stand', sets: 2, reps: '20-30 sec per side', restSeconds: 20, rpe: '4-5', cues: 'Soft knee, steady gaze.' },
+        { fixed: 'Single-leg stand with head turns', sets: 2, reps: '15-20 sec per side', restSeconds: 20, rpe: '5', cues: 'Keep hips level while turning.' },
+        { fixed: 'Single-leg reach', sets: 2, reps: '6-8 per side', restSeconds: 20, rpe: '5-6', cues: 'Control the return, no wobble.' },
+        { fixed: 'Supported single-leg deadlift', sets: 2, reps: '8 per side', restSeconds: 30, rpe: '5-6', cues: 'Long spine, hips square.' }
+      ]
+    },
+    {
+      id: 'core_control', name: 'Core Control', slug: 'core-control', category: 'core', subcategory: 'core_stability',
+      missionType: 'single_session', description: 'A short combined core circuit that supports running posture and stability.',
+      trainingPurpose: ['core_stability', 'running_form'], durationMinutesMin: 10, durationMinutesMax: 15,
+      difficultyLevels: ['foundation', 'base', 'strong'], equipmentOptions: ['bodyweight', 'resistance_bands'],
+      impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 1, upperBodyFatigue: 1, coreFatigue: 3, runningInterference: 'low',
+      relationshipLabel: 'Complements today\'s Main Mission', completionMetric: 'workout_complete', targetValue: 1,
+      canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'quality', 'long', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
+      avoidWhen: ['sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 65,
+      badgeId: null, progression: 'Add a round or hold each position slightly longer before adding harder variations.', logicalNextStep: 'Core 10',
+      warmup: ['Easy breathing x 5 breaths', 'Cat-cow x 6'],
+      exercises: [
+        { pattern: 'core', fixed: 'Dead bug', sets: 3, reps: '8 per side', restSeconds: 20, rpe: '5', cues: 'Low back quiet.' },
+        { fixed: 'Bird dog', sets: 3, reps: '8 per side', restSeconds: 20, rpe: '5', cues: 'Move slowly.' },
+        { fixed: 'Side plank', sets: 3, reps: '20 sec per side', restSeconds: 20, rpe: '5-6', cues: 'Straight line, no sagging.' },
+        { fixed: 'Glute bridge', sets: 3, reps: '12', restSeconds: 20, rpe: '5', cues: 'Keep hips level.' }
+      ]
+    },
+    {
+      id: 'upper_body_armor', name: 'Upper-Body Armor', slug: 'upper-body-armor', category: 'strength', subcategory: 'upper_body',
+      missionType: 'single_session', description: 'A bodyweight-first upper-body circuit for posture and pull-side strength.',
+      trainingPurpose: ['upper_body_strength', 'posture', 'general_strength'], durationMinutesMin: 15, durationMinutesMax: 20,
+      difficultyLevels: ['foundation', 'base', 'strong', 'advanced'], equipmentOptions: ['bodyweight', 'resistance_bands', 'dumbbells', 'kettlebells', 'cable_machine'],
+      impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 0, upperBodyFatigue: 3, coreFatigue: 2, runningInterference: 'low',
+      relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
+      canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
+      avoidWhen: ['severe_fatigue', 'shoulder_pain', 'wrist_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 70,
+      badgeId: null, progression: 'Add reps first, then an equipment version of the same movement.', logicalNextStep: 'Upper Body 20',
+      warmup: ['Shoulder circles x 10 each way', 'Band pull-aparts or scap squeezes x 12'],
+      exercises: [
+        { pattern: 'push', sets: 3, reps: '6-15', restSeconds: 40, rpe: '6-7', cues: 'Quality reps, stop before technical failure.' },
+        { fixed: 'Prone Y-T-W raises', sets: 2, reps: '8 per position', restSeconds: 30, rpe: '5', cues: 'Small controlled range.' },
+        { fixed: 'Plank shoulder taps', sets: 2, reps: '10 per side', restSeconds: 30, rpe: '5-6', cues: 'Hips stay still.' },
+        { fixed: 'Bear-position hold', sets: 2, reps: '20-30 sec', restSeconds: 30, rpe: '6', cues: 'Knees hover, back flat.' }
+      ]
+    },
+    {
+      id: 'runners_leg_circuit', name: 'Runner\'s Leg Circuit', slug: 'runners-leg-circuit', category: 'strength', subcategory: 'runner_strength',
+      missionType: 'single_session', description: 'A concise, repeatable lower-body circuit built for runners.',
+      trainingPurpose: ['runner_strength', 'durability', 'balance'], durationMinutesMin: 12, durationMinutesMax: 18,
+      difficultyLevels: ['foundation', 'base', 'strong'], equipmentOptions: ['bodyweight'],
+      impactLevel: 'low', trainingLoad: 3, lowerBodyFatigue: 3, upperBodyFatigue: 0, coreFatigue: 1, runningInterference: 'moderate',
+      relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
+      canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: ['quality', 'long'],
+      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 70,
+      badgeId: null, progression: 'Add a round before adding harder variations of each movement.', logicalNextStep: 'Strong Runner 20',
+      warmup: ['Easy marching in place 30 seconds', 'Leg swings x 8 each way'],
+      exercises: [
+        { pattern: 'squat', sets: 3, reps: '12', restSeconds: 30, rpe: '6', cues: 'Smooth depth, whole foot grounded.' },
+        { fixed: 'Reverse lunge', sets: 3, reps: '8 per side', restSeconds: 30, rpe: '6', cues: 'Controlled descent.' },
+        { fixed: 'Glute bridge', sets: 3, reps: '12', restSeconds: 20, rpe: '5', cues: 'Keep hips level.' },
+        { fixed: 'Calf raise', sets: 3, reps: '15', restSeconds: 20, rpe: '5', cues: 'Slow lowering.' },
+        { fixed: 'Single-leg balance', sets: 3, reps: '20 sec per side', restSeconds: 20, rpe: '4-5', cues: 'Soft knee, steady gaze.' }
+      ]
+    }
+  ];
+
+  // ── Bodyweight Challenge Library (docs/RACR_SideMission_Expansion.md) ──
+  // Distinct from MISSION_CATALOG (single-session, complete/not-complete) and
+  // from QUEST_TRACKS (session-count progress) -- a challenge accumulates a
+  // numeric quantity (reps or seconds) toward a target across multiple
+  // sessions, e.g. logging 30 squats today and 70 more next week both count
+  // toward Squat Century's 100. Progress is never stored as its own counter
+  // (see challengeProgressFromLog below) -- it's derived from tagged
+  // state.sideQuestLog entries, which already merge safely across devices.
+  // Not to be confused with the app's separate, unrelated "Weekly Challenge"
+  // feature (WEEKLY_QUICK_QUESTS above / state.activeWeeklyChallenge in
+  // app.js) -- that's a weekly session-count target, a different concept.
+  var CHALLENGE_CATALOG = [
+    {
+      id: 'squat_century', name: 'Squat Century', category: 'strength', unit: 'reps', levels: [100],
+      description: 'Complete 100 controlled squats, in any structure that works for you.',
+      variants: { beginner: 'Chair squat', standard: 'Bodyweight squat', advanced: 'Goblet squat' },
+      badgeId: 'squat_century', xpReward: 40, equipmentOptions: ['bodyweight', 'dumbbells'],
+      avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 3
+    },
+    {
+      id: 'lunge_ladder', name: 'Lunge Ladder', category: 'strength', unit: 'reps', levels: [20, 40, 60, 80, 100],
+      description: 'A personalized reverse-lunge progression, counted across both legs.',
+      variants: { beginner: 'Supported split squat', standard: 'Reverse lunge', advanced: 'Weighted reverse lunge' },
+      badgeId: 'lunge_builder', xpReward: 40, equipmentOptions: ['bodyweight', 'dumbbells', 'kettlebells'],
+      avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 3
+    },
+    {
+      id: 'pushup_progress', name: 'Push-Up Progress', category: 'strength', unit: 'reps', levels: [15, 25, 40, 60, 100],
+      description: 'Progress within whichever push-up variation fits you today.',
+      variants: { beginner: 'Wall push-up', standard: 'Incline push-up', advanced: 'Floor push-up' },
+      badgeId: 'pushup_progress', xpReward: 35, equipmentOptions: ['bodyweight'],
+      avoidBeforeWorkoutTypes: [], lowerBodyFatigue: 0
+    },
+    {
+      id: 'glute_bridge_builder', name: 'Glute-Bridge Builder', category: 'strength', unit: 'reps', levels: [30, 50, 75, 100],
+      description: 'Build accumulated glute-bridge volume at a controlled tempo.',
+      variants: { beginner: 'Supported glute bridge', standard: 'Glute bridge', advanced: 'Single-leg glute bridge' },
+      badgeId: null, xpReward: 35, equipmentOptions: ['bodyweight'],
+      avoidBeforeWorkoutTypes: ['long'], lowerBodyFatigue: 2
+    },
+    {
+      id: 'calf_capacity', name: 'Calf Capacity', category: 'strength', unit: 'reps', levels: [40, 60, 80, 100],
+      description: 'Build calf and ankle durability with slow, controlled repetitions.',
+      variants: { beginner: 'Supported calf raise', standard: 'Calf raise', advanced: 'Single-leg calf raise' },
+      badgeId: 'calf_capacity', xpReward: 35, equipmentOptions: ['bodyweight'],
+      avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 2
+    },
+    {
+      id: 'wall_sit_builder', name: 'Wall-Sit Builder', category: 'strength', unit: 'seconds', levels: [60, 120, 180, 300],
+      description: 'Accumulate wall-sit time across one or more sets -- quality over one maximum hold.',
+      variants: { beginner: 'Supported wall sit', standard: 'Wall sit', advanced: 'Single-leg wall sit' },
+      badgeId: null, xpReward: 30, equipmentOptions: ['bodyweight'],
+      avoidBeforeWorkoutTypes: ['long'], lowerBodyFatigue: 2
+    },
+    {
+      id: 'plank_accumulator', name: 'Plank Accumulator', category: 'core', unit: 'seconds', levels: [120, 240, 360, 480, 600],
+      description: 'Accumulate quality plank time across sets -- never a single continuous maximum hold.',
+      variants: { beginner: 'Knee plank', standard: 'Standard plank', advanced: 'Side plank' },
+      badgeId: null, xpReward: 30, equipmentOptions: ['bodyweight'],
+      avoidBeforeWorkoutTypes: [], lowerBodyFatigue: 0
+    },
+    {
+      id: 'step_up_summit', name: 'Step-Up Summit', category: 'strength', unit: 'reps', levels: [50, 100, 150, 200],
+      description: 'Accumulate controlled step-ups using a safe step, stair, or box.',
+      variants: { beginner: 'Low step-up', standard: 'Step-up', advanced: 'Weighted step-up' },
+      badgeId: null, xpReward: 35, equipmentOptions: ['bodyweight', 'chair_or_bench'],
+      avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 3
     }
   ];
 
@@ -123,9 +266,9 @@
 
   var CATEGORY_SECTIONS = [
     { id: 'recommended', name: 'Recommended for you', missionIds: ['upper_body_20', 'core_10', 'trail_90'] },
-    { id: 'build_strength', name: 'Build Strength', missionIds: ['strong_runner_20', 'upper_body_20', 'core_10', 'carry_10'] },
+    { id: 'build_strength', name: 'Build Strength', missionIds: ['strong_runner_20', 'upper_body_20', 'core_10', 'carry_10', 'single_leg_stability', 'core_control', 'upper_body_armor', 'runners_leg_circuit'] },
     { id: 'go_explore', name: 'Go Explore', missionIds: ['trail_90'] },
-    { id: 'quick_wins', name: 'Quick Wins', missionIds: ['core_10', 'carry_10'] },
+    { id: 'quick_wins', name: 'Quick Wins', missionIds: ['core_10', 'carry_10', 'core_control'] },
     { id: 'cross_training', name: 'Cross-Training', missionIds: ['trail_90'] },
     { id: 'recovery_mobility', name: 'Recovery and Mobility', missionIds: ['core_10'] }
   ];
@@ -281,9 +424,34 @@
     return exercise.fixed || '';
   }
 
+  function challengeById(id) {
+    return CHALLENGE_CATALOG.filter(function (c) { return c.id === id; })[0] || null;
+  }
+
+  // Pure -- takes the log array as a parameter rather than touching any
+  // stored state directly, matching this module's existing convention
+  // (e.g. weeklyLoad(days, missions)). `level` is 1-indexed count of levels
+  // reached (0 = none yet); `complete` is true only once every level,
+  // including the final one, has been reached.
+  function challengeProgressFromLog(challengeId, sideQuestLog) {
+    var challenge = challengeById(challengeId);
+    if (!challenge) return { accumulated: 0, level: 0, levelTarget: 0, complete: false };
+    var accumulated = (sideQuestLog || [])
+      .filter(function (e) { return e && e.challengeId === challengeId; })
+      .reduce(function (sum, e) { return sum + (e.amount || 0); }, 0);
+    var level = 0;
+    for (var i = 0; i < challenge.levels.length; i++) {
+      if (accumulated >= challenge.levels[i]) level = i + 1; else break;
+    }
+    var complete = level >= challenge.levels.length;
+    var levelTarget = challenge.levels[Math.min(level, challenge.levels.length - 1)];
+    return { accumulated: accumulated, level: level, levelTarget: levelTarget, complete: complete };
+  }
+
   return {
     MOVEMENT_VARIANTS: MOVEMENT_VARIANTS,
     MISSION_CATALOG: MISSION_CATALOG,
+    CHALLENGE_CATALOG: CHALLENGE_CATALOG,
     QUEST_TRACKS: QUEST_TRACKS,
     WEEKLY_QUICK_QUESTS: WEEKLY_QUICK_QUESTS,
     CATEGORY_SECTIONS: CATEGORY_SECTIONS,
@@ -301,6 +469,8 @@
     detectCalendarConflict: detectCalendarConflict,
     recommendMissions: recommendMissions,
     missionSummaryForCoach: missionSummaryForCoach,
-    resolveExercise: resolveExercise
+    resolveExercise: resolveExercise,
+    challengeById: challengeById,
+    challengeProgressFromLog: challengeProgressFromLog
   };
 });

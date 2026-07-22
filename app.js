@@ -448,6 +448,53 @@
     return true;
   }
 
+  function bodyweightChallengeById(id) {
+    return SideQuestDomain.challengeById ? SideQuestDomain.challengeById(id) : null;
+  }
+  function bodyweightChallengeProgress(challengeId) {
+    return SideQuestDomain.challengeProgressFromLog
+      ? SideQuestDomain.challengeProgressFromLog(challengeId, state.sideQuestLog)
+      : { accumulated: 0, level: 0, levelTarget: 0, complete: false };
+  }
+
+  // ── Bodyweight Challenge Library (docs/RACR_SideMission_Expansion.md) ──
+  // Logs one session's contribution toward a named accumulated challenge
+  // (e.g. 30 of Squat Century's 100 squats). Never awards XP per log --
+  // only once, the first time the accumulated total crosses the challenge's
+  // final level, matching "no XP per repetition, no unlimited XP for
+  // repeating the same challenge." Reusing awardXp's upsert-by-idempotencyKey
+  // behavior (via awardSideMissionXp) means a second full completion just
+  // replaces the same ledger entry rather than adding a new one -- no
+  // separate cooldown/repeat-window logic needed for that guarantee.
+  function logChallengeProgress(challengeId, amount, variant) {
+    var challenge = bodyweightChallengeById(challengeId);
+    if (!challenge || !amount || amount <= 0) return null;
+    var before = bodyweightChallengeProgress(challengeId);
+    state.sideQuestLog.push({
+      id: 'challenge_' + challengeId + '_' + Date.now(),
+      challengeId: challengeId,
+      key: null,
+      date: dateToISO(new Date()),
+      category: challenge.category,
+      amount: amount,
+      variant: variant || 'standard'
+    });
+    var after = bodyweightChallengeProgress(challengeId);
+    var xpResult = null;
+    var justCompleted = after.complete && !before.complete;
+    if (justCompleted) {
+      xpResult = awardSideMissionXp('challenge|' + challengeId, challenge.xpReward, { key: null });
+      if (challenge.badgeId && state.badges.indexOf(challenge.badgeId) === -1) state.badges.push(challenge.badgeId);
+    }
+    saveState(state);
+    refreshPathProgress();
+    var toast = justCompleted
+      ? challenge.name + ' complete!' + xpToastSuffix(xpResult)
+      : 'Logged ' + amount + ' ' + challenge.unit + ' toward ' + challenge.name + ' (' + after.accumulated + ' of ' + after.levelTarget + ').';
+    showToast(toast);
+    return after;
+  }
+
   function buildCurrentWeeks() {
     if (!state.raceGoal || !state.profile || !state.planMeta) return [];
     var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -2344,6 +2391,22 @@
     return '<div class="quest-card mission-card"><div class="quest-name">' + escapeHtml(mission.name) + '</div><div class="quest-desc">' + escapeHtml(mission.description) + '</div><div class="mission-tags"><span>' + durationText(mission) + '</span><span>Load ' + mission.trainingLoad + '</span><span>' + escapeHtml(mission.runningInterference) + ' interference</span></div><div class="quest-meta">' + escapeHtml(mission.relationshipLabel) + ' &middot; ' + mission.xpReward + ' XP</div><button type="button" class="ob-btn ob-btn-secondary quest-btn" ' + actionAttr + '="' + mission.id + '">' + actionLabel + '</button></div>';
   }
 
+  // Bodyweight Challenge card -- distinct from renderMissionCard: shows
+  // accumulated progress toward the challenge's current level, reusing the
+  // same .progress-track/.progress-fill pattern as the active Mission Track
+  // and Weekly Challenge cards above.
+  function renderChallengeCard(challenge) {
+    var progress = bodyweightChallengeProgress(challenge.id);
+    var pct = progress.levelTarget ? Math.min(100, Math.round(100 * progress.accumulated / progress.levelTarget)) : 0;
+    return '<div class="quest-card mission-card">' +
+      '<div class="quest-name">' + escapeHtml(challenge.name) + '</div>' +
+      '<div class="quest-desc">' + escapeHtml(challenge.description) + '</div>' +
+      '<div class="quest-meta">' + progress.accumulated + ' of ' + progress.levelTarget + ' ' + escapeHtml(challenge.unit) + (progress.complete ? ' &middot; Complete' : '') + ' &middot; ' + challenge.xpReward + ' XP</div>' +
+      '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
+      '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-challenge-id="' + challenge.id + '" style="margin-top:10px">' + (progress.complete ? 'View' : (progress.accumulated ? 'Continue' : 'Start')) + '</button>' +
+    '</div>';
+  }
+
   function renderSideQuestsHomeNew() {
     if (!state.sideQuestOnboarding || !state.sideQuestOnboarding.completed) { renderSideQuestOnboarding(); return; }
     var app = document.getElementById('app');
@@ -2399,8 +2462,9 @@
       var cards = section.missionIds.map(missionById).filter(Boolean).map(function (m) { return renderMissionCard(m, 'Preview', 'data-mission-id'); }).join('');
       return '<div class="ob-sub" style="margin-top:20px">' + escapeHtml(section.name) + '</div>' + cards;
     }).join('');
+    var challengesHtml = (SideQuestDomain.CHALLENGE_CATALOG || []).map(renderChallengeCard).join('');
     var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>XP</dt><dd>' + state.xp + '</dd><dt>Side Missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(function (b) { return escapeHtml(humanizeSlug(b)); }).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed Side Missions, badges, personal records, and lifetime totals will appear here.</p>';
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Missions</div><div class="ob-title">Side Missions</div><p class="intro-body">Your run is the Main Quest. Side Missions make the journey stronger, broader, and more enjoyable.</p><div class="ob-sub">Active Mission Track</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + '<div class="ob-sub" style="margin-top:20px">Recommended for you</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Mission Tracks</div>' + tracksHtml + sectionsHtml + '<div class="ob-sub" style="margin-top:20px">Completed Side Missions</div>' + completedHtml + '</div>');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Missions</div><div class="ob-title">Side Missions</div><p class="intro-body">Your run is the Main Quest. Side Missions make the journey stronger, broader, and more enjoyable.</p><div class="ob-sub">Active Mission Track</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + '<div class="ob-sub" style="margin-top:20px">Recommended for you</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Mission Tracks</div>' + tracksHtml + '<div class="ob-sub" style="margin-top:20px">Challenges</div>' + challengesHtml + sectionsHtml + '<div class="ob-sub" style="margin-top:20px">Completed Side Missions</div>' + completedHtml + '</div>');
     app.appendChild(wrap);
     var resume = document.getElementById('resumeTrackBtn');
     if (resume && activeTrack) resume.addEventListener('click', function () { renderMissionDetail(activeTrack.missionIds[Math.min(active.completedSessions, activeTrack.missionIds.length - 1)], null); });
@@ -2411,6 +2475,9 @@
     });
     wrap.querySelectorAll('[data-mission-id]').forEach(function (btn) {
       btn.addEventListener('click', function () { renderMissionDetail(btn.getAttribute('data-mission-id'), null); });
+    });
+    wrap.querySelectorAll('[data-challenge-id]').forEach(function (btn) {
+      btn.addEventListener('click', function () { renderBodyweightChallengeDetail(btn.getAttribute('data-challenge-id')); });
     });
     if (activeChallenge && challenge) {
       var weeklyFillEl = document.getElementById('weeklyChallengeFill');
@@ -2472,6 +2539,60 @@
       });
     });
     document.getElementById('missionBackBtn').addEventListener('click', renderQuestsHome);
+  }
+
+  function renderBodyweightChallengeDetail(challengeId) {
+    var challenge = bodyweightChallengeById(challengeId);
+    if (!challenge) return renderQuestsHome();
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
+    wireHeaderIcons();
+    var progress = bodyweightChallengeProgress(challengeId);
+    var pct = progress.levelTarget ? Math.min(100, Math.round(100 * progress.accumulated / progress.levelTarget)) : 0;
+    var variantKeys = ['beginner', 'standard', 'advanced'];
+    var variantLabels = {};
+    variantKeys.forEach(function (k) { variantLabels[k] = challenge.variants[k]; });
+    var logHtml = progress.complete ?
+      '<p class="recap-empty">Challenge complete &mdash; nice work.' + (challenge.badgeId ? ' Badge earned: ' + escapeHtml(humanizeSlug(challenge.badgeId)) + '.' : '') + '</p>' :
+      ('<div class="ob-label">Variation</div>' +
+        '<div class="chip-grid" id="challengeVariant">' + chipsHtml('challengeVariant', variantKeys, variantLabels, 'standard', false) + '</div>' +
+        '<div class="ob-label">How many ' + escapeHtml(challenge.unit) + ' did you do today?</div>' +
+        '<input class="ob-input" type="number" min="0" step="1" id="challengeAmount" placeholder="e.g. 30">' +
+        '<button type="button" class="ob-btn" id="logChallengeBtn">Log progress</button>');
+    var wrap = el(
+      '<div class="ob sidequest-screen">' +
+        '<div class="brand-mark">Challenge</div>' +
+        '<div class="ob-title">' + escapeHtml(challenge.name) + '</div>' +
+        '<p class="intro-body">' + escapeHtml(challenge.description) + '</p>' +
+        '<div class="quest-meta">' + progress.accumulated + ' of ' + progress.levelTarget + ' ' + escapeHtml(challenge.unit) + '</div>' +
+        '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
+        '<dl class="wd-info"><dt>XP on completion</dt><dd>' + challenge.xpReward + ' XP</dd></dl>' +
+        logHtml +
+        '<div class="ob-cancel" id="challengeBackBtn">Back to Side Missions</div>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+    var selectedVariant = 'standard';
+    var variantWrap = document.getElementById('challengeVariant');
+    if (variantWrap) {
+      variantWrap.querySelectorAll('.chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          selectedVariant = chip.getAttribute('data-value');
+          variantWrap.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+        });
+      });
+    }
+    var logBtn = document.getElementById('logChallengeBtn');
+    if (logBtn) {
+      logBtn.addEventListener('click', function () {
+        var amount = parseInt(document.getElementById('challengeAmount').value, 10);
+        if (!amount || amount <= 0) return;
+        logChallengeProgress(challengeId, amount, selectedVariant);
+        renderBodyweightChallengeDetail(challengeId);
+      });
+    }
+    document.getElementById('challengeBackBtn').addEventListener('click', renderQuestsHome);
   }
 
   function renderMissionPlayer(missionId, key) {
