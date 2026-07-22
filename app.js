@@ -2231,7 +2231,7 @@
     var exercisesHtml = '<dl class="mission-exercises">' + (mission.exercises || []).map(function (ex) {
       var variation = SideQuestDomain.resolveExercise ? SideQuestDomain.resolveExercise(ex, 'base') : (ex.fixed || '');
       var name = ex.fixed || variation;
-      return '<dt>' + escapeHtml(name) + '</dt><dd>' + escapeHtml((ex.sets || '') + ' sets &middot; ' + (ex.reps || '') + ' &middot; RPE ' + (ex.rpe || 'easy-moderate')) + '<div class="quest-meta">Scale: ' + escapeHtml(variation) + '</div>' + (ex.cues ? '<div class="quest-meta">' + escapeHtml(ex.cues) + '</div>' : '') + '</dd>';
+      return '<dt>' + escapeHtml(name) + '</dt><dd>' + escapeHtml(String(ex.sets || '')) + ' sets &middot; ' + escapeHtml(String(ex.reps || '')) + ' &middot; RPE ' + escapeHtml(String(ex.rpe || 'easy-moderate')) + '<div class="quest-meta">Scale: ' + escapeHtml(variation) + '</div>' + (ex.cues ? '<div class="quest-meta">' + escapeHtml(ex.cues) + '</div>' : '') + '</dd>';
     }).join('') + '</dl>';
     var scheduleOptions = '';
     if (!key) {
