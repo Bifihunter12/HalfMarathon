@@ -1,6 +1,6 @@
 # RACR Leveling System — XP, RACR Level, Badges, PRs
 
-Saved verbatim/condensed (2026-07-22). This completes the reward architecture the RACR Master Prompt only partially specified — it answers *why XP matters, what leveling up means, what a level unlocks,* and *how small wins feel rewarding between major milestones.* Builds on, does not replace, `RACR_Master_Prompt.md`'s existing Badges/Progress-system/Reward-hierarchy sections. **Spec only — no code changes made from this doc; see the Master Prompt's own "Next action" note for what to build first.**
+Saved verbatim/condensed (2026-07-22). **Superseded the same day by `docs/RACR_Reward_System_Master_Prompt.md`** — a fuller engineering-grade version of this same material (adds quality bonuses, the XP event system, full data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Kept here for history; build from the newer doc, not this one. Original framing: this completes the reward architecture the RACR Master Prompt only partially specified — it answers *why XP matters, what leveling up means, what a level unlocks,* and *how small wins feel rewarding between major milestones.* **Spec only — no code changes made from either doc yet.**
 
 ## Four distinct progression systems (each answers a different question)
 

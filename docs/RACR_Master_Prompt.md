@@ -40,7 +40,7 @@ Upcoming, available, in progress, completed as planned, completed with coach-app
 
 Available, recommended, optional, not-recommended-today, locked-until-prerequisite, in progress, completed, mastered, temporarily paused.
 
-## Reward hierarchy (6 levels — refined by `docs/RACR_Leveling_System.md`)
+## Reward hierarchy (6 levels — refined by `docs/RACR_Reward_System_Master_Prompt.md`)
 
 1. **Micro-wins** (new, 2026-07-22 addition) — shown, not permanently collected: "You showed up," "Easy effort held," "Warm-up completed," "Returned after a missed day," "Stopped at the right time," etc. Give XP + immediate feedback + progress toward a larger badge without cluttering the badge cabinet — this is the layer that makes small, non-milestone actions feel rewarding.
 2. Accomplishments (factual milestones — first continuous mile, first 20-min run, four consistent weeks, etc. — not necessarily badges)
@@ -63,19 +63,15 @@ Full data model: id/slug/name/descriptions/category/subcategory/tierModel/curren
 
 **Explicitly forbidden** (badges and mechanics): No Rest Days, Pain Is Weakness, 7-runs-in-7-days universal challenge, calorie burn, fastest easy run, ran-while-sick, ran-through-pain, beat-everyone, perfect-plan-no-mods, streak-saved-at-any-cost, sleep-is-for-the-weak, double-workout-redemption, make-up-mileage, punishment-run. Never remove earned badges after a miss, reset the whole Path, shame publicly, require social sharing, use deceptive countdowns/fake scarcity.
 
-## Progress system — four distinct progression systems
+## Progress system — six questions, never merged into one number
 
-Superseded/completed by `docs/RACR_Leveling_System.md` (2026-07-22 addition, full detail there): points/XP are **not** just an optional light layer as originally scoped here — the leveling addendum promotes XP + a permanent **RACR Level** into a full named system, answering "how much experience have I built as a runner," distinct from and never combined with Race Readiness, the Main Quest Path, or Badges. Still true and unchanged: XP is never awarded for exceeding prescribed mileage and never determines coaching decisions — the two systems are additive, not in tension.
+Superseded/completed by `docs/RACR_Reward_System_Master_Prompt.md` (2026-07-22, the authoritative engineering-grade version — full detail there, including quality bonuses, the XP event system, data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Points/XP are **not** just an optional light layer as originally scoped here — they're a full named system with a permanent **RACR Level**, explicitly separate from Race Readiness. Still true and unchanged: XP is never awarded for exceeding prescribed mileage and never determines coaching decisions.
 
-Four systems, each answering one question, never merged:
-1. **Main Quest Path** — "How close am I to my race?" Season-specific, resets each season (archives the completed one).
-2. **XP + RACR Level** — "How much experience have I built as a runner?" Permanent, cross-season. 50 numeric levels with periodic titles (In Motion → Building → Grounded → Enduring → Advancing → Racecraft → Seasoned → Proven → RACR). Unlocks personalization only (profile titles, Path themes, badge frames, Season Card formats, celebration styles) — never safety, coaching, logging, or recovery options, which stay free at every level.
-3. **Badges** — "What specific things have I accomplished?" Award bonus XP but the achievement is the primary value.
-4. **Personal Records & Milestones** — "What can I do now that I couldn't before?" Not all PRs become badges — only the most meaningful graduate.
+Six questions, each answered by a different system, never combined into one number: **Path progress** ("how close am I to this race-training journey," season-specific) · **Running progress** ("am I running farther/faster/with better control") · **Achievements** ("what meaningful things have I done") · **XP** ("how much valid training experience did this action earn") · **RACR Level** ("how much experience have I accumulated as a runner across all seasons" — permanent, cross-season, 50 numeric levels with periodic titles In Motion→Building→Grounded→Enduring→Advancing→Racecraft→Seasoned→Proven→RACR, unlocking personalization only — never safety/coaching/logging/recovery, which stay free at every level) · **Race Readiness** ("how prepared am I for my current target race" — current-season only, a high-level user can have low readiness after a break and vice versa).
 
 **Weekly adherence, not daily streaks** — states: on course / adapted intelligently / partially completed / recovery week / needs recalibration. A user who did 3 planned + 2 valid adaptations may be more "adherent" than one who ran extra unplanned mileage.
 
-**Main Quest vs. Side Mission XP split**: target 70–80% of weekly XP from Main Quest, 20–30% from Side Missions (Side Mission XP additionally capped at 30% of that week's Main Quest XP) — protects the product hierarchy so a runner can't skip runs, do mobility daily, and out-level someone following the actual plan. Full XP tables (Main Quest base values 40–500, Side Mission base values 25–70, completion modifiers 0–100% keyed to whether the session's *purpose* was preserved not just raw compliance), the 50-level cumulative-XP curve, per-level unlock lists, the level-up presentation format, and the 6-step post-run / post-Side-Mission reward sequences all live in `docs/RACR_Leveling_System.md` — condensing them here would just duplicate that doc.
+**Main Quest vs. Side Mission XP split**: target 70–80% of weekly XP from Main Quest, 20–30% from Side Missions (Side Mission XP additionally capped at 30% of that week's Main Quest XP) — protects the product hierarchy so a runner can't skip runs, do mobility daily, and out-level someone following the actual plan. Full XP tables (Main Quest base values 40–500, Side Mission base values 25–70, completion + quality-bonus modifiers keyed to whether the session's *purpose* was preserved not just raw compliance), the 50-level cumulative-XP curve, per-level unlock lists, the level-up presentation format, and the 8-step post-run / post-Side-Mission reward sequences all live in `docs/RACR_Reward_System_Master_Prompt.md` — condensing them here would just duplicate that doc.
 
 ## Side-mission safety logic
 
@@ -109,6 +105,6 @@ Inspect existing architecture before changing code; reuse existing components/co
 
 12 questions, most load-bearing: does this reward a real behavior that supports the race goal? Can it be gamed unsafely? Does it make rest look like failure? Would a qualified running coach approve it? If the answer reveals unsafe/meaningless behavior, don't implement it.
 
-## Anti-gaming rules (2026-07-22 addition, full list in `docs/RACR_Leveling_System.md`)
+## Anti-gaming rules (2026-07-22 addition, full list in `docs/RACR_Reward_System_Master_Prompt.md`)
 
 No extra XP for mileage beyond the prescribed range; no repeat XP from delete-and-relog; no unlimited XP from very short mobility sessions; no multiple rest-day rewards on the same date; Side Mission weekly XP cap; badge awards idempotent; PRs require eligible activities only; easy-run speed never generates a speed bonus; pain tolerance never generates XP; unplanned double workouts get no bonus; imported activities checked for duplicates; honest-mistake edits never lose already-earned legitimate rewards.
