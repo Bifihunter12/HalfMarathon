@@ -646,6 +646,20 @@
   function isLoggable(label) { return !isRest(label); }
   function isRace(label) { return !!RACE_LABEL_SET[label.trim().toLowerCase()]; }
   function hasCross(label) { return /\bcross\b/i.test(label); }
+  // The per-day cross-training <select> (state.crossType[key]) previously
+  // only toggled a CSS class on itself -- the label kept whatever activity
+  // was baked in from the profile-level crossPref at plan-generation time,
+  // so picking a different option in the dropdown visibly did nothing. This
+  // splices the chosen activity into the displayed label instead, preserving
+  // any "+ strength" suffix and working whether or not the base label already
+  // named an activity (profile.crossOptions could be 'None', in which case
+  // the label has no "· X" segment to replace at all).
+  function applyCrossOverride(label, crossValue) {
+    if (!crossValue) return label;
+    var hasStrength = / \+ strength$/.test(label);
+    var base = label.replace(/ \+ strength$/, '').replace(/ · .+$/, '');
+    return base + ' · ' + crossValue + (hasStrength ? ' + strength' : '');
+  }
 
   function escapeHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -2879,6 +2893,7 @@
       var todayKey = currentWeek + '-' + todayDayIdx;
       var todayDayData = weeks[currentWeek - 1].days[todayDayIdx];
       var todayLabel = state.overrides[todayKey] || todayDayData.label;
+      if (hasCross(todayLabel) && state.crossType[todayKey]) todayLabel = applyCrossOverride(todayLabel, state.crossType[todayKey]);
       var todayMission = missionById(state.sideQuestCalendar[todayKey]);
       var todayLoggable = isLoggable(todayLabel);
       var todayEntry = getLog(todayKey);
@@ -2953,6 +2968,7 @@
         var isPast = d < today;
         var entry = getLog(key);
         var crossValue = state.crossType[key] || '';
+        if (cross && crossValue) label = applyCrossOverride(label, crossValue);
         var scheduledMission = missionById(state.sideQuestCalendar[key]);
 
         var classes = 'day-row';
@@ -2989,6 +3005,8 @@
               selectEl.classList.remove('chosen');
             }
             saveState(state);
+            var planDiv = row.querySelector('.day-plan');
+            if (planDiv) planDiv.textContent = selectEl.value ? applyCrossOverride(state.overrides[key] || baseLabel, selectEl.value) : (state.overrides[key] || baseLabel);
           });
         }
 
@@ -3371,6 +3389,7 @@
     var key = weekNum + '-' + dayIdx;
     var d = dateForSlot(raceDate, planLengthWeeks, weekNum, dayIdx);
     var label = state.overrides[key] || dayData.label;
+    if (hasCross(label) && state.crossType[key]) label = applyCrossOverride(label, state.crossType[key]);
     var loggable = isLoggable(label);
     var race = isRace(label);
     var detail = WORKOUT_DETAIL[dayData.type] || null;
