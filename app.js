@@ -120,26 +120,26 @@
     ['Easy + strides', 'Easy pace, then 4-6 x ~20 sec quick-but-controlled pickups, full recovery between'],
     ['Medium-long run', 'Longer than an easy run, shorter than your weekly long run'],
     ['Back-to-back long runs', 'Two long-ish runs on consecutive days, to train running on tired legs'],
-    ['Time-on-feet long run', 'Paced by duration, not distance -- hiking the tough parts is fine'],
+    ['Time-on-feet long run', 'Paced by duration, not distance – hiking the tough parts is fine'],
     ['Trail long run w/ climbing', 'A long run on the hilliest terrain you have access to'],
     ['Long climb + descent conditioning', 'Sustained uphill and downhill running to condition legs for race terrain'],
-    ['Night run rehearsal', 'Practice running in the dark -- test your lights/gear before race day'],
+    ['Night run rehearsal', 'Practice running in the dark – test your lights/gear before race day'],
     ['Downhill conditioning', 'Repeated descents to condition your legs for the pounding of downhill running'],
     ['Gear + fueling rehearsal', 'Practice your actual race-day gear, food, and drink on this run'],
-    ['Fartlek', '"Speed play" -- unstructured faster bursts mixed into an easy run, by feel not exact pace'],
+    ['Fartlek', '"Speed play" – unstructured faster bursts mixed into an easy run, by feel not exact pace'],
     ['Hill repeats', 'Hard uphill efforts, jogging or walking back down as recovery between each'],
     ['Hills:', 'Hard uphill efforts, jogging or walking back down as recovery between each'],
     ['@ half-marathon pace', 'Miles at your actual goal race pace, so it feels familiar on race day'],
     ['@ marathon pace', 'Miles at your actual goal race pace, so it feels familiar on race day'],
     ['@ 5K pace', 'Fast reps at your goal 5K race pace, with recovery jogs between'],
-    ['@ 5K effort', 'Hard, sustained reps around 5K effort -- go by feel, not a watch'],
+    ['@ 5K effort', 'Hard, sustained reps around 5K effort – go by feel, not a watch'],
     ['@ 10K pace', 'Reps at your goal 10K race pace, with recovery jogs between'],
-    ['@ 10K effort', 'Sustained, controlled reps around 10K effort -- harder than tempo, not all-out'],
-    ['Tempo', 'A "comfortably hard" sustained effort -- faster than easy, controlled, not a sprint'],
+    ['@ 10K effort', 'Sustained, controlled reps around 10K effort – harder than tempo, not all-out'],
+    ['Tempo', 'A "comfortably hard" sustained effort – faster than easy, controlled, not a sprint'],
     ['long run', 'Your longest effort of the week, done slower than race pace'],
-    ['easy run', 'Comfortable, conversational pace -- most of your running should feel like this'],
-    ['cross', 'Non-running aerobic work -- builds fitness while giving your running muscles a break'],
-    ['Rest', 'A full day off running -- this is when your body actually adapts and gets stronger']
+    ['easy run', 'Comfortable, conversational pace – most of your running should feel like this'],
+    ['cross', 'Non-running aerobic work – builds fitness while giving your running muscles a break'],
+    ['Rest', 'A full day off running – this is when your body actually adapts and gets stronger']
   ];
   function calendarHint(label) {
     for (var i = 0; i < CALENDAR_HINTS.length; i++) {
@@ -238,17 +238,17 @@
   var SIDE_QUESTS = [
     { id: 'hike_60', name: '60-Minute Hike', category: 'hike', description: 'An easy-paced hike, roughly an hour.', estimatedMinutes: 60, trainingLoad: 3, rewardPoints: 120, replaces: ['easy', 'cross'] },
     { id: 'hike_90', name: '90-Minute Hike', category: 'hike', description: 'A longer hike on easier terrain than a run.', estimatedMinutes: 90, trainingLoad: 4, rewardPoints: 160, replaces: ['easy', 'cross'] },
-    { id: 'incline_walk', name: '35-Minute Incline Walk', category: 'hike', description: 'A brisk walk on an incline or treadmill grade -- low-impact aerobic work.', estimatedMinutes: 35, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
-    { id: 'upper_body_builder', name: 'Upper Body Builder', category: 'strength', description: 'A full upper-body strength session -- push, pull, and core.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
+    { id: 'incline_walk', name: '35-Minute Incline Walk', category: 'hike', description: 'A brisk walk on an incline or treadmill grade – low-impact aerobic work.', estimatedMinutes: 35, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
+    { id: 'upper_body_builder', name: 'Upper Body Builder', category: 'strength', description: 'A full upper-body strength session – push, pull, and core.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
     { id: 'core_10', name: 'Core 10', category: 'core', description: '10 minutes of focused core work.', estimatedMinutes: 10, trainingLoad: 1, rewardPoints: 50, replaces: ['easy', 'cross'] },
     { id: 'core_20', name: 'Core 20', category: 'core', description: '20 minutes of focused core work.', estimatedMinutes: 20, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
     { id: 'kb_swing_100', name: 'Kettlebell 100', category: 'strength', description: 'Complete 100 controlled kettlebell swings.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
-    { id: 'pushup_ladder', name: 'Push-Up Ladder', category: 'strength', description: 'A push-up ladder set -- build to your max in rungs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
+    { id: 'pushup_ladder', name: 'Push-Up Ladder', category: 'strength', description: 'A push-up ladder set – build to your max in rungs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
     { id: 'squat_century', name: 'Squat Century', category: 'strength', description: '100 bodyweight squats, broken into manageable sets.', estimatedMinutes: 20, trainingLoad: 3, rewardPoints: 100, replaces: ['cross'] },
     { id: 'row_5k', name: '5K Row', category: 'cross', description: 'Row 5,000 meters at a steady effort.', estimatedMinutes: 25, trainingLoad: 3, rewardPoints: 110, replaces: ['easy', 'cross'] },
     { id: 'easy_cycle', name: 'Easy 30-Minute Cycle', category: 'cross', description: 'A relaxed, conversational-pace bike ride.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 80, replaces: ['easy', 'cross'] },
     { id: 'mobility_reset', name: 'Mobility Reset', category: 'mobility', description: '15 minutes of hips, ankles, and thoracic mobility work.', estimatedMinutes: 15, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
-    { id: 'farmer_carry', name: 'Farmer Carry Challenge', category: 'strength', description: 'Loaded carries for distance or time -- grip, core, and legs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
+    { id: 'farmer_carry', name: 'Farmer Carry Challenge', category: 'strength', description: 'Loaded carries for distance or time – grip, core, and legs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
     { id: 'stair_climb', name: 'Stair Climb', category: 'cross', description: 'Repeated stair or step climbing at a steady effort.', estimatedMinutes: 20, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
     { id: 'new_route_run', name: 'New-Route Run', category: 'run', description: "Keep the run, but explore a route you haven't tried before.", estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 70, replaces: ['easy'] }
   ];
@@ -307,7 +307,7 @@
     {
       id: 'strong_start', name: 'Strong Start', hasDifficulty: false, weeks: 4, sessionsPerWeek: 2, sessionMinutes: 20,
       equipment: 'None required', runningInterference: 'Low', beginnerFriendly: true,
-      description: 'A gentle intro to strength training -- no experience needed.',
+      description: 'A gentle intro to strength training – no experience needed.',
       exercises: [{ fixed: 'Chair Squat' }, { fixed: 'Wall Push-Up' }, { fixed: 'Band or Dumbbell Row' }, { fixed: 'Glute Bridge' }, { fixed: 'Dead Bug' }, { fixed: 'Farmer Carry' }]
     },
     {
@@ -319,7 +319,7 @@
     {
       id: 'strong_runner_track', name: 'Strong Runner', hasDifficulty: true, weeks: 4, sessionsPerWeek: 2, sessionMinutes: 25,
       equipment: 'Optional dumbbells', runningInterference: 'Low', beginnerFriendly: true,
-      description: 'The default strength track for runners -- durability without exhaustion.',
+      description: 'The default strength track for runners – durability without exhaustion.',
       exercises: [{ movement: 'squat' }, { movement: 'hinge' }, { fixed: 'Step-Up' }, { fixed: 'Calf Raise' }, { movement: 'pull' }, { movement: 'push' }, { fixed: 'Carry' }, { movement: 'core', label: 'Anti-rotation core' }]
     }
   ];
@@ -651,17 +651,17 @@
   // was baked in from the profile-level crossPref at plan-generation time,
   // so picking a different option in the dropdown visibly did nothing. This
   // splices the chosen activity into the displayed label instead, preserving
-  // any "+ strength" suffix and working whether or not the base label already
+  // any "+ Strength" suffix and working whether or not the base label already
   // named an activity (profile.crossOptions could be 'None', in which case
   // the label has no "· X" segment to replace at all).
   function applyCrossOverride(label, crossValue) {
     if (!crossValue) return label;
-    // Suppress the day's own "+ strength" bonus-work suffix when the chosen
+    // Suppress the day's own "+ Strength" bonus-work suffix when the chosen
     // activity already *is* strength training -- otherwise picking
-    // "Strength" produces a redundant "Strength + strength".
-    var hasStrength = / \+ strength$/.test(label) && crossValue.toLowerCase() !== 'strength';
-    var base = label.replace(/ \+ strength$/, '').replace(/ · .+$/, '');
-    return base + ' · ' + crossValue + (hasStrength ? ' + strength' : '');
+    // "Strength" produces a redundant "Strength + Strength".
+    var hasStrength = / \+ Strength$/.test(label) && crossValue.toLowerCase() !== 'strength';
+    var base = label.replace(/ \+ Strength$/, '').replace(/ · .+$/, '');
+    return base + ' · ' + crossValue + (hasStrength ? ' + Strength' : '');
   }
 
   function escapeHtml(s) {
@@ -940,19 +940,19 @@
     var paceInRange = !!(targetPaceRange && actualPace && !paceFast && !paceSlow);
 
     if (distanceRatio != null && distanceRatio < 0.85) {
-      return 'You came up short of the planned distance -- a partial session still counts toward your training, just keep an eye on why (time, fatigue, or how you felt).';
+      return 'You came up short of the planned distance – a partial session still counts toward your training, just keep an eye on why (time, fatigue, or how you felt).';
     }
     if (distanceRatio != null && distanceRatio > 1.3 && (dayData.type === 'easy' || dayData.type === 'long')) {
-      return "You ran notably farther than planned. That's fine as a one-off, but keep an eye on cumulative fatigue if it becomes a pattern -- especially heading into a key workout.";
+      return "You ran notably farther than planned. That's fine as a one-off, but keep an eye on cumulative fatigue if it becomes a pattern – especially heading into a key workout.";
     }
     if (paceFast && (dayData.type === 'easy' || dayData.type === 'long')) {
-      return "You ran faster than the target range for this effort. That's fine occasionally, but easy days work best when they stay easy -- save the faster pace for your key workouts.";
+      return "You ran faster than the target range for this effort. That's fine occasionally, but easy days work best when they stay easy – save the faster pace for your key workouts.";
     }
     if (paceFast && dayData.type === 'quality') {
-      return 'You pushed faster than the target zone for this workout. Strong effort -- just make sure it was sustainable, not an all-out sprint.';
+      return 'You pushed faster than the target zone for this workout. Strong effort – just make sure it was sustainable, not an all-out sprint.';
     }
     if (paceSlow && dayData.type === 'quality') {
-      return "You didn't quite reach the target pace zone for this workout. It still counts -- fatigue, conditions, or an off day can all explain it.";
+      return "You didn't quite reach the target pace zone for this workout. It still counts – fatigue, conditions, or an off day can all explain it.";
     }
     // A slower-than-range easy/long pace is never flagged -- easy days are
     // meant to be conservative, and the range is a floor to avoid, not a
@@ -964,7 +964,7 @@
     if (distanceRatio != null && distanceRatio >= 0.85) {
       return 'You covered the intended distance for this session.';
     }
-    return 'Logged -- nice work keeping track of the actual result.';
+    return 'Logged – nice work keeping track of the actual result.';
   }
 
   var CELEBRATE_MESSAGES = [
@@ -1505,7 +1505,7 @@
         if (isLoggable(todayLabel)) {
           if (!getLog(todayKey)) showAppNotification("Today's run", "Haven't logged it yet: " + todayLabel + '.', 'today-reminder');
         } else {
-          showAppNotification('Rest day', "Today's a scheduled rest day -- that's part of the plan, not a gap in it.", 'rest-reminder');
+          showAppNotification('Rest day', "Today's a scheduled rest day – that's part of the plan, not a gap in it.", 'rest-reminder');
         }
         log.lastTodayNoteDate = todayIso;
         changed = true;
@@ -1513,7 +1513,7 @@
 
       // Missed-workout check-in -- gentle, once per missed day, checked any time the day after.
       if (yesterdayKey && isLoggable(yesterdayLabel) && !getLog(yesterdayKey) && log.lastMissedCheckinDate !== todayIso) {
-        showAppNotification('Yesterday', "Looks like yesterday's session didn't happen -- no problem. Tell the coach what's going on if you want the plan to adjust.", 'missed-checkin');
+        showAppNotification('Yesterday', "Looks like yesterday's session didn't happen – no problem. Tell the coach what's going on if you want the plan to adjust.", 'missed-checkin');
         log.lastMissedCheckinDate = todayIso;
         changed = true;
       }
@@ -1521,7 +1521,7 @@
       // Hydration/prep reminder for tomorrow's long run, evening before -- same >=90min
       // threshold buildStructuredWeeks already uses for the "+ fueling practice" label.
       if (tomorrowDay && tomorrowDay.type === 'long' && tomorrowDay.miles * 11 >= 90 && hour >= 17 && log.lastHydrationReminderDate !== todayIso) {
-        showAppNotification('Tomorrow: long run', 'Hydrate today and lay out your gear -- ' + tomorrowLabel + '.', 'hydration-reminder');
+        showAppNotification('Tomorrow: long run', 'Hydrate today and lay out your gear – ' + tomorrowLabel + '.', 'hydration-reminder');
         log.lastHydrationReminderDate = todayIso;
         changed = true;
       }
@@ -1552,7 +1552,7 @@
         var rangeId = r.start + '|' + r.end;
         var announcedBreaks = log.announcedBreakEnds || [];
         if (announcedBreaks.indexOf(rangeId) === -1) {
-          showAppNotification('Welcome back', "Your plan's been adjusted for the time off -- today picks back up gently.", 'return-from-break');
+          showAppNotification('Welcome back', "Your plan's been adjusted for the time off – today picks back up gently.", 'return-from-break');
           announcedBreaks.push(rangeId);
           log.announcedBreakEnds = announcedBreaks;
           changed = true;
@@ -1562,7 +1562,7 @@
       // Weekly recap ready -- once per week transition, not every render.
       var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
       if (currentWeekIdx > 1 && log.lastRecapNotifiedWeek !== currentWeekIdx - 1) {
-        showAppNotification('Weekly recap ready', 'Week ' + (currentWeekIdx - 1) + ' wrapped up -- see how it went.', 'weekly-recap');
+        showAppNotification('Weekly recap ready', 'Week ' + (currentWeekIdx - 1) + ' wrapped up – see how it went.', 'weekly-recap');
         log.lastRecapNotifiedWeek = currentWeekIdx - 1;
         changed = true;
       }
@@ -1572,7 +1572,7 @@
       // itself, same as the other notifications above).
       var thisMonday = dateToISO(mondayOfWeek(today));
       if (varietyWeekSuggested() && log.lastVarietyWeekNotifiedWeek !== thisMonday) {
-        showAppNotification('Consider a Variety Week', "You've mentioned feeling bored of running two weeks running -- check Side Missions for a change of pace.", 'variety-week');
+        showAppNotification('Consider a Variety Week', "You've mentioned feeling bored of running two weeks running – check Side Missions for a change of pace.", 'variety-week');
         log.lastVarietyWeekNotifiedWeek = thisMonday;
         changed = true;
       }
@@ -1819,7 +1819,7 @@
           var addStrength = strengthAssigned < strengthBudget;
           if (addStrength) strengthAssigned++;
           day.type = 'cross';
-          day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + strength' : '');
+          day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + Strength' : '');
         } else {
           day.type = 'rest'; day.label = 'Rest';
         }
@@ -2458,7 +2458,7 @@
           '<div class="quest-name">' + escapeHtml(challenge.name) + '</div>' +
           '<div class="quest-meta">' + wcProgress + ' of ' + challenge.target + ' this week</div>' +
           '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="weeklyChallengeFill"></div></div>' +
-          (wcProgress >= challenge.target ? '<p class="recap-empty">Challenge complete -- nice work.</p>' : '') +
+          (wcProgress >= challenge.target ? '<p class="recap-empty">Challenge complete – nice work.</p>' : '') +
           '<div class="ob-cancel" id="dropChallengeBtn">Drop this challenge</div>' +
         '</div>';
     } else {
@@ -3566,7 +3566,7 @@
           aiWhyResult.textContent = result2.data.explanation;
         }).catch(function () {
           aiWhyResult.className = 'ai-why-result ai-why-error';
-          aiWhyResult.textContent = "Couldn't reach the AI coach right now -- the explanation above still applies.";
+          aiWhyResult.textContent = "Couldn't reach the AI coach right now – the explanation above still applies.";
         }).finally(function () {
           aiWhyBtn.disabled = false;
           aiWhyBtn.textContent = 'Ask AI: why this workout?';
@@ -4095,7 +4095,7 @@
         '<button type="button" class="ob-btn ob-btn-secondary" id="saveFeelingBtn" style="margin-top:8px">Save</button>' +
       '</div>';
     var varietyBannerHtml = varietyWeekSuggested() ?
-      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week -- swap an easy Main Mission for a Side Mission, add strength carefully, and keep your long run and key workout as-is. <span class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Side Missions</span></span></div>' : '';
+      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week – swap an easy Main Mission for a Side Mission, add strength carefully, and keep your long run and key workout as-is. <span class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Side Missions</span></span></div>' : '';
 
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
@@ -4268,7 +4268,7 @@
           aiRecapResult.textContent = result2.data.recap;
         }).catch(function () {
           aiRecapResult.className = 'ai-why-result ai-why-error';
-          aiRecapResult.textContent = "Couldn't reach the AI coach right now -- the stats above still apply.";
+          aiRecapResult.textContent = "Couldn't reach the AI coach right now – the stats above still apply.";
         }).finally(function () {
           aiRecapBtn.disabled = false;
           aiRecapBtn.textContent = 'Ask AI for a recap';
