@@ -2002,8 +2002,6 @@
     return (
       '<div class="hd-actions">' +
         '<i class="' + cls('progressBtn') + ' ti-chart-line" id="progressBtn" title="Progress"></i>' +
-        '<i class="' + cls('questsBtn') + ' ti-trophy" id="questsBtn" title="Side Missions"></i>' +
-        '<i class="' + cls('pathBtn') + ' ti-route" id="pathBtn" title="Path"></i>' +
         '<i class="' + cls('glossaryBtn') + ' ti-book-2" id="glossaryBtn" title="What this all means"></i>' +
         '<i class="' + cls('safetyBtn') + ' ti-shield-check" id="safetyBtn" title="Safety info"></i>' +
         '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
@@ -2027,8 +2025,6 @@
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
     document.getElementById('glossaryBtn').addEventListener('click', renderGlossaryPanel);
     document.getElementById('progressBtn').addEventListener('click', renderProgressPanel);
-    document.getElementById('questsBtn').addEventListener('click', renderQuestsHome);
-    document.getElementById('pathBtn').addEventListener('click', function () { renderPathWindow(); });
     var installBtn = document.getElementById('installBtn');
     if (deferredInstallPrompt) installBtn.style.display = 'inline-block';
     installBtn.addEventListener('click', function () {
@@ -2037,6 +2033,32 @@
       deferredInstallPrompt.userChoice.then(function () {
         deferredInstallPrompt = null;
         installBtn.style.display = 'none';
+      });
+    });
+  }
+
+  // ── Primary bottom tab bar (docs/RACR_Master_Prompt.md) -- exactly the 3
+  // co-equal primary destinations the spec calls out, not a catch-all nav.
+  // Utility screens (Progress/Glossary/Safety/Edit/Settings) stay on the top
+  // header icon row above; Coach stays reached via the Today card button.
+  function bottomTabsHtml(active) {
+    var items = [
+      ['main', 'Main Quest', 'ti-flag'],
+      ['side', 'Side Missions', 'ti-trophy'],
+      ['path', 'Path', 'ti-route']
+    ];
+    return '<div class="bottom-tabs">' + items.map(function (item) {
+      return '<button type="button" class="bottom-tab' + (active === item[0] ? ' active' : '') + '" data-tab="' + item[0] + '">' +
+        '<i class="ti ' + item[2] + '"></i><span>' + item[1] + '</span></button>';
+    }).join('') + '</div>';
+  }
+  function wireBottomTabs(scope) {
+    (scope || document).querySelectorAll('[data-tab]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = btn.getAttribute('data-tab');
+        if (tab === 'side') renderQuestsHome();
+        else if (tab === 'path') renderPathWindow();
+        else renderMain();
       });
     });
   }
@@ -2081,7 +2103,7 @@
     var draft = { strengthExperience: 'new_strength', equipment: ['no_equipment'], preferredDuration: 'medium', interest: 'running', limitations: ['no_current_limitations'] };
     function renderStep(step) {
       app.innerHTML = '';
-      app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
+      app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
       wireHeaderIcons();
       var titles = ['Strength experience', 'Available equipment', 'Mission duration', 'Primary interest', 'Limitations'];
       var body = '';
@@ -2143,8 +2165,11 @@
     if (!state.sideQuestOnboarding || !state.sideQuestOnboarding.completed) { renderSideQuestOnboarding(); return; }
     var app = document.getElementById('app');
     app.innerHTML = '';
-    app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
     wireHeaderIcons();
+    var sideTabs = el(bottomTabsHtml('side'));
+    app.appendChild(sideTabs);
+    wireBottomTabs(sideTabs);
     var active = state.activeQuestTrack;
     var activeTrack = active && SideQuestDomain.questTrackById ? SideQuestDomain.questTrackById(active.trackId) : null;
     var activeHtml = '';
@@ -2226,7 +2251,7 @@
     if (!mission) return renderQuestsHome();
     var app = document.getElementById('app');
     app.innerHTML = '';
-    app.appendChild(el('<div class="subnav">' + headerIconsHtml('questsBtn') + '</div>'));
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
     wireHeaderIcons();
     var exercisesHtml = '<dl class="mission-exercises">' + (mission.exercises || []).map(function (ex) {
       var variation = SideQuestDomain.resolveExercise ? SideQuestDomain.resolveExercise(ex, 'base') : (ex.fixed || '');
@@ -2376,8 +2401,11 @@
       app.appendChild(el('<div class="ob"><div class="ob-title">Path</div><p class="intro-body">Path is unavailable because the Path engine did not load.</p></div>'));
       return;
     }
-    app.appendChild(el('<div class="subnav">' + headerIconsHtml('pathBtn') + '</div>'));
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
     wireHeaderIcons();
+    var pathTabs = el(bottomTabsHtml('path'));
+    app.appendChild(pathTabs);
+    wireBottomTabs(pathTabs);
 
     var totalRequired = pathModel.nodes.filter(function (n) { return n.required; }).length;
     var completeRequired = pathModel.nodes.filter(function (n) { return n.required && n.status === 'completed'; }).length;
@@ -2494,6 +2522,9 @@
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
     wireHeaderIcons();
+    var mainTabs = el(bottomTabsHtml('main'));
+    app.appendChild(mainTabs);
+    wireBottomTabs(mainTabs);
 
     if (todayDayIdx !== -1) {
       var todayKey = currentWeek + '-' + todayDayIdx;

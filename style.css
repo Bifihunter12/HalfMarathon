@@ -25,7 +25,7 @@ body {
   color: var(--text);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
-  padding-bottom: 64px;
+  padding-bottom: 88px;
 }
 
 #app {
@@ -387,6 +387,37 @@ body {
 
 .subnav { display: flex; justify-content: flex-end; margin-bottom: 18px; }
 
+/* ── Bottom tab bar -- Main Quest / Side Missions / Path only ─────────── */
+.bottom-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.bottom-tab {
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  font-family: var(--font);
+  cursor: pointer;
+  padding: 10px 4px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.bottom-tab i { font-size: 19px; }
+.bottom-tab span { font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; overflow-wrap: anywhere; }
+.bottom-tab.active { color: var(--accent); }
+
 .stat-line {
   margin-top: 16px;
   display: flex;
@@ -613,7 +644,7 @@ body {
 .app-toast {
   position: fixed;
   left: 50%;
-  bottom: 28px;
+  bottom: 76px;
   transform: translateX(-50%);
   max-width: calc(100% - 32px);
   background: var(--surface-2);
