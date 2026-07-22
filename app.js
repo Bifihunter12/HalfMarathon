@@ -603,6 +603,13 @@
   function escapeHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+  // Badge ids and trainingPurpose/category tags are stored as machine-readable
+  // snake_case slugs (e.g. 'badge_first_mile', 'aerobic_base') -- never fit to
+  // show a user raw, so every place that displays one runs it through this
+  // first, same transform already used for Path node badge ids.
+  function humanizeSlug(s) {
+    return String(s || '').replace(/^badge_/, '').replace(/_/g, ' ');
+  }
   function round5(n) { return Math.round(n * 2) / 2; }
   function round1(n) { return Math.round(n * 10) / 10; }
 
@@ -2392,7 +2399,7 @@
       var cards = section.missionIds.map(missionById).filter(Boolean).map(function (m) { return renderMissionCard(m, 'Preview', 'data-mission-id'); }).join('');
       return '<div class="ob-sub" style="margin-top:20px">' + escapeHtml(section.name) + '</div>' + cards;
     }).join('');
-    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>XP</dt><dd>' + state.xp + '</dd><dt>Side Missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(escapeHtml).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed Side Missions, badges, personal records, and lifetime totals will appear here.</p>';
+    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>XP</dt><dd>' + state.xp + '</dd><dt>Side Missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(function (b) { return escapeHtml(humanizeSlug(b)); }).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed Side Missions, badges, personal records, and lifetime totals will appear here.</p>';
     var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Missions</div><div class="ob-title">Side Missions</div><p class="intro-body">Your run is the Main Quest. Side Missions make the journey stronger, broader, and more enjoyable.</p><div class="ob-sub">Active Mission Track</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + '<div class="ob-sub" style="margin-top:20px">Recommended for you</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Mission Tracks</div>' + tracksHtml + sectionsHtml + '<div class="ob-sub" style="margin-top:20px">Completed Side Missions</div>' + completedHtml + '</div>');
     app.appendChild(wrap);
     var resume = document.getElementById('resumeTrackBtn');
@@ -2452,7 +2459,7 @@
       scheduleOptions = options.length ? '<div class="ob-sub" style="margin-top:18px">Add to Calendar</div>' + options.join('') : '';
     }
     var safetyText = (mission.avoidBeforeWorkoutTypes.length ? 'Avoid before ' + mission.avoidBeforeWorkoutTypes.join(' or ') + '. ' : '') + 'Stop for sharp, worsening, or unusual pain.';
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span><span>' + mission.xpReward + ' XP</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<div class="ob-cancel" id="missionBackBtn">Back to Side Missions</div></div>');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span><span>' + mission.xpReward + ' XP</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<div class="ob-cancel" id="missionBackBtn">Back to Side Missions</div></div>');
     app.appendChild(wrap);
     document.getElementById('startMissionBtn').addEventListener('click', function () { renderMissionPlayer(mission.id, key); });
     var completeNow = document.getElementById('completeNowBtn');
@@ -2595,7 +2602,7 @@
         '<dt>Why it matters</dt><dd>' + escapeHtml(selected.whyItMatters || 'This marks meaningful progress along your running journey.') + '</dd>' +
         '<dt>Requirement</dt><dd>' + escapeHtml(selected.requirements) + '</dd>' +
         '<dt>Progress</dt><dd>' + selected.progressCurrent + ' of ' + selected.progressTarget + '</dd>' +
-        (selected.badgeId ? '<dt>Badge</dt><dd>' + escapeHtml(selected.badgeId.replace(/^badge_/, '').replace(/_/g, ' ')) + '</dd>' : '') +
+        (selected.badgeId ? '<dt>Badge</dt><dd>' + escapeHtml(humanizeSlug(selected.badgeId)) + '</dd>' : '') +
       '</dl>' +
     '</div>' : '';
     var nodesHtml = pathModel.nodes.map(function (node) {
