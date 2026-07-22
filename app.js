@@ -568,6 +568,16 @@
     return isStale(sorted[0]) && isStale(sorted[1]);
   }
 
+  // Replaces the old boolean `done` flag on a log entry -- lets the weekly
+  // row and post-run review show *how* a workout was completed, not just
+  // whether it was. `coach_alternative` and `rescheduled` from the source
+  // spec are deliberately not separate values here: a coach-approved swap
+  // already shows up via state.overrides/sideQuestLog, and a reschedule via
+  // the existing inline label-edit -- adding overlapping status values for
+  // those would just be two ways to represent the same fact.
+  var COMPLETION_TYPES = ['planned', 'modified', 'partial', 'stopped_early'];
+  var COMPLETION_TYPE_LABEL = { planned: 'Completed as planned', modified: 'Modified', partial: 'Partially completed', stopped_early: 'Stopped early' };
+
   var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
   // Never diagnoses -- only routes toward "keep going / back off / get it checked."
   function painGuidance(severity, worsens, canWalk) {
@@ -628,6 +638,26 @@
     var m = Math.floor(secPerMi / 60), s = Math.round(secPerMi % 60);
     if (s === 60) { m++; s = 0; }
     return m + ':' + String(s).padStart(2, '0');
+  }
+  // Actual-run duration input, same mm:ss / h:mm:ss shape as
+  // parseRaceTimeToMinutes but returns whole seconds (not minutes) since
+  // that's the natural unit for a logged run's elapsed time and for the
+  // pace math below -- kept as a separate function rather than reusing
+  // parseRaceTimeToMinutes directly so the two independent input surfaces
+  // (recent race result vs. a logged run) can't accidentally couple.
+  function parseDurationToSeconds(str) {
+    if (!str) return null;
+    var m = str.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    var hours = m[1] ? parseInt(m[1], 10) : 0;
+    var mins = parseInt(m[2], 10), secs = parseInt(m[3], 10);
+    return hours * 3600 + mins * 60 + secs;
+  }
+  // pace = duration / distance (spec's own formula) -- null on zero/missing
+  // distance or an unparseable duration, never a divide-by-zero or NaN pace.
+  function computeActualPaceSecPerMi(distanceMiles, durationSeconds) {
+    if (!distanceMiles || distanceMiles <= 0 || !durationSeconds) return null;
+    return durationSeconds / distanceMiles;
   }
   // Projects the runner's real result onto an equivalent time at any other
   // distance via Riegel's race-time-prediction formula (T2 = T1*(D2/D1)^1.06
@@ -757,7 +787,7 @@
   }
   function setLog(key, patch) {
     var next = Object.assign({}, getLog(key), patch);
-    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.done);
+    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType);
     if (hasContent) state.logs[key] = next;
     else delete state.logs[key];
     saveState(state);
@@ -815,6 +845,48 @@
       return { kind: 'fastest_pace', workoutType: dayType, distance: toUnit(entry.distance), unit: unitLabel(), paceMinPerUnit: Math.round(pace * 100) / 100 };
     }
     return null;
+  }
+
+  // Deterministic (no AI call) comparison of a logged run against the day's
+  // own planned distance / target pace range -- satisfies the "coach
+  // interpretation" requirement from docs/RACR_RunLogging_Correction.md
+  // without a new AI dependency, matching this app's established
+  // deterministic-first pattern (see logAndCelebrate's local-message
+  // fallback and the SIDE_QUESTS reason-based filtering).
+  function interpretRunResult(dayData, entry, targetPaceRange) {
+    if (!entry || (entry.distance == null && !entry.time)) return null;
+    var distanceRatio = (dayData.miles && entry.distance != null) ? entry.distance / dayData.miles : null;
+    var actualPace = computeActualPaceSecPerMi(entry.distance, parseDurationToSeconds(entry.time));
+    var paceFast = !!(targetPaceRange && actualPace && actualPace < targetPaceRange.loSecPerMi - 5);
+    var paceSlow = !!(targetPaceRange && actualPace && actualPace > targetPaceRange.hiSecPerMi + 5);
+    var paceInRange = !!(targetPaceRange && actualPace && !paceFast && !paceSlow);
+
+    if (distanceRatio != null && distanceRatio < 0.85) {
+      return 'You came up short of the planned distance -- a partial session still counts toward your training, just keep an eye on why (time, fatigue, or how you felt).';
+    }
+    if (distanceRatio != null && distanceRatio > 1.3 && (dayData.type === 'easy' || dayData.type === 'long')) {
+      return "You ran notably farther than planned. That's fine as a one-off, but keep an eye on cumulative fatigue if it becomes a pattern -- especially heading into a key workout.";
+    }
+    if (paceFast && (dayData.type === 'easy' || dayData.type === 'long')) {
+      return "You ran faster than the target range for this effort. That's fine occasionally, but easy days work best when they stay easy -- save the faster pace for your key workouts.";
+    }
+    if (paceFast && dayData.type === 'quality') {
+      return 'You pushed faster than the target zone for this workout. Strong effort -- just make sure it was sustainable, not an all-out sprint.';
+    }
+    if (paceSlow && dayData.type === 'quality') {
+      return "You didn't quite reach the target pace zone for this workout. It still counts -- fatigue, conditions, or an off day can all explain it.";
+    }
+    // A slower-than-range easy/long pace is never flagged -- easy days are
+    // meant to be conservative, and the range is a floor to avoid, not a
+    // ceiling to hit (matches the spec's "don't reward beating the pace
+    // target on easy days" rule from the other direction).
+    if (distanceRatio != null && distanceRatio >= 0.85 && paceInRange) {
+      return 'You completed the intended work and kept the effort inside the assigned target. No adjustment needed.';
+    }
+    if (distanceRatio != null && distanceRatio >= 0.85) {
+      return 'You covered the intended distance for this session.';
+    }
+    return 'Logged -- nice work keeping track of the actual result.';
   }
 
   var CELEBRATE_MESSAGES = [
@@ -2460,6 +2532,51 @@
     }, 80);
   }
 
+  // ── Weekly row: meaningful status + planned/actual summaries ───────────
+  // Replaces the old plain checkbox -- a status glyph reflecting
+  // completionType (or missed/today/upcoming when unlogged), matching
+  // docs/RACR_RunLogging_Correction.md's "don't use a checkbox as the only
+  // interaction" requirement. Tapping the date (existing behavior) still
+  // opens the full detail view to actually log or edit a run.
+  function dayStatusHtml(loggable, entry, isToday, isPast) {
+    if (!loggable) return '';
+    if (entry && entry.completionType) {
+      if (entry.completionType === 'planned') {
+        return '<span class="day-status day-status--done" title="Completed as planned"><i class="ti ti-check"></i></span>';
+      }
+      return '<span class="day-status day-status--modified" title="' + escapeHtml(COMPLETION_TYPE_LABEL[entry.completionType] || 'Modified') + '">~</span>';
+    }
+    if (isPast) return '<span class="day-status day-status--missed" title="Missed">&ndash;</span>';
+    if (isToday) return '<span class="day-status day-status--today" title="Today"></span>';
+    return '<span class="day-status day-status--upcoming" title="Upcoming"></span>';
+  }
+  // Target line: planned distance + (when a recent race result supports it)
+  // a target pace range -- reuses the exact same range helpers renderWorkoutDetail
+  // already calls, so the two screens can never disagree about the target.
+  function targetSummaryHtml(dayData, label) {
+    var range = null;
+    if (dayData.type === 'easy' || dayData.type === 'long') range = computeEasyPaceRange(state.profile);
+    else if (dayData.type === 'quality') range = computeQualityPaceRange(state.profile, label);
+    var parts = [];
+    if (dayData.miles) parts.push(toUnit(dayData.miles) + ' ' + unitLabel());
+    if (range) {
+      var lo = state.units === 'km' ? range.loSecPerMi / KM_PER_MI : range.loSecPerMi;
+      var hi = state.units === 'km' ? range.hiSecPerMi / KM_PER_MI : range.hiSecPerMi;
+      parts.push(formatPace(lo) + '&ndash;' + formatPace(hi) + '/' + unitLabel());
+    }
+    return parts.length ? '<div class="day-target">Target: ' + parts.join(' &middot; ') + '</div>' : '';
+  }
+  // Actual result, appended alongside (never replacing) the target line above.
+  function completedSummaryHtml(entry) {
+    if (!entry || (entry.distance == null && !entry.time)) return '';
+    var pace = computeActualPaceSecPerMi(entry.distance, parseDurationToSeconds(entry.time));
+    var parts = [];
+    if (entry.distance != null) parts.push(toUnit(entry.distance) + ' ' + unitLabel());
+    if (entry.time) parts.push(escapeHtml(entry.time));
+    if (pace) parts.push(formatPace(state.units === 'km' ? pace / KM_PER_MI : pace) + '/' + unitLabel());
+    return parts.length ? '<div class="day-completed">Completed: ' + parts.join(' &middot; ') + '</div>' : '';
+  }
+
   function renderMain() {
     if (!state.raceGoal || !state.profile || !state.planMeta) { renderIntro(); return; }
 
@@ -2601,6 +2718,7 @@
         var race = isRace(label);
         var cross = hasCross(label);
         var isToday = sameDate(d, today);
+        var isPast = d < today;
         var entry = getLog(key);
         var crossValue = state.crossType[key] || '';
         var scheduledMission = missionById(state.sideQuestCalendar[key]);
@@ -2612,11 +2730,12 @@
 
         var row = el(
           '<div class="' + classes + '">' +
-            (loggable ? '<input type="checkbox" class="day-done-check" title="Mark done"' + (entry && entry.done ? ' checked' : '') + '>' : '') +
+            dayStatusHtml(loggable, entry, isToday, isPast) +
             '<div class="day-date"><span class="day-dow">' + DOW_FULL[d.getDay()] + '</span><span class="day-dom">' + d.getDate() + '</span></div>' +
             '<div class="day-main">' +
               '<div class="day-plan">' + escapeHtml(label) + '</div>' +
               (calendarHint(label) ? '<div class="day-hint">' + escapeHtml(calendarHint(label)) + '</div>' : '') +
+              (loggable ? targetSummaryHtml(dayData, label) + completedSummaryHtml(entry) : '') +
               (scheduledMission ? '<button type="button" class="calendar-side-mission" data-mission-id="' + scheduledMission.id + '">Side Mission: ' + escapeHtml(scheduledMission.name) + '</button>' : '') +
               (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
@@ -2626,20 +2745,6 @@
         row.querySelector('.day-date').addEventListener('click', function () {
           renderWorkoutDetail(weekNum, di);
         });
-
-        function refreshLoggedCount() {
-          var loggedNow = Object.keys(state.logs).length;
-          document.getElementById('progressFill').style.width = (totalLoggable ? (100 * loggedNow / totalLoggable) : 0) + '%';
-          document.getElementById('loggedCount').textContent = loggedNow + ' / ' + totalLoggable + ' LOGGED';
-        }
-
-        if (loggable) {
-          var doneCheck = row.querySelector('.day-done-check');
-          doneCheck.addEventListener('change', function () {
-            logAndCelebrate(key, { done: doneCheck.checked ? true : null }, dayData.type, weeks);
-            refreshLoggedCount();
-          });
-        }
 
         if (cross) {
           var selectEl = row.querySelector('.cross-select');
@@ -3042,13 +3147,16 @@
 
     // Only shown when the runner actually supplied a recent race result --
     // otherwise this stays RPE/talk-test-only like every other workout type,
-    // per the roadmap's "avoid false precision" rule.
+    // per the roadmap's "avoid false precision" rule. `targetPaceRange` is
+    // kept (not just the formatted string) so the Planned vs. Actual block
+    // and interpretRunResult below can compare a logged run against it.
     var paceRow = '';
+    var targetPaceRange = null;
     if (dayData.type === 'easy' || dayData.type === 'long') {
-      var paceRange = computeEasyPaceRange(state.profile);
-      if (paceRange) {
-        var loDisplay = state.units === 'km' ? paceRange.loSecPerMi / KM_PER_MI : paceRange.loSecPerMi;
-        var hiDisplay = state.units === 'km' ? paceRange.hiSecPerMi / KM_PER_MI : paceRange.hiSecPerMi;
+      targetPaceRange = computeEasyPaceRange(state.profile);
+      if (targetPaceRange) {
+        var loDisplay = state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi;
+        var hiDisplay = state.units === 'km' ? targetPaceRange.hiSecPerMi / KM_PER_MI : targetPaceRange.hiSecPerMi;
         paceRow = '<dt>Estimated pace</dt><dd>' + formatPace(loDisplay) + '&ndash;' + formatPace(hiDisplay) + ' /' + unitLabel() +
           ' &mdash; a range from your recent ' + RACE_RESULT_LABEL[state.profile.recentRaceDistance] + ' time, not a target. Go by feel first.</dd>';
       }
@@ -3057,13 +3165,45 @@
       // "Tempo: ... @ threshold") -- effort-based work like Fartlek or hill
       // repeats never gets a pace quoted, matching GLOSSARY_WORKOUTS' own
       // description of those as "by feel," not a pace target.
-      var qualityRange = computeQualityPaceRange(state.profile, label);
-      if (qualityRange) {
-        var qLoDisplay = state.units === 'km' ? qualityRange.loSecPerMi / KM_PER_MI : qualityRange.loSecPerMi;
-        var qHiDisplay = state.units === 'km' ? qualityRange.hiSecPerMi / KM_PER_MI : qualityRange.hiSecPerMi;
+      targetPaceRange = computeQualityPaceRange(state.profile, label);
+      if (targetPaceRange) {
+        var qLoDisplay = state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi;
+        var qHiDisplay = state.units === 'km' ? targetPaceRange.hiSecPerMi / KM_PER_MI : targetPaceRange.hiSecPerMi;
         paceRow = '<dt>Estimated pace</dt><dd>' + formatPace(qLoDisplay) + '&ndash;' + formatPace(qHiDisplay) + ' /' + unitLabel() +
-          ' &mdash; estimated ' + QUALITY_PACE_ZONE_LABEL[qualityRange.zone] + ' pace from your recent ' + RACE_RESULT_LABEL[state.profile.recentRaceDistance] + ' time, not a target. Go by feel first.</dd>';
+          ' &mdash; estimated ' + QUALITY_PACE_ZONE_LABEL[targetPaceRange.zone] + ' pace from your recent ' + RACE_RESULT_LABEL[state.profile.recentRaceDistance] + ' time, not a target. Go by feel first.</dd>';
       }
+    }
+
+    // ── Planned vs. Actual review (docs/RACR_RunLogging_Correction.md) ──
+    // Only shown once something's actually been logged -- planned data is
+    // never overwritten by the actual result, both stay visible together.
+    var plannedVsActualHtml = '';
+    if (loggable && (entry.distance != null || entry.time)) {
+      var actualSecs = parseDurationToSeconds(entry.time);
+      var actualPaceSecPerMi = computeActualPaceSecPerMi(entry.distance, actualSecs);
+      var actualPaceDisplay = actualPaceSecPerMi ?
+        formatPace(state.units === 'km' ? actualPaceSecPerMi / KM_PER_MI : actualPaceSecPerMi) + ' /' + unitLabel() : '&mdash;';
+      var interpretation = interpretRunResult(dayData, entry, targetPaceRange);
+      plannedVsActualHtml =
+        '<div class="wd-review">' +
+          '<div class="wd-review-col">' +
+            '<div class="wd-review-label">Planned</div>' +
+            '<dl class="wd-info">' +
+              (dayData.miles ? '<dt>Distance</dt><dd>' + toUnit(dayData.miles) + ' ' + unitLabel() + '</dd>' : '') +
+              (targetPaceRange ? '<dt>Target pace</dt><dd>' + formatPace(state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi) + '&ndash;' + formatPace(state.units === 'km' ? targetPaceRange.hiSecPerMi / KM_PER_MI : targetPaceRange.hiSecPerMi) + ' /' + unitLabel() + '</dd>' : '') +
+            '</dl>' +
+          '</div>' +
+          '<div class="wd-review-col">' +
+            '<div class="wd-review-label">Actual</div>' +
+            '<dl class="wd-info">' +
+              (entry.distance != null ? '<dt>Distance</dt><dd>' + toUnit(entry.distance) + ' ' + unitLabel() + '</dd>' : '') +
+              (entry.time ? '<dt>Duration</dt><dd>' + escapeHtml(entry.time) + '</dd>' : '') +
+              '<dt>Pace</dt><dd>' + actualPaceDisplay + '</dd>' +
+              (entry.effort ? '<dt>Effort</dt><dd>RPE ' + entry.effort + '</dd>' : '') +
+            '</dl>' +
+          '</div>' +
+        '</div>' +
+        (interpretation ? '<p class="wd-interpretation">' + escapeHtml(interpretation) + '</p>' : '');
     }
 
     var detailHtml = detail ? (
@@ -3082,15 +3222,21 @@
       rpeChips += '<button type="button" class="rpe-chip" data-rpe="' + i + '">' + i + '</button>';
     }
 
+    var completionSelected = entry.completionType || 'planned';
+
     var logHtml = loggable ? (
       '<div class="wd-log">' +
         (GoogleHealth.isConnected ? '<div class="pain-toggle" id="ghImportBtn">Import from Google Health</div><div class="ai-why-result" id="ghImportResult" style="display:none"></div>' : '') +
-        '<div class="ob-label">Time</div>' +
-        '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10" value="' + escapeHtml(entry.time || '') + '">' +
+        '<div class="ob-label">Duration</div>' +
+        '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10 or 1:15:00" value="' + escapeHtml(entry.time || '') + '">' +
         '<div class="ob-label">Distance (' + unitLabel() + ')</div>' +
         '<input class="ob-input" type="number" min="0" step="0.1" id="wd_distance" value="' + (entry.distance != null ? toUnit(entry.distance) : '') + '">' +
+        '<div class="ob-label">Pace</div>' +
+        '<div class="wd-computed-pace" id="wd_pace_display">&mdash;</div>' +
         '<div class="ob-label">Effort (RPE 1&ndash;10)</div>' +
         '<div class="chip-grid" id="wd_rpe">' + rpeChips + '</div>' +
+        '<div class="ob-label">Completion</div>' +
+        '<div class="chip-grid" id="wd_completion">' + chipsHtml('completion', COMPLETION_TYPES, COMPLETION_TYPE_LABEL, completionSelected, false) + '</div>' +
         '<div class="ob-label">Notes</div>' +
         '<textarea class="ob-input wd-notes" id="wd_notes" rows="3" placeholder="How did it feel?">' + escapeHtml(entry.notes || '') + '</textarea>' +
         '<div class="pain-toggle" id="painToggle">' + (entry.pain ? 'Update pain report' : 'Report pain or discomfort') + '</div>' +
@@ -3113,6 +3259,7 @@
         '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
         '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
         detailHtml +
+        plannedVsActualHtml +
         (detail ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiWhyBtn">Ask AI: why this workout?</button><div class="ai-why-result" id="aiWhyResult" style="display:none"></div></div>' : '') +
         ((dayData.type === 'easy' || dayData.type === 'cross') ? '<div class="pain-toggle" id="switchItUpBtn">Not feeling this run?</div>' : '') +
         logHtml +
@@ -3223,6 +3370,33 @@
           paintRpe();
         });
       });
+
+      // Live pace = duration / distance as the runner types, matching the
+      // spec's "automatically calculate average pace" requirement -- not
+      // just a post-save review, but visible while filling in the form.
+      var wdTimeInput = document.getElementById('wd_time');
+      var wdDistanceInput = document.getElementById('wd_distance');
+      var wdPaceDisplay = document.getElementById('wd_pace_display');
+      function updateComputedPaceDisplay() {
+        var distMiles = wdDistanceInput.value !== '' ? fromUnit(parseFloat(wdDistanceInput.value)) : null;
+        var secs = parseDurationToSeconds(wdTimeInput.value.trim());
+        var pace = computeActualPaceSecPerMi(distMiles, secs);
+        wdPaceDisplay.textContent = pace ? formatPace(state.units === 'km' ? pace / KM_PER_MI : pace) + ' /' + unitLabel() : '—';
+      }
+      updateComputedPaceDisplay();
+      wdTimeInput.addEventListener('input', updateComputedPaceDisplay);
+      wdDistanceInput.addEventListener('input', updateComputedPaceDisplay);
+
+      var completionWrap = document.getElementById('wd_completion');
+      completionWrap.querySelectorAll('.chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          completionSelected = chip.getAttribute('data-value');
+          completionWrap.querySelectorAll('.chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === completionSelected);
+          });
+        });
+      });
+
       var painToggle = document.getElementById('painToggle');
       var painForm = document.getElementById('painForm');
       painToggle.addEventListener('click', function () {
@@ -3302,7 +3476,7 @@
           effort: effortSelected,
           notes: notes || null,
           pain: pain,
-          done: true
+          completionType: completionSelected
         }, dayData.type, result.weeks);
         renderMain();
       });

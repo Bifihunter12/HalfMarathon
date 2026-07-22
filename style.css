@@ -633,13 +633,28 @@ body {
 .cross-select:focus { outline: none; border-color: var(--accent); }
 
 
-.day-done-check {
+/* ── Weekly-row status glyph -- replaces the old plain checkbox ────────── */
+.day-status {
   flex: none;
-  width: 19px;
-  height: 19px;
-  accent-color: var(--accent);
-  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
 }
+.day-status--upcoming { border: 1.5px solid var(--border); }
+.day-status--today { background: var(--accent); border: 1.5px solid var(--accent); }
+.day-status--missed { border: 1.5px solid var(--border); color: var(--text-faint); }
+.day-status--done { background: var(--accent); color: #fff; }
+.day-status--done i { font-size: 12px; }
+.day-status--modified { border: 1.5px solid var(--accent); color: var(--accent); }
+
+.day-target, .day-completed { font-size: 12px; line-height: 1.4; color: var(--text-faint); }
+.day-completed { color: var(--text-dim); font-weight: 600; }
 
 .app-toast {
   position: fixed;
@@ -696,6 +711,30 @@ dl.wd-info dd {
 
 .wd-log { margin-top: 4px; }
 .wd-notes { resize: vertical; font-family: var(--font); line-height: 1.5; }
+
+/* ── Planned vs. Actual review (docs/RACR_RunLogging_Correction.md) ────── */
+.wd-review { display: flex; gap: 18px; margin-top: 10px; }
+.wd-review-col { flex: 1; min-width: 0; }
+.wd-review-col .wd-info { margin-top: 4px; padding: 0; border: none; }
+.wd-review-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.wd-interpretation {
+  margin: 12px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+.wd-computed-pace {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
 
 .rpe-chip {
   appearance: none;
@@ -850,4 +889,5 @@ dl.wd-info dd {
 @media (max-width: 420px) {
   #app { padding: 22px 14px 40px; }
   .hd-title { font-size: 26px; }
+  .wd-review { flex-direction: column; gap: 14px; }
 }

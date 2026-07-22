@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.07.21.4";
+const APP_VERSION = "2026.07.22.1";
 const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
