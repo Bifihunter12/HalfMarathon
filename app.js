@@ -4,6 +4,7 @@
   var STORAGE_KEY = 'training_plan_v1';
   var SideQuestDomain = window.RACRSideQuests || {};
   var PathDomain = window.RACRPath || {};
+  var XpDomain = window.RACRXp || {};
   var DOW_FULL = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
   var MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
@@ -277,7 +278,11 @@
   function applySideQuest(key, quest, baseLabel) {
     if (quest.name === baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
     state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
-    saveState(state);
+    // Previously never awarded XP at all (a pre-existing inconsistency vs.
+    // completeMission/applySideQuestChat, found while scoping the reward
+    // system's Phase 1) -- now routed through the same shared path as every
+    // other Side Mission completion.
+    awardSideMissionXp('sidemission|' + quest.id + '|' + key + '|' + dateToISO(new Date()), quest.rewardPoints, { key: key });
     refreshPathProgress();
   }
 
@@ -391,7 +396,7 @@
         rewardPoints: mission ? mission.xpReward : 80,
         relationship: mission ? mission.relationshipLabel : 'Supports your Main Quest'
       });
-      state.xp += mission ? mission.xpReward : 80;
+      awardSideMissionXp('sidemission|' + domainTrack.id + '|' + missionId + '|' + dateToISO(new Date()), mission ? mission.xpReward : 80, { key: key });
       if (key && state.sideQuestCalendar[key] === missionId) delete state.sideQuestCalendar[key];
       if (active.completedSessions >= domainTotal) {
         state.completedQuestTracks.push({ trackId: domainTrack.id, date: dateToISO(new Date()), badgeId: 'strong_runner' });
@@ -407,7 +412,7 @@
     if (active.completedSessions >= total) return;
     active.completedSessions++;
     state.sideQuestLog.push({ id: track.id + '-session-' + active.completedSessions, key: null, date: dateToISO(new Date()), category: 'strength', rewardPoints: 40 });
-    state.xp += 40;
+    awardSideMissionXp('sidemission|' + track.id + '|session' + active.completedSessions, 40, { key: key });
     saveState(state);
     refreshPathProgress();
   }
@@ -434,12 +439,12 @@
       difficulty: feedback && feedback.difficulty || null,
       pain: feedback && feedback.pain || null
     });
-    state.xp += mission.xpReward || mission.rewardPoints || 0;
+    var xpResult = awardSideMissionXp('sidemission|' + mission.id + '|' + (key || 'none') + '|' + dateToISO(new Date()), mission.xpReward || mission.rewardPoints || 0, { key: key });
     if (mission.badgeId && state.badges.indexOf(mission.badgeId) === -1) state.badges.push(mission.badgeId);
     if (key && state.sideQuestCalendar[key] === mission.id) delete state.sideQuestCalendar[key];
     saveState(state);
     refreshPathProgress();
-    showToast('Side Mission complete: ' + mission.name + '.');
+    showToast('Side Mission complete: ' + mission.name + '.' + xpToastSuffix(xpResult));
     return true;
   }
 
@@ -763,7 +768,9 @@
     if (!s.badges) s.badges = [];
     if (!s.path) s.path = null; // { id, mainQuestId, currentNodeId, nodeIds }
     if (!s.pathNodes) s.pathNodes = [];
-    if (!s.xp) s.xp = 0;
+    if (!s.xp) s.xp = 0; // derived -- always recomputed from xpEvents by awardXp()/mergeRunnerState, never incremented directly
+    if (!s.xpEvents) s.xpEvents = []; // [{ idempotencyKey, source, xpType, baseXp, modifier, totalXp, date, key }]
+    if (!s.xpProfile) s.xpProfile = { lastLevelUpAt: null, selectedProfileTitle: null, selectedPathTheme: null, selectedBadgeFrame: null };
     if (!s.runningFeelingLog) s.runningFeelingLog = []; // [{ weekStartIso, feeling }]
     if (!s.lastModified) s.lastModified = 0;
     return s;
@@ -908,16 +915,97 @@
     setTimeout(function () { toast.remove(); }, 3700);
   }
 
+  // ── XP awarding (docs/RACR_Reward_System_Master_Prompt.md, Phase 1) ──
+  // The one place state.xpEvents/state.xp/state.xpProfile get written.
+  // Upserts by idempotencyKey -- honest re-edits (re-saving a day after
+  // changing effort/completionType, or re-completing the same Side Mission
+  // slot) correct that one ledger entry instead of farming a duplicate.
+  // source:'side_mission' additionally clamps through the weekly cap before
+  // being recorded; state.xp is always the ledger's own sum afterward, never
+  // an independently-incremented counter (see mergeRunnerState's comment on
+  // why that matters for cross-device merges).
+  function awardXp(idempotencyKey, source, xpType, baseXp, modifier, meta) {
+    var totalXp = Math.round((baseXp || 0) * (modifier != null ? modifier : 1));
+
+    if (source === 'side_mission') {
+      var today = new Date(); today.setHours(0, 0, 0, 0);
+      var weekStart = mondayOfWeek(today);
+      var weekEnd = new Date(weekStart.getTime() + 6 * 86400000);
+      var thisWeekEvents = state.xpEvents.filter(function (e) {
+        if (e.idempotencyKey === idempotencyKey) return false; // exclude the entry being replaced, if any
+        var d = parseDate(e.date);
+        return d >= weekStart && d <= weekEnd;
+      });
+      var sideMissionSoFar = thisWeekEvents.filter(function (e) { return e.source === 'side_mission'; })
+        .reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
+      var mainQuestThisWeek = thisWeekEvents.filter(function (e) { return e.source === 'main_quest'; })
+        .reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
+      if (XpDomain.applySideMissionWeeklyCap) {
+        totalXp = XpDomain.applySideMissionWeeklyCap(sideMissionSoFar, mainQuestThisWeek, totalXp);
+      }
+    }
+
+    var event = {
+      idempotencyKey: idempotencyKey, source: source, xpType: xpType,
+      baseXp: baseXp || 0, modifier: modifier != null ? modifier : 1, totalXp: totalXp,
+      date: dateToISO(new Date()), key: (meta && meta.key) || null
+    };
+    var idx = -1;
+    for (var i = 0; i < state.xpEvents.length; i++) {
+      if (state.xpEvents[i].idempotencyKey === idempotencyKey) { idx = i; break; }
+    }
+    if (idx === -1) state.xpEvents.push(event); else state.xpEvents[idx] = event;
+
+    var levelBefore = XpDomain.levelForTotalXp ? XpDomain.levelForTotalXp(state.xp).level : 1;
+    state.xp = state.xpEvents.reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
+    var levelAfterInfo = XpDomain.levelForTotalXp ? XpDomain.levelForTotalXp(state.xp) : { level: levelBefore, rankTitle: '' };
+    if (levelAfterInfo.level > levelBefore) state.xpProfile.lastLevelUpAt = Date.now();
+    saveState(state);
+    return { totalXp: totalXp, levelBefore: levelBefore, levelAfter: levelAfterInfo.level, rankTitle: levelAfterInfo.rankTitle };
+  }
+
+  // Thin wrapper shared by every Side Mission completion path (single-session
+  // quests, quest-track sessions, the AI-chat substitute flow) -- unifies
+  // what used to be three inconsistent `state.xp +=` lines (and one path,
+  // applySideQuest, that never awarded XP at all) into one call.
+  function awardSideMissionXp(idempotencyKey, baseXp, meta) {
+    var calc = XpDomain.xpForSideMission ? XpDomain.xpForSideMission(baseXp) : { baseXp: baseXp || 0, modifier: 1 };
+    return awardXp(idempotencyKey, 'side_mission', 'side_mission', calc.baseXp, calc.modifier, meta);
+  }
+
+  // Minimal Phase 1 surfacing of an awardXp() result -- appended to whichever
+  // toast logAndCelebrate/completeMission were already going to show. The
+  // full 8-step reward sequence (micro-wins/level bar/badge progress/Path
+  // emphasis) is explicitly Phase 2+ work, not built here.
+  function xpToastSuffix(xpResult) {
+    if (!xpResult || !xpResult.totalXp) return '';
+    var suffix = ' +' + xpResult.totalXp + ' XP';
+    if (xpResult.levelAfter > xpResult.levelBefore) {
+      suffix += ' · Level up! Now Level ' + xpResult.levelAfter + (xpResult.rankTitle ? ' — ' + xpResult.rankTitle : '');
+    }
+    return suffix;
+  }
+
   // Shared by the quick calendar row, its done-checkbox, and the workout
   // detail Save button -- one place decides whether a log is an ordinary
   // completion (free local message) or an actual personal best (worth a
   // real AI-phrased note, since those are rare enough that the API call is
   // cheap and the moment deserves more than a canned line).
-  function logAndCelebrate(key, patch, dayType, weeks) {
+  function logAndCelebrate(key, patch, dayType, weeks, dayData, label) {
     setLog(key, patch);
     refreshPathProgress(weeks);
     var entry = getLog(key);
     if (!entry) return;
+
+    var xpResult = null;
+    if (dayData && XpDomain.xpForMainQuestWorkout) {
+      var xpCalc = XpDomain.xpForMainQuestWorkout(dayData, label || dayData.label, entry.completionType);
+      if (xpCalc.totalXp > 0) {
+        xpResult = awardXp('mainquest|' + key, 'main_quest', xpCalc.xpType, xpCalc.baseXp, xpCalc.modifier, { key: key });
+      }
+    }
+    var xpSuffix = xpToastSuffix(xpResult);
+
     var milestone = checkForMilestone(key, dayType, entry, weeks);
     if (milestone) {
       fetch('/.netlify/functions/celebrate', {
@@ -927,12 +1015,12 @@
       }).then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (result) {
-        showToast((result.ok && result.data.message) || 'That’s a personal best — nice work!');
+        showToast(((result.ok && result.data.message) || 'That’s a personal best — nice work!') + xpSuffix);
       }).catch(function () {
-        showToast('That’s a personal best — nice work!');
+        showToast('That’s a personal best — nice work!' + xpSuffix);
       });
     } else {
-      showToast(CELEBRATE_MESSAGES[_celebrateMsgIdx % CELEBRATE_MESSAGES.length]);
+      showToast(CELEBRATE_MESSAGES[_celebrateMsgIdx % CELEBRATE_MESSAGES.length] + xpSuffix);
       _celebrateMsgIdx++;
     }
   }
@@ -1003,6 +1091,21 @@
       if (!pathNodeMap[n.id] || n.status === 'completed') pathNodeMap[n.id] = n;
     });
 
+    // XP events are append-only and idempotency-keyed (docs/RACR_Reward_System_Master_Prompt.md
+    // Phase 1) -- union by key like sideQuestLog/completedQuestTracks above,
+    // not a scalar merge. `xp` itself is then recomputed as the ledger's sum
+    // rather than merged independently, which is what actually fixes the
+    // fragility the old scalar-xp merge (still shown further down) had to
+    // work around: two devices earning XP offline can no longer silently
+    // lose one side's events, since both sides' events survive the union.
+    var xpEventMap = {};
+    (remote.xpEvents || []).concat(local.xpEvents || []).forEach(function (e) {
+      if (!e || !e.idempotencyKey) return;
+      xpEventMap[e.idempotencyKey] = e;
+    });
+    var xpEventsMerged = Object.keys(xpEventMap).map(function (k) { return xpEventMap[k]; });
+    var xpTotalFromLedger = xpEventsMerged.reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
+
     return {
       userName: prefer.userName,
       units: prefer.units,
@@ -1015,12 +1118,13 @@
       path: prefer.path || local.path || remote.path || null,
       pathNodes: Object.keys(pathNodeMap).map(function (k) { return pathNodeMap[k]; }),
       badges: badgesUnion,
-      // Additive counter -- prefer-newer (like every other scalar here) isn't
-      // perfectly reconciled across two devices earning XP while both
-      // offline, but it's a correct, simple fix for the real bug this
-      // replaced: xp was missing from this object entirely, so it was
-      // silently wiped back to whatever the losing side had on every sync.
-      xp: typeof prefer.xp === 'number' ? prefer.xp : 0,
+      // Derived from xpEventsMerged above, not merged as its own scalar --
+      // see the xpEventMap comment above for why this replaced the old
+      // prefer-newer-scalar approach (kept working, but was a documented
+      // known-fragile pattern, not one to extend further).
+      xp: xpTotalFromLedger,
+      xpEvents: xpEventsMerged,
+      xpProfile: prefer.xpProfile || { lastLevelUpAt: null, selectedProfileTitle: null, selectedPathTheme: null, selectedBadgeFrame: null },
       raceGoal: prefer.raceGoal,
       profile: prefer.profile,
       planMeta: prefer.planMeta,
@@ -2890,8 +2994,7 @@
       if (!day || !quest || replaces.indexOf(day.type) === -1) return false;
       if (quest.name === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
       state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), rewardPoints: quest.xpReward || quest.rewardPoints || 0, relationship: quest.relationshipLabel || 'Can replace an easy Main Mission' });
-      state.xp += quest.xpReward || quest.rewardPoints || 0;
-      saveState(state);
+      awardSideMissionXp('sidemission|' + quest.id + '|' + key + '|' + dateToISO(new Date()), quest.xpReward || quest.rewardPoints || 0, { key: key });
       refreshPathProgress();
       return true;
     }
@@ -3477,7 +3580,7 @@
           notes: notes || null,
           pain: pain,
           completionType: completionSelected
-        }, dayData.type, result.weeks);
+        }, dayData.type, result.weeks, dayData, label);
         renderMain();
       });
     }
