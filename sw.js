@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.07.22.8";
+const APP_VERSION = "2026.07.23.1";
 const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
@@ -8,11 +8,15 @@ const APP_FILES = [
   `/side-quests.js?v=${APP_VERSION}`,
   `/path-system.js?v=${APP_VERSION}`,
   `/xp-system.js?v=${APP_VERSION}`,
+  `/merge-state.js?v=${APP_VERSION}`,
   `/app.js?v=${APP_VERSION}`,
   `/app-version.json?v=${APP_VERSION}`,
   "/sw.js",
   `/icons/icon-192.svg?v=${APP_VERSION}`,
-  `/icons/icon-512.svg?v=${APP_VERSION}`
+  `/icons/icon-512.svg?v=${APP_VERSION}`,
+  `/icons/icon-192.png?v=${APP_VERSION}`,
+  `/icons/icon-512.png?v=${APP_VERSION}`,
+  `/icons/icon-512-maskable.png?v=${APP_VERSION}`
 ];
 
 self.addEventListener("install", (event) => {

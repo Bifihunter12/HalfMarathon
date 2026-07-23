@@ -5,6 +5,35 @@
   var SideQuestDomain = window.RACRSideQuests || {};
   var PathDomain = window.RACRPath || {};
   var XpDomain = window.RACRXp || {};
+  var MergeStateDomain = window.RACRMergeState || {};
+
+  // ── Minimal self-hosted crash/event logging (docs/RELEASE_BLOCKERS.md
+  // CRITICAL-2 + CRITICAL-3) -- fire-and-forget POSTs to a Netlify function
+  // that just logs to Netlify's own function logs (no third-party account
+  // needed). Never awaited, never lets a logging failure become a second
+  // visible error, and never sends free-text/PII (no notes, no pain-report
+  // text, no chat content -- only short event names/enums and error
+  // messages/stack traces).
+  function sendTelemetry(kind, name, detail) {
+    try {
+      fetch('/.netlify/functions/log-telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind, name: name, detail: detail, timestamp: Date.now() })
+      }).catch(function () {});
+    } catch (e) { /* telemetry must never itself throw */ }
+  }
+  function reportError(message, stack) { sendTelemetry('error', String(message || 'Unknown error'), String(stack || '')); }
+  function logTelemetryEvent(name, detail) { sendTelemetry('event', name, detail); }
+
+  window.addEventListener('error', function (e) {
+    reportError(e.message, e.error && e.error.stack);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var reason = e.reason;
+    reportError(reason && reason.message ? reason.message : String(reason), reason && reason.stack);
+  });
+
   var DOW_FULL = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
   var MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
@@ -444,6 +473,7 @@
     if (key && state.sideQuestCalendar[key] === mission.id) delete state.sideQuestCalendar[key];
     saveState(state);
     refreshPathProgress();
+    logTelemetryEvent('side_mission_completed', mission.id);
     showToast('Side Mission complete: ' + mission.name + '.' + xpToastSuffix(xpResult));
     return true;
   }
@@ -485,6 +515,7 @@
     if (justCompleted) {
       xpResult = awardSideMissionXp('challenge|' + challengeId, challenge.xpReward, { key: null });
       if (challenge.badgeId && state.badges.indexOf(challenge.badgeId) === -1) state.badges.push(challenge.badgeId);
+      logTelemetryEvent('challenge_completed', challengeId);
     }
     saveState(state);
     refreshPathProgress();
@@ -1087,6 +1118,7 @@
     refreshPathProgress(weeks);
     var entry = getLog(key);
     if (!entry) return;
+    logTelemetryEvent('workout_logged', dayType);
 
     var xpResult = null;
     if (dayData && XpDomain.xpForMainQuestWorkout) {
@@ -1106,8 +1138,10 @@
       }).then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (result) {
+        if (!result.ok) logTelemetryEvent('ai_call_failed', 'celebrate');
         showToast(((result.ok && result.data.message) || 'That’s a personal best — nice work!') + xpSuffix);
       }).catch(function () {
+        logTelemetryEvent('ai_call_failed', 'celebrate');
         showToast('That’s a personal best — nice work!' + xpSuffix);
       });
     } else {
@@ -1131,103 +1165,11 @@
   // Same lastModified-wins-for-scalars / union-merge-for-collections pattern as
   // Conqur's CloudSync, adapted to this app's shape -- logs/overrides/crossType
   // are keyed by "weekNum-dayIdx" so they union the same way Conqur unions by id.
-  function mergeRunnerState(local, remote) {
-    var localNewer = (local.lastModified || 0) >= (remote.lastModified || 0);
-    var prefer = localNewer ? local : remote;
-
-    function mergeMap(localMap, remoteMap) {
-      var out = {};
-      Object.keys(localMap || {}).concat(Object.keys(remoteMap || {})).forEach(function (k) {
-        if (out.hasOwnProperty(k)) return;
-        var lv = (localMap || {})[k], rv = (remoteMap || {})[k];
-        out[k] = (lv !== undefined && rv !== undefined) ? (localNewer ? lv : rv) : (lv !== undefined ? lv : rv);
-      });
-      return out;
-    }
-
-    var unavailableMap = {};
-    (remote.unavailable || []).concat(local.unavailable || []).forEach(function (r) {
-      unavailableMap[r.start + '|' + r.end + '|' + r.reason] = r;
-    });
-
-    var sideQuestMap = {};
-    (remote.sideQuestLog || []).concat(local.sideQuestLog || []).forEach(function (r) {
-      sideQuestMap[r.date + '|' + r.key + '|' + r.id] = r;
-    });
-
-    // Unlike unavailable/sideQuestLog (append-only), a week's feeling can be
-    // overwritten via "Change" -- so this needs real last-write-wins per
-    // week key, not just "whichever side happened to list it," hence
-    // reusing mergeMap's local-newer-wins logic instead of a plain union.
-    function toWeekMap(arr) {
-      var out = {};
-      (arr || []).forEach(function (e) { out[e.weekStartIso] = e; });
-      return out;
-    }
-    var feelingMap = mergeMap(toWeekMap(local.runningFeelingLog), toWeekMap(remote.runningFeelingLog));
-
-    // Same union-by-natural-key treatment as unavailable/sideQuestLog above --
-    // these are append-only records too, never overwritten in place.
-    var completedTracksMap = {};
-    (remote.completedQuestTracks || []).concat(local.completedQuestTracks || []).forEach(function (r) {
-      completedTracksMap[r.trackId + '|' + r.date] = r;
-    });
-    var badgesUnion = (local.badges || []).concat(remote.badges || []).filter(function (b, i, arr) { return arr.indexOf(b) === i; });
-    // sideQuestCalendar is a plain dayKey->missionId map, same shape as
-    // logs/overrides/crossType above -- reuse mergeMap directly.
-    var sideQuestCalendarMerged = mergeMap(local.sideQuestCalendar, remote.sideQuestCalendar);
-    var pathNodeMap = {};
-    (remote.pathNodes || []).concat(local.pathNodes || []).forEach(function (n) {
-      if (!n || !n.id) return;
-      if (!pathNodeMap[n.id] || n.status === 'completed') pathNodeMap[n.id] = n;
-    });
-
-    // XP events are append-only and idempotency-keyed (docs/RACR_Reward_System_Master_Prompt.md
-    // Phase 1) -- union by key like sideQuestLog/completedQuestTracks above,
-    // not a scalar merge. `xp` itself is then recomputed as the ledger's sum
-    // rather than merged independently, which is what actually fixes the
-    // fragility the old scalar-xp merge (still shown further down) had to
-    // work around: two devices earning XP offline can no longer silently
-    // lose one side's events, since both sides' events survive the union.
-    var xpEventMap = {};
-    (remote.xpEvents || []).concat(local.xpEvents || []).forEach(function (e) {
-      if (!e || !e.idempotencyKey) return;
-      xpEventMap[e.idempotencyKey] = e;
-    });
-    var xpEventsMerged = Object.keys(xpEventMap).map(function (k) { return xpEventMap[k]; });
-    var xpTotalFromLedger = xpEventsMerged.reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
-
-    return {
-      userName: prefer.userName,
-      units: prefer.units,
-      notifications: prefer.notifications || { enabled: false },
-      activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
-      activeWeeklyChallenge: prefer.activeWeeklyChallenge !== undefined ? prefer.activeWeeklyChallenge : null,
-      sideQuestOnboarding: prefer.sideQuestOnboarding !== undefined ? prefer.sideQuestOnboarding : null,
-      sideQuestCalendar: sideQuestCalendarMerged,
-      completedQuestTracks: Object.keys(completedTracksMap).map(function (k) { return completedTracksMap[k]; }),
-      path: prefer.path || local.path || remote.path || null,
-      pathNodes: Object.keys(pathNodeMap).map(function (k) { return pathNodeMap[k]; }),
-      badges: badgesUnion,
-      // Derived from xpEventsMerged above, not merged as its own scalar --
-      // see the xpEventMap comment above for why this replaced the old
-      // prefer-newer-scalar approach (kept working, but was a documented
-      // known-fragile pattern, not one to extend further).
-      xp: xpTotalFromLedger,
-      xpEvents: xpEventsMerged,
-      xpProfile: prefer.xpProfile || { lastLevelUpAt: null, selectedProfileTitle: null, selectedPathTheme: null, selectedBadgeFrame: null },
-      raceGoal: prefer.raceGoal,
-      profile: prefer.profile,
-      planMeta: prefer.planMeta,
-      logs: mergeMap(local.logs, remote.logs),
-      overrides: mergeMap(local.overrides, remote.overrides),
-      crossType: mergeMap(local.crossType, remote.crossType),
-      unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
-      sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
-      runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),
-      lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
-    };
-  }
+  // mergeRunnerState now lives in merge-state.js (docs/RELEASE_BLOCKERS.md
+  // CRITICAL-1) so it can have real automated test coverage -- see
+  // tests/merge-state.test.js. This is the single most safety-critical piece
+  // of code in the app (cross-device conflict resolution) and had zero
+  // coverage before, despite 3+ real historical data-loss bugs living here.
 
   var CloudSync = {
     _user: null,
@@ -1295,7 +1237,7 @@
           await this.push();
           return;
         }
-        var merged = mergeRunnerState(state, res.data.state_json);
+        var merged = MergeStateDomain.mergeRunnerState(state, res.data.state_json);
         _skipCloudPush = true;
         state = merged;
         saveState(state);
@@ -2256,6 +2198,7 @@
       state.logs = {}; state.overrides = {}; state.crossType = {};
     }
     saveState(state);
+    if (!isEdit) logTelemetryEvent('onboarding_completed', raceGoal.event);
     didAutoScroll = false;
     renderMain();
   }
@@ -3323,6 +3266,7 @@
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (result2) {
         if (!result2.ok || result2.data.error) {
+          logTelemetryEvent('ai_call_failed', 'coach');
           coachHistory.push({ role: 'coach', text: (result2.data && result2.data.error) || "Couldn't reach the AI coach right now.", action: null, resolved: null });
         } else {
           coachHistory.push({
@@ -3331,6 +3275,7 @@
           });
         }
       }).catch(function () {
+        logTelemetryEvent('ai_call_failed', 'coach');
         coachHistory.push({ role: 'coach', text: "Couldn't reach the AI coach right now.", action: null, resolved: null });
       }).finally(function () {
         coachWaiting = false;
@@ -3656,6 +3601,7 @@
           }
           aiWhyResult.textContent = result2.data.explanation;
         }).catch(function () {
+          logTelemetryEvent('ai_call_failed', 'why-workout');
           aiWhyResult.className = 'ai-why-result ai-why-error';
           aiWhyResult.textContent = "Couldn't reach the AI coach right now – the explanation above still applies.";
         }).finally(function () {
@@ -4358,6 +4304,7 @@
           }
           aiRecapResult.textContent = result2.data.recap;
         }).catch(function () {
+          logTelemetryEvent('ai_call_failed', 'weekly-recap');
           aiRecapResult.className = 'ai-why-result ai-why-error';
           aiRecapResult.textContent = "Couldn't reach the AI coach right now – the stats above still apply.";
         }).finally(function () {
