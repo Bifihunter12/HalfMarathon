@@ -632,6 +632,12 @@ body {
 .cross-select.chosen { border-style: solid; border-color: var(--accent); color: var(--accent); }
 .cross-select:focus { outline: none; border-color: var(--accent); }
 
+/* ── Multi-activity cross-training builder (Workout Detail) ─────────────── */
+.cross-segment-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.cross-segment-row .cross-select { flex: 1; min-width: 0; }
+.cross-segment-minutes { width: 60px !important; flex: none; margin-top: 0 !important; padding: 8px 10px !important; font-size: 14px !important; }
+.cross-segment-remove { margin-top: 0; white-space: nowrap; }
+
 
 /* ── Weekly-row status glyph -- replaces the old plain checkbox ────────── */
 .day-status {

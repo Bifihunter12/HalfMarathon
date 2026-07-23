@@ -654,14 +654,34 @@
   // any "+ Strength" suffix and working whether or not the base label already
   // named an activity (profile.crossOptions could be 'None', in which case
   // the label has no "· X" segment to replace at all).
+  // state.crossType[key] is either a plain string (the fast single-activity
+  // path via the weekly row's dropdown) or an array of {activity, minutes}
+  // segments (built up via the Workout Detail multi-activity builder) --
+  // this normalizes either shape to an array so display/editing code never
+  // needs to branch on which one it got.
+  function normalizeCrossSegments(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    return [{ activity: value, minutes: null }];
+  }
+  // Joins segments for display -- a single segment with no minutes renders
+  // identically to the old plain-string behavior ("Bike"), so this is a
+  // strict superset, not a visual change, for every existing single-activity day.
+  function crossSegmentsToText(segments) {
+    return segments.map(function (seg) {
+      return (seg.minutes ? seg.minutes + ' min ' : '') + seg.activity;
+    }).join(', ');
+  }
   function applyCrossOverride(label, crossValue) {
-    if (!crossValue) return label;
+    var segments = normalizeCrossSegments(crossValue);
+    if (!segments.length) return label;
     // Suppress the day's own "+ Strength" bonus-work suffix when the chosen
-    // activity already *is* strength training -- otherwise picking
-    // "Strength" produces a redundant "Strength + Strength".
-    var hasStrength = / \+ Strength$/.test(label) && crossValue.toLowerCase() !== 'strength';
+    // mix already includes strength training -- otherwise it duplicates
+    // against a "Strength" segment (e.g. "20 min Bike, 15 min Strength + Strength").
+    var includesStrength = segments.some(function (seg) { return seg.activity && seg.activity.toLowerCase() === 'strength'; });
+    var hasStrength = / \+ Strength$/.test(label) && !includesStrength;
     var base = label.replace(/ \+ Strength$/, '').replace(/ · .+$/, '');
-    return base + ' · ' + crossValue + (hasStrength ? ' + Strength' : '');
+    return base + ' · ' + crossSegmentsToText(segments) + (hasStrength ? ' + Strength' : '');
   }
 
   function escapeHtml(s) {
@@ -3470,6 +3490,15 @@
       '</dl>'
     ) : '';
 
+    // ── Multi-activity cross-training builder ──
+    // Lets the user break a cross day into several activities with their own
+    // minutes (e.g. "20 min Bike, 25 min Row") instead of the weekly row's
+    // single-activity dropdown. state.crossType[key] stays a plain string for
+    // the common single-activity case (unchanged) and only becomes an array
+    // once a second segment is added -- see normalizeCrossSegments/
+    // crossSegmentsToText/applyCrossOverride above.
+    var crossSegmentsHtml = hasCross(label) ? '<div class="ob-sub">Your session</div><div id="crossSegmentList"></div><button type="button" class="ob-btn ob-btn-secondary" id="addCrossSegmentBtn">+ Add another activity</button>' : '';
+
     var rpeChips = '';
     for (var i = 1; i <= 10; i++) {
       rpeChips += '<button type="button" class="rpe-chip" data-rpe="' + i + '">' + i + '</button>';
@@ -3512,6 +3541,7 @@
         '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
         '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
         detailHtml +
+        crossSegmentsHtml +
         plannedVsActualHtml +
         (detail ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiWhyBtn">Ask AI: why this workout?</button><div class="ai-why-result" id="aiWhyResult" style="display:none"></div></div>' : '') +
         ((dayData.type === 'easy' || dayData.type === 'cross') ? '<div class="pain-toggle" id="switchItUpBtn">Not feeling this run?</div>' : '') +
@@ -3521,6 +3551,67 @@
       '</div>'
     );
     app.appendChild(wrap);
+
+    if (hasCross(label)) {
+      var crossSegments = normalizeCrossSegments(state.crossType[key]);
+      if (!crossSegments.length) crossSegments = [{ activity: '', minutes: null }];
+
+      var persistCrossSegments = function () {
+        var cleaned = crossSegments.filter(function (seg) { return seg.activity; });
+        if (cleaned.length) {
+          state.crossType[key] = (cleaned.length === 1 && cleaned[0].minutes == null) ? cleaned[0].activity : cleaned;
+        } else {
+          delete state.crossType[key];
+        }
+        saveState(state);
+        var titleEl = document.querySelector('.wd-title');
+        if (titleEl) {
+          var baseTitleLabel = state.overrides[key] || dayData.label;
+          titleEl.textContent = state.crossType[key] ? applyCrossOverride(baseTitleLabel, state.crossType[key]) : baseTitleLabel;
+        }
+      };
+
+      var renderCrossSegmentRows = function () {
+        var listEl = document.getElementById('crossSegmentList');
+        listEl.innerHTML = crossSegments.map(function (seg, i) {
+          return '<div class="cross-segment-row">' +
+            '<select class="cross-select" data-seg-index="' + i + '">' + crossOptionsHtml(seg.activity) + '</select>' +
+            '<input class="ob-input cross-segment-minutes" type="number" min="0" step="1" placeholder="min" data-seg-index="' + i + '" value="' + (seg.minutes != null ? seg.minutes : '') + '">' +
+            (crossSegments.length > 1 ? '<span class="ob-cancel cross-segment-remove" data-seg-index="' + i + '">Remove</span>' : '') +
+          '</div>';
+        }).join('');
+        listEl.querySelectorAll('.cross-select').forEach(function (sel) {
+          sel.addEventListener('change', function () {
+            crossSegments[parseInt(sel.getAttribute('data-seg-index'), 10)].activity = sel.value;
+            persistCrossSegments();
+          });
+        });
+        listEl.querySelectorAll('.cross-segment-minutes').forEach(function (inp) {
+          inp.addEventListener('input', function () {
+            var val = parseInt(inp.value, 10);
+            crossSegments[parseInt(inp.getAttribute('data-seg-index'), 10)].minutes = isNaN(val) ? null : val;
+            persistCrossSegments();
+          });
+        });
+        listEl.querySelectorAll('.cross-segment-remove').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            crossSegments.splice(parseInt(btn.getAttribute('data-seg-index'), 10), 1);
+            persistCrossSegments();
+            renderCrossSegmentRows();
+          });
+        });
+      };
+
+      renderCrossSegmentRows();
+
+      var addCrossSegmentBtn = document.getElementById('addCrossSegmentBtn');
+      if (addCrossSegmentBtn) {
+        addCrossSegmentBtn.addEventListener('click', function () {
+          crossSegments.push({ activity: '', minutes: null });
+          renderCrossSegmentRows();
+        });
+      }
+    }
 
     var switchItUpBtn = document.getElementById('switchItUpBtn');
     if (switchItUpBtn) {
