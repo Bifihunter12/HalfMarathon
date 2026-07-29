@@ -1,0 +1,155 @@
+// Decision-scenario library (docs/COACHING_SPEC.md "Adaptation rules").
+// Each test below documents one disrupted-training-week scenario against
+// coaching-rules.js's REAL applyMissedAdjustment/applyDifficultyAdjustment --
+// not a reimplementation -- following the master prompt's own schema:
+// Context / Approved outcome / Forbidden outcomes / Status. This is the
+// project's defensible coaching asset per that prompt's own framing ("the
+// decision library -- not the marketing copy -- is the defensible coaching
+// asset"), not just incidental unit coverage.
+//
+// Run with: node --test tests/
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+
+const rules = require(path.join(__dirname, '..', 'coaching-rules.js'));
+
+// Fixed race date/plan length shared by every scenario -- the exact date
+// doesn't matter, only the relative week math does. "Today" is always the
+// Monday of week 3, so week 3 is "current," week 2 is "last week" (the one
+// whose completion decides this week's adjustment), and weeks 4-6 are future.
+const RACE_DATE = rules.parseDate('2026-12-06');
+const PLAN_LENGTH = 6;
+const TODAY = rules.dateForSlot(RACE_DATE, PLAN_LENGTH, 3, 0);
+const RACE_GOAL = { raceDate: '2026-12-06' };
+const PLAN_META = { planLengthWeeks: PLAN_LENGTH };
+const UNITS = 'mi';
+
+function day(type, miles) { return { type: type, miles: miles, label: type + ' ' + miles }; }
+
+// A realistic week: easy, quality, easy, rest, cross, easy, long (7 slots).
+function standardWeek(weekNum, phase) {
+  return {
+    weekNum: weekNum, phase: phase, targetVolume: 0,
+    days: [day('easy', 4), day('quality', 0), day('easy', 4), day('rest', 0), day('cross', 0), day('easy', 4), day('long', 6)]
+  };
+}
+
+function sixWeekPlan() {
+  return [
+    standardWeek(1, 'base'), standardWeek(2, 'base'), standardWeek(3, 'build'),
+    standardWeek(4, 'build'), standardWeek(5, 'peak'), Object.assign(standardWeek(6, 'race'), { days: standardWeek(6, 'race').days.map(function (d, i) { return i === 6 ? day('race', 0) : d; }) })
+  ];
+}
+
+test('Context: only one easy run missed last week, everything else logged. Approved outcome: preserve the whole plan, no adjustment at all.', function () {
+  var weeks = sixWeekPlan();
+  var logs = { '2-0': null, '2-1': { effort: 4 }, '2-2': { effort: 4 }, '2-5': { effort: 4 }, '2-6': { effort: 4 } }; // slot 0 (easy) missed; quality/easy/easy/long logged; rest (slot 3) and cross (slot 4) don't need logs to count as "handled" for this scenario
+  logs['2-4'] = { effort: 3 }; // log the cross day too, so only the one easy run (slot 0) is actually missed
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(result.note, null, 'a single missed easy run, with everything else logged, must not trigger any adjustment note');
+  assert.equal(weeks[2].days[6].miles, 6, 'this week\'s long run stays exactly as planned');
+  assert.equal(weeks[3].days[6].miles, 6, 'future weeks stay exactly as planned');
+});
+
+test('Context: only one quality session missed last week (the master prompt\'s own worked example). Approved outcome: preserve Thursday\'s quality slot and Saturday\'s long run.', function () {
+  var weeks = sixWeekPlan();
+  var logs = { '2-0': { effort: 4 }, '2-2': { effort: 4 }, '2-4': { effort: 3 }, '2-5': { effort: 4 }, '2-6': { effort: 4 } }; // slot 1 (quality) missed, everything else logged
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(result.note, null, 'one missed quality session with a low overall ratio must not trigger any adjustment');
+  assert.equal(weeks[2].days[6].miles, 6, 'the long run is untouched');
+});
+
+test('Context: only the long run itself was missed last week; everything else logged. Approved outcome: shorten (not remove) just this week\'s long run; forbidden: touching any other day.', function () {
+  var weeks = sixWeekPlan();
+  var logs = { '2-0': { effort: 4 }, '2-1': { effort: 4 }, '2-2': { effort: 4 }, '2-4': { effort: 3 }, '2-5': { effort: 4 } }; // slot 6 (long) missed, everything else logged
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(result.note, /long run was shortened/);
+  assert.equal(weeks[2].days[6].miles, 5, 'this week\'s long run shortens ~20% (6mi -> 5mi), it is not skipped/removed');
+  assert.equal(weeks[2].days[0].miles, 4, 'forbidden outcome check: the easy run days are untouched');
+  assert.equal(weeks[2].days[1].label, 'quality 0', 'forbidden outcome check: the quality day is untouched');
+});
+
+test('Context: most of last week was missed (>60%). Approved outcome: future volume dampens ~15% to rebuild gradually; forbidden outcomes: no day\'s mileage ever increases, the current in-progress week is left alone, race week is never touched.', function () {
+  var weeks = sixWeekPlan();
+  var logs = { '2-6': { effort: 4 } }; // only the long run logged; everything else (3 easy + 1 quality + 1 cross) missed -> missedRatio = 1 - 1/6 = 0.833
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(result.note, /reduced about 15%/);
+  // Forbidden: current week (week 3, index 2) is untouched by the ratio-dampening branch (only future weeks 4-6 are).
+  assert.equal(weeks[2].days[0].miles, 4, 'forbidden outcome: the current in-progress week is never retroactively dampened');
+  // Future weeks dampen, never increase.
+  assert.equal(weeks[3].days[0].miles, 3.5, 'week 4\'s easy run dampens ~15% (4mi -> 3.5mi after round5)');
+  assert.equal(weeks[3].days[6].miles, 5, 'week 4\'s long run dampens the same way (6mi -> 5mi after round5)');
+  assert.ok(weeks[3].days[0].miles <= 4 && weeks[3].days[6].miles <= 6, 'forbidden outcome: no day\'s mileage ever increases');
+  // Forbidden: race week (week 6) is never touched.
+  assert.equal(weeks[5].days[0].miles, 4, 'forbidden outcome: race week is never dampened');
+});
+
+test('Context: last week had several illness/away days already converted to rest (simulating applyUnavailableRanges). Approved outcome (docs/SAFETY_POLICY.md): illness time never counts against the runner, even when only a few loggable days remained.', function () {
+  var weeks = sixWeekPlan();
+  weeks[1].days[0] = day('rest', 0); // illness-converted easy day
+  weeks[1].days[2] = day('rest', 0); // illness-converted easy day
+  weeks[1].days[4] = day('rest', 0); // illness-converted cross day
+  // Only quality/easy(slot5)/long remain loggable -- log all 3.
+  var logs = { '2-1': { effort: 4 }, '2-5': { effort: 4 }, '2-6': { effort: 4 } };
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(result.note, null, 'illness-converted rest days must never inflate the missed-workout ratio');
+});
+
+test('Context: easy/long RPE has averaged >=7 across the last two weeks. Approved outcome: future easy/long volume eases back ~10%; forbidden: quality/cross/rest days are never touched by this adjustment.', function () {
+  var weeks = sixWeekPlan();
+  var logs = {
+    '1-0': { effort: 8 }, '1-2': { effort: 8 }, '1-6': { effort: 7 },
+    '2-0': { effort: 8 }, '2-2': { effort: 7 }
+  };
+  var note = rules.applyDifficultyAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(note, /eased back about 10%/);
+  // The adjustment applies from the week AFTER current onward (weeks[currentWeekIdx] as an
+  // array index = weekNum 4, same off-by-one convention as applyMissedAdjustment's dampening branch).
+  assert.equal(weeks[3].days[0].miles, 3.5, 'week 4\'s easy runs ease back ~10% (4mi -> 3.5mi after round5)');
+  assert.equal(weeks[3].days[6].miles, 5.5, 'week 4\'s long run eases back the same way (6mi -> 5.5mi after round5)');
+  assert.equal(weeks[3].days[1].label, 'quality 0', 'forbidden outcome: the quality day is untouched');
+  assert.equal(weeks[3].days[4].label, 'cross 0', 'forbidden outcome: the cross day is untouched');
+  assert.equal(weeks[2].days[0].miles, 4, 'forbidden outcome: the current in-progress week (week 3) is never retroactively adjusted');
+});
+
+test('Context: easy/long RPE has averaged <=2 across the last two weeks (feels too easy). Approved outcome: future easy/long volume nudges up ~5%; forbidden: quality/cross are never touched.', function () {
+  var weeks = sixWeekPlan();
+  var logs = {
+    '1-0': { effort: 1 }, '1-2': { effort: 2 }, '1-6': { effort: 1 },
+    '2-0': { effort: 2 }
+  };
+  var note = rules.applyDifficultyAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(note, /nudged up about 5%/);
+  assert.equal(weeks[3].days[0].miles, 4, 'round5(4 * 1.05) rounds back down to 4 -- still a real, if small, nudge up');
+  assert.equal(weeks[3].days[6].miles, 6.5, 'week 4\'s long run nudges up ~5% (6mi -> 6.5mi after round5)');
+});
+
+test('Context: fewer than 3 logged RPE samples exist in the lookback window. Approved outcome: never guess -- no adjustment at all (insufficient evidence).', function () {
+  var weeks = sixWeekPlan();
+  var logs = { '1-0': { effort: 8 }, '2-0': { effort: 8 } }; // only 2 samples
+  var note = rules.applyDifficultyAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(note, null, 'fewer than 3 samples must never produce a volume adjustment');
+  assert.equal(weeks[2].days[0].miles, 4, 'nothing is touched');
+});
+
+// ── Known gap, recorded not fixed (docs/COACHING_SPEC.md "Adaptation rules") ──
+// Master-prompt worked example: miss ONLY Tuesday's easy run; Thursday's
+// quality session and Saturday's long run should stay untouched. Today's
+// engine decides off a whole-week aggregate ratio, so if enough OTHER
+// (lower-stakes) sessions were also unlogged -- e.g. several cross-training
+// days -- the same 60% threshold trips and dampens quality/long too, even
+// though the "real" miss was just one easy run. Marked `todo` so this stays
+// a visible, honest target for the future per-session rewrite rather than
+// silently omitted or falsely asserted as passing today.
+test('Context: only Tuesday\'s easy run and several lower-stakes cross-training days were missed; the quality session and long run were both completed. Approved outcome: preserve the quality session and long run untouched, since the real miss was one easy run plus optional cross-training, not core running work.', { todo: 'per-session adaptation engine not yet built -- see docs/COACHING_SPEC.md' }, function () {
+  var weeks = sixWeekPlan();
+  weeks[1].days[3] = day('cross', 0); // extra cross-training slot, missed
+  weeks[1].days[4] = day('cross', 0); // extra cross-training slot, missed
+  // Logged: quality (slot 1) and long (slot 6). Missed: easy(0), the 2 cross slots, easy(2), easy(5) -- 5 of 7 missed.
+  var logs = { '2-1': { effort: 4 }, '2-6': { effort: 4 } };
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(weeks[3].days[1].miles, 0, 'quality day miles stay 0 regardless (not a real check)');
+  assert.equal(weeks[3].days[6].miles, 6, 'the future long run should stay untouched since the actual miss was low-stakes -- FAILS today, whole-week dampening reduces it instead');
+});

@@ -6,6 +6,7 @@
   var PathDomain = window.RACRPath || {};
   var XpDomain = window.RACRXp || {};
   var MergeStateDomain = window.RACRMergeState || {};
+  var CoachingRulesDomain = window.RACRCoachingRules || {};
 
   // ── Minimal self-hosted crash/event logging (docs/RELEASE_BLOCKERS.md
   // CRITICAL-2 + CRITICAL-3) -- fire-and-forget POSTs to a Netlify function
@@ -39,14 +40,14 @@
 
   // ── Event + level tables (own synthesis, not any coach's copyrighted schedule) ──
   var EVENTS = ['5k', '10k', 'half', 'marathon', '50k', '50mi', '100k', '100mi'];
-  var EVENT_LABEL = { '5k': '5K', '10k': '10K', half: 'Half Marathon', marathon: 'Marathon', '50k': '50K', '50mi': '50 Mile', '100k': '100K', '100mi': '100 Mile' };
+  var EVENT_LABEL = CoachingRulesDomain.EVENT_LABEL; // docs/COACHING_SPEC.md -- moved to coaching-rules.js
   var RACE_LABEL = { '5k': '5K Race', '10k': '10K Race', half: 'Half Marathon', marathon: 'Marathon', '50k': '50K', '50mi': '50 Mile', '100k': '100K', '100mi': '100 Mile' };
   var RACE_LABEL_SET = {};
   EVENTS.forEach(function (e) { RACE_LABEL_SET[RACE_LABEL[e].toLowerCase()] = true; });
   // legacy labels from the original Higdon-only version, kept recognizable for old overrides
   ['5-k race', '10-k race'].forEach(function (l) { RACE_LABEL_SET[l] = true; });
 
-  var LEVELS = ['beginner', 'novice', 'intermediate', 'advanced'];
+  var LEVELS = CoachingRulesDomain.LEVELS; // docs/COACHING_SPEC.md -- moved to coaching-rules.js
   var LEVEL_LABEL = { beginner: 'Beginner', novice: 'Novice', intermediate: 'Intermediate', advanced: 'Advanced' };
   var GOALS = ['finish', 'improve', 'pr', 'aggressive'];
   var GOAL_LABEL = { finish: 'Finish', improve: 'Improve', pr: 'PR', aggressive: 'Aggressive PR' };
@@ -64,56 +65,8 @@
   var STRENGTH_SESSIONS = { base: 2, build: 2, peak: 1, taper: 0, race: 0 };
 
   // { idealWeeks, minWeeks, longRunPeak (mi), peakVolume (mi/wk), taperWeeks }
-  var EVENT_TABLE = {
-    '5k': {
-      beginner: { idealWeeks: 12, minWeeks: 8, longRunPeak: 3, peakVolume: 12, taperWeeks: 1 },
-      novice: { idealWeeks: 10, minWeeks: 8, longRunPeak: 4, peakVolume: 15, taperWeeks: 1 },
-      intermediate: { idealWeeks: 8, minWeeks: 6, longRunPeak: 6, peakVolume: 22, taperWeeks: 1 },
-      advanced: { idealWeeks: 6, minWeeks: 4, longRunPeak: 8, peakVolume: 30, taperWeeks: 1 }
-    },
-    '10k': {
-      beginner: { idealWeeks: 12, minWeeks: 8, longRunPeak: 5, peakVolume: 16, taperWeeks: 1 },
-      novice: { idealWeeks: 10, minWeeks: 8, longRunPeak: 6, peakVolume: 20, taperWeeks: 1 },
-      intermediate: { idealWeeks: 8, minWeeks: 6, longRunPeak: 9, peakVolume: 28, taperWeeks: 1 },
-      advanced: { idealWeeks: 8, minWeeks: 6, longRunPeak: 11, peakVolume: 38, taperWeeks: 1 }
-    },
-    half: {
-      beginner: { idealWeeks: 18, minWeeks: 12, longRunPeak: 9, peakVolume: 22, taperWeeks: 2 },
-      novice: { idealWeeks: 14, minWeeks: 10, longRunPeak: 10, peakVolume: 28, taperWeeks: 2 },
-      intermediate: { idealWeeks: 12, minWeeks: 8, longRunPeak: 12, peakVolume: 38, taperWeeks: 2 },
-      advanced: { idealWeeks: 10, minWeeks: 6, longRunPeak: 15, peakVolume: 50, taperWeeks: 2 }
-    },
-    marathon: {
-      beginner: { idealWeeks: 22, minWeeks: 16, longRunPeak: 18, peakVolume: 35, taperWeeks: 3 },
-      novice: { idealWeeks: 18, minWeeks: 14, longRunPeak: 20, peakVolume: 42, taperWeeks: 3 },
-      intermediate: { idealWeeks: 16, minWeeks: 12, longRunPeak: 20, peakVolume: 52, taperWeeks: 3 },
-      advanced: { idealWeeks: 14, minWeeks: 10, longRunPeak: 22, peakVolume: 65, taperWeeks: 3 }
-    },
-    '50k': {
-      beginner: { idealWeeks: 24, minWeeks: 16, longRunPeak: 22, peakVolume: 35, taperWeeks: 2 },
-      novice: { idealWeeks: 20, minWeeks: 14, longRunPeak: 24, peakVolume: 42, taperWeeks: 2 },
-      intermediate: { idealWeeks: 16, minWeeks: 12, longRunPeak: 26, peakVolume: 50, taperWeeks: 2 },
-      advanced: { idealWeeks: 14, minWeeks: 10, longRunPeak: 28, peakVolume: 60, taperWeeks: 2 }
-    },
-    '50mi': {
-      beginner: { idealWeeks: 28, minWeeks: 20, longRunPeak: 28, peakVolume: 45, taperWeeks: 3 },
-      novice: { idealWeeks: 24, minWeeks: 18, longRunPeak: 30, peakVolume: 52, taperWeeks: 3 },
-      intermediate: { idealWeeks: 20, minWeeks: 14, longRunPeak: 32, peakVolume: 60, taperWeeks: 3 },
-      advanced: { idealWeeks: 16, minWeeks: 12, longRunPeak: 34, peakVolume: 70, taperWeeks: 3 }
-    },
-    '100k': {
-      beginner: { idealWeeks: 28, minWeeks: 20, longRunPeak: 28, peakVolume: 45, taperWeeks: 3 },
-      novice: { idealWeeks: 24, minWeeks: 18, longRunPeak: 30, peakVolume: 52, taperWeeks: 3 },
-      intermediate: { idealWeeks: 20, minWeeks: 14, longRunPeak: 32, peakVolume: 60, taperWeeks: 3 },
-      advanced: { idealWeeks: 16, minWeeks: 12, longRunPeak: 34, peakVolume: 70, taperWeeks: 3 }
-    },
-    '100mi': {
-      beginner: { idealWeeks: 36, minWeeks: 24, longRunPeak: 32, peakVolume: 55, taperWeeks: 4 },
-      novice: { idealWeeks: 30, minWeeks: 20, longRunPeak: 34, peakVolume: 62, taperWeeks: 4 },
-      intermediate: { idealWeeks: 24, minWeeks: 16, longRunPeak: 36, peakVolume: 72, taperWeeks: 4 },
-      advanced: { idealWeeks: 20, minWeeks: 14, longRunPeak: 38, peakVolume: 80, taperWeeks: 4 }
-    }
-  };
+  // -- docs/COACHING_SPEC.md, moved to coaching-rules.js
+  var EVENT_TABLE = CoachingRulesDomain.EVENT_TABLE;
 
   var LONG_RUN_SHARE = { '5k': 0.32, '10k': 0.30, half: 0.30, marathon: 0.28, '50k': 0.35, '50mi': 0.38, '100k': 0.38, '100mi': 0.40 };
 
@@ -1577,10 +1530,7 @@
   });
 
   // ── Date helpers ───────────────────────────────────────────────────────
-  function parseDate(iso) {
-    var p = iso.split('-').map(Number);
-    return new Date(p[0], p[1] - 1, p[2]);
-  }
+  function parseDate(iso) { return CoachingRulesDomain.parseDate(iso); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
   function dateToISO(d) {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
@@ -1615,43 +1565,12 @@
   }
 
   // slot index within a week: 0..6, slot 6 always lands on the real race weekday
-  function dateForSlot(raceDate, planLengthWeeks, week, slot) {
-    var slotNum = (week - 1) * 7 + slot;
-    var raceSlotNum = (planLengthWeeks - 1) * 7 + 6;
-    var d = new Date(raceDate.getTime());
-    d.setDate(d.getDate() + (slotNum - raceSlotNum));
-    return d;
-  }
+  function dateForSlot(raceDate, planLengthWeeks, week, slot) { return CoachingRulesDomain.dateForSlot(raceDate, planLengthWeeks, week, slot); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
 
-  // ── Classification + safety ──────────────────────────────────────────
-  function classifyUser(profile) {
-    var freq = profile.runDaysPerWeek, mileage = profile.weeklyMileage;
-    var computed;
-    if (freq <= 2 || mileage < 8) computed = 'beginner';
-    else if (freq === 3 && mileage < 20) computed = 'novice';
-    else if (freq <= 5 && mileage < 40) computed = 'intermediate';
-    else computed = 'advanced';
-    var selfRank = LEVELS.indexOf(profile.experienceLevel);
-    var compRank = LEVELS.indexOf(computed);
-    var rank = Math.min(selfRank >= 0 ? selfRank : compRank, compRank);
-    if (profile.recentInjury) rank = Math.min(rank, LEVELS.indexOf('novice'));
-    return LEVELS[rank];
-  }
-
-  function evaluateSafety(event, weeksAvailable, level) {
-    var cfg = EVENT_TABLE[event][level];
-    var unsafe = weeksAvailable < cfg.minWeeks;
-    var warnings = [];
-    if (unsafe) {
-      warnings.push('You have ' + weeksAvailable + ' week' + (weeksAvailable === 1 ? '' : 's') + ' until race day, but a safe ' + EVENT_LABEL[event] + ' build at your current level needs at least ' + cfg.minWeeks + '. This plan scales volume and long runs down to reduce injury risk given the shorter runway — consider a later race date or a shorter distance for a safer build.');
-    }
-    return { unsafe: unsafe, warnings: warnings };
-  }
-
-  function choosePlanLength(weeksAvailable, event, level) {
-    var idealWeeks = EVENT_TABLE[event][level].idealWeeks;
-    return Math.min(weeksAvailable, Math.round(idealWeeks * 1.6), 40);
-  }
+  // ── Classification + safety (docs/COACHING_SPEC.md) -- moved to coaching-rules.js ──
+  function classifyUser(profile) { return CoachingRulesDomain.classifyUser(profile); }
+  function evaluateSafety(event, weeksAvailable, level) { return CoachingRulesDomain.evaluateSafety(event, weeksAvailable, level); }
+  function choosePlanLength(weeksAvailable, event, level) { return CoachingRulesDomain.choosePlanLength(weeksAvailable, event, level); }
 
   // ── Weekly template: which of the 7 slots are long/quality/easy/cross/rest ──
   var RUN_SLOT_PRIORITY = [1, 3, 5, 0, 2, 4]; // Tue, Thu, Sat, Mon, Wed, Fri (slot 6 = long, fixed)
@@ -1804,15 +1723,7 @@
     return weeks;
   }
 
-  function findCurrentWeekIdx(raceDate, planLengthWeeks, today) {
-    for (var w = 1; w <= planLengthWeeks; w++) {
-      var wkStart = dateForSlot(raceDate, planLengthWeeks, w, 0);
-      var wkEnd = dateForSlot(raceDate, planLengthWeeks, w, 6);
-      if (today >= wkStart && today <= wkEnd) return w;
-      if (today < wkStart) return w;
-    }
-    return -1;
-  }
+  function findCurrentWeekIdx(raceDate, planLengthWeeks, today) { return CoachingRulesDomain.findCurrentWeekIdx(raceDate, planLengthWeeks, today); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
 
   // ── Adaptive layer: pause days the user marked unavailable (illness/travel) ──
   function applyUnavailableRanges(weeks, raceGoal, planMeta, ranges) {
@@ -1834,97 +1745,17 @@
     return weeks;
   }
 
-  // ── Adaptive layer: dampen future weeks if recent training was mostly missed ──
+  // ── Adaptive layer: dampen future weeks if recent training was mostly missed,
+  // and nudge future volume on a sustained RPE trend (docs/COACHING_SPEC.md
+  // "Adaptation rules") -- both moved to coaching-rules.js. state.units is
+  // threaded through explicitly now (previously read module-level state.units
+  // via formatLongRunLabel/formatEasyRunLabel inside these functions).
+  var RPE_TARGET = CoachingRulesDomain.RPE_TARGET;
   function applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote) {
-    var raceDate = parseDate(raceGoal.raceDate);
-    var planLengthWeeks = planMeta.planLengthWeeks;
-    var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
-    if (currentWeekIdx <= 1) return { weeks: weeks, note: null };
-
-    var lastWeek = weeks[currentWeekIdx - 2]; // the fully-completed week before current
-    var loggableCount = 0, loggedCount = 0, longRunMissed = false;
-    lastWeek.days.forEach(function (day, di) {
-      if (day.type === 'rest' || day.type === 'race') return;
-      loggableCount++;
-      var key = lastWeek.weekNum + '-' + di;
-      if (logs[key]) loggedCount++;
-      else if (day.type === 'long') longRunMissed = true;
-    });
-    var missedRatio = loggableCount ? 1 - loggedCount / loggableCount : 0;
-    var note = null;
-    if (missedRatio > 0.6) {
-      var dampen = 0.85;
-      for (var i = currentWeekIdx; i < weeks.length; i++) {
-        var wk = weeks[i];
-        if (wk.phase === 'race') continue;
-        wk.days.forEach(function (day) {
-          if (day.miles) {
-            day.miles = round5(day.miles * dampen);
-            if (day.type === 'long') day.label = formatLongRunLabel(day.miles, terrainNote);
-            else if (day.type === 'easy') day.label = formatEasyRunLabel(day.miles);
-          }
-        });
-      }
-      note = 'You missed most of last week’s sessions, so upcoming volume was reduced about 15% to rebuild gradually.';
-    } else if (longRunMissed) {
-      var wkNext = weeks[currentWeekIdx - 1];
-      if (wkNext) {
-        wkNext.days.forEach(function (day) {
-          if (day.type === 'long' && day.miles) {
-            day.miles = round5(day.miles * 0.8);
-            day.label = formatLongRunLabel(day.miles, terrainNote);
-          }
-        });
-      }
-      note = 'Last week’s long run was missed, so this week’s long run was shortened.';
-    }
-    return { weeks: weeks, note: note };
+    return CoachingRulesDomain.applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, state.units);
   }
-
-  // ── Adaptive layer: nudge future volume if easy/long RPE has been consistently
-  // off-target for a couple of weeks (doesn't run in the same week a missed-
-  // workout adjustment already fired -- one adaptive story per render, not two) ──
-  var RPE_TARGET = { easy: [3, 4], long: [4, 5] };
   function applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote) {
-    var raceDate = parseDate(raceGoal.raceDate);
-    var planLengthWeeks = planMeta.planLengthWeeks;
-    var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
-    if (currentWeekIdx <= 1) return null;
-
-    var samples = [];
-    for (var w = Math.max(1, currentWeekIdx - 2); w < currentWeekIdx; w++) {
-      var wk = weeks[w - 1];
-      if (!wk) continue;
-      wk.days.forEach(function (day, di) {
-        if (day.type !== 'easy' && day.type !== 'long') return;
-        var entry = getLog(wk.weekNum + '-' + di);
-        if (entry && entry.effort) samples.push(entry.effort);
-      });
-    }
-    if (samples.length < 3) return null;
-    var avg = samples.reduce(function (a, b) { return a + b; }, 0) / samples.length;
-
-    var factor = null, note = null;
-    if (avg <= RPE_TARGET.easy[0] - 1) {
-      factor = 1.05;
-      note = 'Your easy running has felt too easy lately, so upcoming volume was nudged up about 5%.';
-    } else if (avg >= RPE_TARGET.easy[1] + 3) {
-      factor = 0.9;
-      note = 'Your easy running has felt harder than it should lately, so upcoming volume was eased back about 10%.';
-    }
-    if (!factor) return null;
-
-    for (var i = currentWeekIdx; i < weeks.length; i++) {
-      var wk2 = weeks[i];
-      if (wk2.phase === 'race') continue;
-      wk2.days.forEach(function (day) {
-        if (day.miles && (day.type === 'easy' || day.type === 'long')) {
-          day.miles = round5(day.miles * factor);
-          day.label = day.type === 'long' ? formatLongRunLabel(day.miles, terrainNote) : formatEasyRunLabel(day.miles);
-        }
-      });
-    }
-    return note;
+    return CoachingRulesDomain.applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, state.units);
   }
 
   function generateAll(profile, raceGoal, planMeta, logs, today) {
