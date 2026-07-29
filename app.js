@@ -1670,11 +1670,21 @@
     var longRunSafetyCap = Math.max(profile.longestRun * 1.15, 2);
     var terrainNote = terrainNoteFrom(profile.terrains);
 
+    // docs/COACHING_SPEC.md "Run-walk programming" -- only when the runner
+    // explicitly said they can't yet run continuously. Spends roughly the
+    // first 60% of the plan on a time-based run/walk progression, then falls
+    // through to the normal continuous-mileage generation below unchanged,
+    // so the runner arrives at race day already running continuously.
+    var useRunWalk = profile.canRunContinuously === false;
+    var runWalkWeeks = useRunWalk ? CoachingRulesDomain.runWalkWeeksFor(planLengthWeeks) : 0;
+
     var weeks = [];
     for (var w = 1; w <= planLengthWeeks; w++) {
       var phase = phases[w - 1];
       var targetVolume = volumes[w - 1];
       var template = assignWeekTemplate(runDays, wantCross);
+      var inRunWalkWindow = useRunWalk && phase !== 'race' && w <= runWalkWeeks;
+      var runWalkStage = inRunWalkWindow ? CoachingRulesDomain.runWalkStageForWeek(w, runWalkWeeks) : null;
       var isEntry = (level === 'beginner') || (level === 'novice' && phase === 'base');
       var pool = isEntry ? qualityPool.entry : qualityPool.trained;
       var qualityText = pool[(w - 1) % pool.length];
@@ -1700,13 +1710,35 @@
         } else if (phase === 'race') {
           day.type = 'rest'; day.label = 'Rest';
         } else if (tok === 'long') {
-          day.type = 'long'; day.miles = longRunMiles;
-          day.label = formatLongRunLabel(longRunMiles, terrainNote);
+          day.type = 'long';
+          if (runWalkStage) {
+            day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, true);
+            day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
+          } else {
+            day.miles = longRunMiles;
+            day.label = formatLongRunLabel(longRunMiles, terrainNote);
+          }
         } else if (tok === 'quality') {
-          day.type = 'quality'; day.label = qualityText;
+          day.type = 'quality';
+          if (runWalkStage) {
+            // Never hand a true beginner a tempo/interval prescription
+            // (QUALITY_POOL's entry text, e.g. "20 min tempo, comfortably
+            // hard") before they can run continuously at all -- another
+            // gentle run/walk session instead.
+            day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, false);
+            day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
+          } else {
+            day.label = qualityText;
+          }
         } else if (tok === 'easy') {
-          day.type = 'easy'; day.miles = easyEach;
-          day.label = formatEasyRunLabel(easyEach);
+          day.type = 'easy';
+          if (runWalkStage) {
+            day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, false);
+            day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
+          } else {
+            day.miles = easyEach;
+            day.label = formatEasyRunLabel(easyEach);
+          }
         } else if (tok === 'cross') {
           var addStrength = strengthAssigned < strengthBudget;
           if (addStrength) strengthAssigned++;
@@ -1815,7 +1847,8 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName };
+    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName };
+    if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
     var step = 0;
     var steps = ['event', 'race', 'fitness', 'logistics'];
 
@@ -1856,6 +1889,8 @@
           '<input class="ob-input" type="number" min="0" step="0.5" id="f_longestRun" value="' + toUnit(draft.longestRun) + '">' +
           '<div class="ob-label">Runs per week right now</div>' +
           '<input class="ob-input" type="number" min="0" max="7" step="1" id="f_runDaysPerWeek" value="' + draft.runDaysPerWeek + '">' +
+          '<div class="ob-label">Can you run continuously for a few minutes right now, without needing to walk?</div>' +
+          '<div class="chip-grid">' + chipsHtml('canRunContinuously', ['yes', 'no'], { yes: 'Yes', no: 'No — I\'m starting from walking' }, draft.canRunContinuously ? 'yes' : 'no', false) + '</div>' +
           '<div class="ob-label">Experience level</div>' +
           '<div class="chip-grid">' + chipsHtml('experienceLevel', LEVELS, LEVEL_LABEL, draft.experienceLevel, false) + '</div>' +
           '<div class="ob-label" style="margin-top:18px">Recent race result (optional)</div>' +
@@ -1929,6 +1964,8 @@
             }
           } else if (group === 'recentInjury') {
             draft.recentInjury = value === 'yes';
+          } else if (group === 'canRunContinuously') {
+            draft.canRunContinuously = value === 'yes';
           } else {
             draft[group] = value;
           }
@@ -1936,6 +1973,7 @@
             var v = c.getAttribute('data-value');
             var sel = MULTI_GROUPS.hasOwnProperty(group) ? draft[group].indexOf(v) !== -1
               : group === 'recentInjury' ? (draft.recentInjury ? 'yes' : 'no') === v
+              : group === 'canRunContinuously' ? (draft.canRunContinuously ? 'yes' : 'no') === v
               : draft[group] === v;
             c.classList.toggle('selected', sel);
           });
@@ -1985,7 +2023,7 @@
     var oldGoal = state.raceGoal, oldMeta = state.planMeta;
     var previewProfile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
-      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, availableDays: draft.availableDays
+      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays
     };
     var level = classifyUser(previewProfile);
     var weeksAvailable = weeksBetween(parseDate(draft.startDate), parseDate(draft.raceDate));
@@ -2026,7 +2064,7 @@
     var raceResultValid = draft.recentRaceDistance && draft.recentRaceDistance !== 'none' && parseRaceTimeToMinutes(draft.recentRaceTime);
     var profile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
-      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, availableDays: draft.availableDays,
+      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays,
       terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'],
       recentRaceDistance: raceResultValid ? draft.recentRaceDistance : null,
       recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : ''
@@ -2075,7 +2113,7 @@
       renderWizard({
         event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
-        experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, availableDays: state.profile.availableDays,
+        experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
         terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
         recentRaceDistance: state.profile.recentRaceDistance || 'none', recentRaceTime: state.profile.recentRaceTime || '',
         userName: state.userName
@@ -3210,7 +3248,17 @@
     if (hasCross(label) && state.crossType[key]) label = applyCrossOverride(label, state.crossType[key]);
     var loggable = isLoggable(label);
     var race = isRace(label);
-    var detail = WORKOUT_DETAIL[dayData.type] || null;
+    // Run-walk sessions (docs/COACHING_SPEC.md "Run-walk programming") keep
+    // their slot's normal type (easy/quality/long) but need their own copy --
+    // the continuous-running WORKOUT_DETAIL entries above assume a pace/
+    // effort that doesn't apply yet.
+    var detail = dayData.runWalk ? {
+      what: 'Alternating running and walking, building your ability to run continuously.',
+      why: "This is how you get from walking to running without injury or burnout — the walk breaks are what make the running sustainable.",
+      howHard: 'Easy effort on every running interval — RPE 3-4, conversational. The walk breaks are the point, not a failure.',
+      ifCant: "Take an extra walk break or two if you need it — finishing the full time matters more than nailing every interval exactly.",
+      mistakes: 'Running the intervals too fast because they feel short. Slow down — you have more of these coming.'
+    } : (WORKOUT_DETAIL[dayData.type] || null);
     var entry = getLog(key) || {};
 
     // Only shown when the runner actually supplied a recent race result --
@@ -3220,7 +3268,9 @@
     // and interpretRunResult below can compare a logged run against it.
     var paceRow = '';
     var targetPaceRange = null;
-    if (dayData.type === 'easy' || dayData.type === 'long') {
+    if (dayData.runWalk) {
+      // No meaningful continuous pace target for a run-walk session -- skip entirely.
+    } else if (dayData.type === 'easy' || dayData.type === 'long') {
       targetPaceRange = computeEasyPaceRange(state.profile);
       if (targetPaceRange) {
         var loDisplay = state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi;
@@ -3258,6 +3308,7 @@
             '<div class="wd-review-label">Planned</div>' +
             '<dl class="wd-info">' +
               (dayData.miles ? '<dt>Distance</dt><dd>' + toUnit(dayData.miles) + ' ' + unitLabel() + '</dd>' : '') +
+              (dayData.runWalk ? '<dt>Duration</dt><dd>' + dayData.runWalk.totalMin + ' min</dd>' : '') +
               (targetPaceRange ? '<dt>Target pace</dt><dd>' + formatPace(state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi) + '&ndash;' + formatPace(state.units === 'km' ? targetPaceRange.hiSecPerMi / KM_PER_MI : targetPaceRange.hiSecPerMi) + ' /' + unitLabel() + '</dd>' : '') +
             '</dl>' +
           '</div>' +
@@ -3306,7 +3357,7 @@
         (GoogleHealth.isConnected ? '<div class="pain-toggle" id="ghImportBtn">Import from Google Health</div><div class="ai-why-result" id="ghImportResult" style="display:none"></div>' : '') +
         '<div class="ob-label">Duration</div>' +
         '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10 or 1:15:00" value="' + escapeHtml(entry.time || '') + '">' +
-        '<div class="ob-label">Distance (' + unitLabel() + ')</div>' +
+        '<div class="ob-label">Distance (' + unitLabel() + (dayData.runWalk ? ', optional' : '') + ')</div>' +
         '<input class="ob-input" type="number" min="0" step="0.1" id="wd_distance" value="' + (entry.distance != null ? toUnit(entry.distance) : '') + '">' +
         '<div class="ob-label">Pace</div>' +
         '<div class="wd-computed-pace" id="wd_pace_display">&mdash;</div>' +

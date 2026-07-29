@@ -251,6 +251,49 @@
     return note;
   }
 
+  // ── Run/walk beginner progression (docs/COACHING_SPEC.md "Run-walk
+  // programming") -- own synthesis, a standard progressive run/walk
+  // structure, not any single trademarked program's exact schedule. Used
+  // only when the runner has explicitly said they can't yet run
+  // continuously (state.profile.canRunContinuously === false); everyone
+  // else keeps the existing continuous-mileage generator untouched.
+  var RUN_WALK_STAGES = [
+    { runSec: 60, walkSec: 120, cycles: 8, totalMin: 24 },   // run 1min / walk 2min x8
+    { runSec: 90, walkSec: 90, cycles: 9, totalMin: 27 },    // run 1:30 / walk 1:30 x9
+    { runSec: 180, walkSec: 90, cycles: 7, totalMin: 32 },   // run 3min / walk 1:30 x7
+    { runSec: 300, walkSec: 90, cycles: 5, totalMin: 33 },   // run 5min / walk 1:30 x5
+    { runSec: 420, walkSec: 90, cycles: 4, totalMin: 34 },   // run 7min / walk 1:30 x4
+    { runSec: 600, walkSec: 90, cycles: 3, totalMin: 35 },   // run 10min / walk 1:30 x3
+    { runSec: 1500, walkSec: 60, cycles: 1, totalMin: 26 }   // run 25min / walk 1min x1 -- graduation stage, near-continuous
+  ];
+
+  function runWalkWeeksFor(planLengthWeeks) {
+    return Math.max(4, Math.ceil(planLengthWeeks * 0.6));
+  }
+
+  function runWalkStageForWeek(week, runWalkWeeks) {
+    var idx = Math.floor((week - 1) / (runWalkWeeks / RUN_WALK_STAGES.length));
+    return RUN_WALK_STAGES[Math.max(0, Math.min(RUN_WALK_STAGES.length - 1, idx))];
+  }
+
+  // The long-day slot gets more cycles (more total time) than the same
+  // stage's easy/quality sessions -- never a different run:walk ratio,
+  // just more of it.
+  function buildRunWalkSession(stage, isLong) {
+    var cycles = isLong ? Math.max(stage.cycles + 1, Math.round(stage.cycles * 1.4)) : stage.cycles;
+    var totalSec = (stage.runSec + stage.walkSec) * cycles;
+    return { runSec: stage.runSec, walkSec: stage.walkSec, cycles: cycles, totalMin: Math.round(totalSec / 60) };
+  }
+
+  function fmtMinSec(sec) {
+    if (sec % 60 === 0) return (sec / 60) + ' min';
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0') + ' min';
+  }
+
+  function formatRunWalkLabel(session) {
+    return 'Run ' + fmtMinSec(session.runSec) + ' / walk ' + fmtMinSec(session.walkSec) + ' ×' + session.cycles + ' (' + session.totalMin + ' min)';
+  }
+
   return {
     LEVELS: LEVELS,
     EVENT_TABLE: EVENT_TABLE,
@@ -263,6 +306,11 @@
     evaluateSafety: evaluateSafety,
     choosePlanLength: choosePlanLength,
     applyMissedAdjustment: applyMissedAdjustment,
-    applyDifficultyAdjustment: applyDifficultyAdjustment
+    applyDifficultyAdjustment: applyDifficultyAdjustment,
+    RUN_WALK_STAGES: RUN_WALK_STAGES,
+    runWalkWeeksFor: runWalkWeeksFor,
+    runWalkStageForWeek: runWalkStageForWeek,
+    buildRunWalkSession: buildRunWalkSession,
+    formatRunWalkLabel: formatRunWalkLabel
   };
 });
