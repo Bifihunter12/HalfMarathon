@@ -162,7 +162,13 @@
     var lastWeek = weeks[currentWeekIdx - 2]; // the fully-completed week before current
     var loggableCount = 0, loggedCount = 0, longRunMissed = false;
     lastWeek.days.forEach(function (day, di) {
-      if (day.type === 'rest' || day.type === 'race') return;
+      // Cross-training is optional supportive work, not core running stimulus --
+      // excluded from the missed-ratio the same way rest/race already are, so
+      // several unlogged cross-training days can never trip the same dampening
+      // threshold as actually missed running work (docs/COACHING_SPEC.md
+      // "Adaptation rules" -- the fix that closed decision-scenarios.test.js's
+      // one, now-removed, todo scenario).
+      if (day.type === 'rest' || day.type === 'race' || day.type === 'cross') return;
       loggableCount++;
       var key = lastWeek.weekNum + '-' + di;
       if (logs[key]) loggedCount++;

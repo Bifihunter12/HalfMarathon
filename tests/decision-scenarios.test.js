@@ -134,22 +134,39 @@ test('Context: fewer than 3 logged RPE samples exist in the lookback window. App
   assert.equal(weeks[2].days[0].miles, 4, 'nothing is touched');
 });
 
-// ── Known gap, recorded not fixed (docs/COACHING_SPEC.md "Adaptation rules") ──
+// ── Formerly a known gap, fixed (docs/COACHING_SPEC.md "Adaptation rules") ──
 // Master-prompt worked example: miss ONLY Tuesday's easy run; Thursday's
-// quality session and Saturday's long run should stay untouched. Today's
-// engine decides off a whole-week aggregate ratio, so if enough OTHER
-// (lower-stakes) sessions were also unlogged -- e.g. several cross-training
-// days -- the same 60% threshold trips and dampens quality/long too, even
-// though the "real" miss was just one easy run. Marked `todo` so this stays
-// a visible, honest target for the future per-session rewrite rather than
-// silently omitted or falsely asserted as passing today.
-test('Context: only Tuesday\'s easy run and several lower-stakes cross-training days were missed; the quality session and long run were both completed. Approved outcome: preserve the quality session and long run untouched, since the real miss was one easy run plus optional cross-training, not core running work.', { todo: 'per-session adaptation engine not yet built -- see docs/COACHING_SPEC.md' }, function () {
+// quality session and Saturday's long run should stay untouched. The engine
+// used to decide off a whole-week aggregate ratio that counted cross-training
+// as equally diagnostic as real running work, so enough unlogged cross-
+// training days could trip the same 60% threshold and dampen quality/long
+// too. Fixed by excluding cross-training from the missed-ratio entirely
+// (coaching-rules.js), the same treatment rest/race days already got.
+test('Context: only Tuesday\'s easy run and several lower-stakes cross-training days were missed; the quality session and long run were both completed. Approved outcome: preserve the quality session and long run untouched, since the real miss was one easy run plus optional cross-training, not core running work.', function () {
   var weeks = sixWeekPlan();
   weeks[1].days[3] = day('cross', 0); // extra cross-training slot, missed
   weeks[1].days[4] = day('cross', 0); // extra cross-training slot, missed
   // Logged: quality (slot 1) and long (slot 6). Missed: easy(0), the 2 cross slots, easy(2), easy(5) -- 5 of 7 missed.
   var logs = { '2-1': { effort: 4 }, '2-6': { effort: 4 } };
   var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
-  assert.equal(weeks[3].days[1].miles, 0, 'quality day miles stay 0 regardless (not a real check)');
-  assert.equal(weeks[3].days[6].miles, 6, 'the future long run should stay untouched since the actual miss was low-stakes -- FAILS today, whole-week dampening reduces it instead');
+  assert.equal(result.note, null, 'excluding cross-training from the ratio means only 1 of 5 core running slots was missed -- well under the 60% threshold');
+  assert.equal(weeks[3].days[1].label, 'quality 0', 'the quality session stays untouched');
+  assert.equal(weeks[3].days[6].miles, 6, 'the future long run stays untouched -- fixed: previously failed here, whole-week dampening used to reduce it instead');
+});
+
+test('Context: only cross-training days were missed last week; every actual running session (easy/quality/long) was logged. Approved outcome: no adjustment at all, no matter how many cross-training days were skipped.', function () {
+  var weeks = sixWeekPlan();
+  weeks[1].days[3] = day('cross', 0);
+  var logs = { '2-0': { effort: 4 }, '2-1': { effort: 4 }, '2-2': { effort: 4 }, '2-5': { effort: 4 }, '2-6': { effort: 4 } }; // every easy/quality/long slot logged; both cross slots (3 and 4) left unlogged
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(result.note, null, 'cross-training misses alone, regardless of count, must never trigger any adjustment');
+  assert.equal(weeks[3].days[6].miles, 6, 'nothing changes');
+});
+
+test('Context: most of last week\'s core running work was missed -- including both the quality session and the long run, not just cross-training. Approved outcome: future volume still dampens ~15% -- confirms the cross-training exclusion only removes false positives, not real core-running disruption.', function () {
+  var weeks = sixWeekPlan();
+  var logs = { '2-0': { effort: 4 } }; // only one easy run logged; the other easy, quality(1), and long(6) all missed (4 of 5 core slots missed)
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(result.note, /reduced about 15%/, 'missing most core running work -- including both quality and the long run -- is a real disruption, cross-training exclusion does not mask it');
+  assert.equal(weeks[3].days[0].miles, 3.5, 'week 4\'s easy run dampens ~15% (4mi -> 3.5mi after round5)');
 });
