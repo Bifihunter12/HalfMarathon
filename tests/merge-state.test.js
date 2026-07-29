@@ -112,6 +112,19 @@ test('scalar fields (raceGoal/profile/planMeta/xpProfile) prefer the newer devic
   assert.equal(merged.xpProfile.lastLevelUpAt, 5);
 });
 
+test('flags (beta feature toggles) prefer the newer device wholesale, defaulting safely when absent', function () {
+  const local = baseState({ lastModified: 2000, flags: { enableLongerDistances: true, quietGamification: false } });
+  const remote = baseState({ lastModified: 1000, flags: { enableLongerDistances: false, quietGamification: true } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.flags.enableLongerDistances, true, 'newer (local) device wins for flags, same prefer-newer pattern as notifications');
+  assert.equal(merged.flags.quietGamification, false);
+
+  const localNoFlags = baseState({ lastModified: 2000 });
+  const remoteNoFlags = baseState({ lastModified: 1000 });
+  const mergedDefaults = mergeState.mergeRunnerState(localNoFlags, remoteNoFlags);
+  assert.deepEqual(mergedDefaults.flags, { enableLongerDistances: false, quietGamification: false }, 'missing flags on both sides falls back to the safe default, not undefined');
+});
+
 test('lastModified in the merged result is always the max of both sides', function () {
   const local = baseState({ lastModified: 2000 });
   const remote = baseState({ lastModified: 5000 });

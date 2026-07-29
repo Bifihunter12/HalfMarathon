@@ -83,6 +83,7 @@
       userName: prefer.userName,
       units: prefer.units,
       notifications: prefer.notifications || { enabled: false },
+      flags: prefer.flags || { enableLongerDistances: false, quietGamification: false },
       activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
       activeWeeklyChallenge: prefer.activeWeeklyChallenge !== undefined ? prefer.activeWeeklyChallenge : null,
       sideQuestOnboarding: prefer.sideQuestOnboarding !== undefined ? prefer.sideQuestOnboarding : null,

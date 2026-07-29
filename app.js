@@ -894,6 +894,12 @@
     if (!s.xpEvents) s.xpEvents = []; // [{ idempotencyKey, source, xpType, baseXp, modifier, totalXp, date, key }]
     if (!s.xpProfile) s.xpProfile = { lastLevelUpAt: null, selectedProfileTitle: null, selectedPathTheme: null, selectedBadgeFrame: null };
     if (!s.runningFeelingLog) s.runningFeelingLog = []; // [{ weekStartIso, feeling }]
+    // Beta/experimental toggles (docs/COACHING_SPEC.md "Launch scope"). Both
+    // default false -- enableLongerDistances stays hidden from public
+    // onboarding until each distance family is separately reviewed;
+    // quietGamification defaults off (unchanged current behavior) since no
+    // one has yet evaluated the quiet variant.
+    if (!s.flags) s.flags = { enableLongerDistances: false, quietGamification: false };
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
@@ -1101,6 +1107,11 @@
   // emphasis) is explicitly Phase 2+ work, not built here.
   function xpToastSuffix(xpResult) {
     if (!xpResult || !xpResult.totalXp) return '';
+    // docs/COACHING_SPEC.md "Launch scope" / gamification-prominence dial --
+    // the XP ledger, Path, and badges keep working underneath either way;
+    // this only silences the one toast surface where XP currently intrudes
+    // outside its own dedicated screens.
+    if (state.flags.quietGamification) return '';
     var suffix = ' +' + xpResult.totalXp + ' XP';
     if (xpResult.levelAfter > xpResult.levelBefore) {
       suffix += ' · Level up! Now Level ' + xpResult.levelAfter + (xpResult.rankTitle ? ' — ' + xpResult.rankTitle : '');
@@ -1981,11 +1992,19 @@
       app.innerHTML = '';
       var body = '';
       if (steps[step] === 'event') {
+        // Launch scope is 5K/10K (docs/COACHING_SPEC.md "Launch scope") --
+        // longer distances stay in the codebase but are hidden here unless
+        // the beta flag is on. The `|| e === draft.event` clause keeps an
+        // existing longer-distance plan's own event selectable when editing,
+        // even with the flag off, so toggling it never strands that plan.
+        var visibleEvents = state.flags.enableLongerDistances
+          ? EVENTS
+          : EVENTS.filter(function (e) { return e === '5k' || e === '10k' || e === draft.event; });
         body =
           '<div class="ob-title">New Training Plan</div>' +
           '<div class="ob-sub">Step 1 of 4 · Event</div>' +
           '<div class="ob-label">What are you training for?</div>' +
-          '<div class="chip-grid">' + chipsHtml('event', EVENTS, EVENT_LABEL, draft.event, false) + '</div>';
+          '<div class="chip-grid">' + chipsHtml('event', visibleEvents, EVENT_LABEL, draft.event, false) + '</div>';
       } else if (steps[step] === 'race') {
         body =
           '<div class="ob-title">Race details</div>' +
@@ -3923,6 +3942,14 @@
             '<p class="recap-empty">Get a nudge for today\'s workout, a missed-session check-in, race countdown, and plan updates. Fully optional and rule-based &mdash; never AI &mdash; and only fires while Runner is open or running in the background.</p>' +
             '<button class="ob-btn ob-btn-secondary" id="notifEnableBtn">Enable notifications</button>'
         ) + '</div>' +
+        '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
+        '<p class="recap-empty">Experimental toggles from RACR\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
+        '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
+        '<p class="recap-empty">Half marathon, marathon, and ultra plans still work but are hidden from new plans until each distance is separately reviewed.</p>' +
+        '<div class="chip-grid" id="set_longerDistances">' + chipsHtml('longerDistances', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.enableLongerDistances ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:18px">Reduce XP/level prominence</div>' +
+        '<p class="recap-empty">Keeps XP, levels, and badges working, just quieter &mdash; hides the "+XP" line from completion toasts.</p>' +
+        '<div class="chip-grid" id="set_quietGamification">' + chipsHtml('quietGamification', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.quietGamification ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -3946,6 +3973,26 @@
         saveState(state);
         wrap.querySelectorAll('#set_units .chip').forEach(function (c) {
           c.classList.toggle('selected', c.getAttribute('data-value') === state.units);
+        });
+      });
+    });
+
+    wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.flags.enableLongerDistances = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off'));
+        });
+      });
+    });
+
+    wrap.querySelectorAll('#set_quietGamification .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.flags.quietGamification = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        wrap.querySelectorAll('#set_quietGamification .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.quietGamification ? 'on' : 'off'));
         });
       });
     });
