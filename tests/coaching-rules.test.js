@@ -18,8 +18,56 @@ test('classifyUser takes the more conservative of computed and self-reported lev
   assert.equal(rules.classifyUser({ runDaysPerWeek: 2, weeklyMileage: 10, experienceLevel: 'advanced', recentInjury: false }), 'beginner');
 });
 
-test('classifyUser caps at novice when a recent injury is reported, even for an advanced runner', function () {
+test('classifyUser caps at novice when a recent injury is reported, even for an advanced runner (legacy boolean field)', function () {
   assert.equal(rules.classifyUser({ runDaysPerWeek: 6, weeklyMileage: 45, experienceLevel: 'advanced', recentInjury: true }), 'novice');
+});
+
+test('classifyUser injuryStatus: resolved applies no cap at all', function () {
+  assert.equal(rules.classifyUser({ runDaysPerWeek: 6, weeklyMileage: 45, experienceLevel: 'advanced', injuryStatus: 'resolved' }), 'advanced');
+});
+
+test('classifyUser injuryStatus: mild_discomfort caps at novice', function () {
+  assert.equal(rules.classifyUser({ runDaysPerWeek: 6, weeklyMileage: 45, experienceLevel: 'advanced', injuryStatus: 'mild_discomfort' }), 'novice');
+});
+
+test('classifyUser injuryStatus: unable_to_run caps at beginner', function () {
+  assert.equal(rules.classifyUser({ runDaysPerWeek: 6, weeklyMileage: 45, experienceLevel: 'advanced', injuryStatus: 'unable_to_run' }), 'beginner');
+});
+
+test('classifyUser injuryStatus: medically_restricted caps at beginner, same as unable_to_run', function () {
+  assert.equal(rules.classifyUser({ runDaysPerWeek: 6, weeklyMileage: 45, experienceLevel: 'advanced', injuryStatus: 'medically_restricted' }), 'beginner');
+});
+
+test('classifyUser prefers injuryStatus over the legacy boolean when both are present', function () {
+  assert.equal(rules.classifyUser({ runDaysPerWeek: 6, weeklyMileage: 45, experienceLevel: 'advanced', recentInjury: true, injuryStatus: 'resolved' }), 'advanced');
+});
+
+test('startRunDaysFor starts at current frequency plus one, never the old hardcoded floor', function () {
+  assert.equal(rules.startRunDaysFor(0, 5), 2, 'a 0-day/week runner still gets a minimum floor of 2, not 3');
+  assert.equal(rules.startRunDaysFor(1, 5), 2);
+  assert.equal(rules.startRunDaysFor(4, 5), 5, 'never exceeds the target');
+});
+
+test('startRunDaysFor never starts above the plan\'s eventual target', function () {
+  assert.equal(rules.startRunDaysFor(6, 5), 5, 'an already-frequent runner starts at the target, not above it');
+});
+
+test('runDaysForWeek holds at target immediately when startRunDays already equals target', function () {
+  for (var w = 1; w <= 10; w++) {
+    assert.equal(rules.runDaysForWeek(w, 5, 5, 2), 5);
+  }
+});
+
+test('runDaysForWeek ramps by exactly one day every rampIntervalWeeks, never exceeding target', function () {
+  var start = 2, target = 5, interval = 2;
+  assert.equal(rules.runDaysForWeek(1, start, target, interval), 2);
+  assert.equal(rules.runDaysForWeek(2, start, target, interval), 2);
+  assert.equal(rules.runDaysForWeek(3, start, target, interval), 3);
+  assert.equal(rules.runDaysForWeek(4, start, target, interval), 3);
+  assert.equal(rules.runDaysForWeek(5, start, target, interval), 4);
+  assert.equal(rules.runDaysForWeek(6, start, target, interval), 4);
+  assert.equal(rules.runDaysForWeek(7, start, target, interval), 5);
+  assert.equal(rules.runDaysForWeek(20, start, target, interval), 5, 'never exceeds target even far into the plan');
 });
 
 test('evaluateSafety flags unsafe and returns a warning when weeksAvailable is below the level\'s minWeeks', function () {

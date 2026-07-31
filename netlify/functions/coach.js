@@ -139,6 +139,10 @@ exports.handler = async function (event) {
     event: plan.event, goal: plan.goal, experienceLevel: plan.experienceLevel,
     phase: plan.phase, currentWeek: plan.currentWeek, totalWeeks: plan.totalWeeks
   };
+  // docs/COACHING_SPEC.md "Runner classification" -- the coach previously had
+  // zero injury signal beyond whatever the runner typed into the live chat.
+  var VALID_INJURY_STATUSES = ['resolved', 'mild_discomfort', 'unable_to_run', 'medically_restricted'];
+  if (VALID_INJURY_STATUSES.indexOf(plan.injuryStatus) !== -1) context.injuryStatus = plan.injuryStatus;
   // Only present when the runner supplied a real recent race result -- the
   // client computes this deterministically (Riegel projection), never the
   // model. A real range, not a single number, so the model can't quote it

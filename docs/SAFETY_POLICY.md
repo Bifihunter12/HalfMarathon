@@ -16,11 +16,13 @@ Every other action type the model can propose (`reduce_intensity`, `substitute_w
 
 ## In-app structured pain triage — documented
 
-`painGuidance(severity, worsens, canWalk)` (`app.js:666`), surfaced through a "Report pain or discomfort" toggle inside `renderWorkoutDetail`. Collects severity (1-10), whether it worsens while running, and whether the runner can walk normally, and returns one of three non-diagnostic guidance levels (mild / caution / urgent). It never names a condition or suggests a cause — only a behavioral response (continue carefully / modify / stop and consider professional care).
+`painGuidance(severity, worsens, canWalk)` (`app.js`), surfaced through a "Report pain or discomfort" toggle inside `renderWorkoutDetail`. Collects severity (1-10), whether it worsens while running, and whether the runner can walk normally, and returns one of three non-diagnostic guidance levels (mild / caution / urgent). It never names a condition or suggests a cause — only a behavioral response (continue carefully / modify / stop and consider professional care).
+
+**Distinct from the onboarding injury-status question (added 2026-07-29, see `docs/COACHING_SPEC.md` "Runner classification"):** `profile.injuryStatus` is a standing intake attribute collected once, answered from memory about the runner's general current state, and used only to constrain plan generation (classification cap, an extra warning for `medically_restricted`). `painGuidance()` is a transient, per-workout symptom check, answered fresh each time about one specific run. The two never read or write each other's data, and neither is a substitute for the other — a runner could report `resolved` at onboarding and still trigger an `urgent` `painGuidance()` result on a specific run.
 
 ## Illness & interruption handling — documented
 
-`state.unavailable` (`{start, end, reason}` ranges, editable in Settings) + `applyUnavailableRanges(weeks, raceGoal, planMeta, ranges)` (`app.js:1807`). Days inside a reported unavailable range are converted to `type:'rest'` with a label reflecting the reason (illness/away), which also automatically excludes them from the missed-workout ratio in `applyMissedAdjustment` (see `docs/COACHING_SPEC.md`) — a runner recovering from illness is never penalized by the adaptation layer for the days they were told to rest.
+`state.unavailable` (`{start, end, reason}` ranges, editable in Settings) + `applyUnavailableRanges(weeks, raceGoal, planMeta, ranges)` (`app.js`). Days inside a reported unavailable range are converted to `type:'rest'` with a label reflecting the reason (illness/away), which also automatically excludes them from the missed-workout ratio in `applyMissedAdjustment` (see `docs/COACHING_SPEC.md`) — a runner recovering from illness is never penalized by the adaptation layer for the days they were told to rest.
 
 ## Explicit gaps — provisional, not fixed this pass
 

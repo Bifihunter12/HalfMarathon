@@ -51,6 +51,16 @@
   var LEVEL_LABEL = { beginner: 'Beginner', novice: 'Novice', intermediate: 'Intermediate', advanced: 'Advanced' };
   var GOALS = ['finish', 'improve', 'pr', 'aggressive'];
   var GOAL_LABEL = { finish: 'Finish', improve: 'Improve', pr: 'PR', aggressive: 'Aggressive PR' };
+  // docs/COACHING_SPEC.md "Runner classification" -- return-to-running triage,
+  // replaces a plain yes/no injury checkbox. See coaching-rules.js's
+  // INJURY_CAP for how each value affects classification.
+  var INJURY_STATUSES = ['resolved', 'mild_discomfort', 'unable_to_run', 'medically_restricted'];
+  var INJURY_STATUS_LABEL = {
+    resolved: 'No issues, running normally',
+    mild_discomfort: 'Mild, manageable discomfort',
+    unable_to_run: "Can't currently run normally",
+    medically_restricted: 'Medically restricted, or returning after a long layoff'
+  };
   var GOAL_FACTOR = { finish: 0.85, improve: 1.0, pr: 1.05, aggressive: 1.12 };
   var TERRAINS = ['road', 'trail', 'hills', 'mountain', 'treadmill'];
   var TERRAIN_LABEL = { road: 'Road', trail: 'Trail', hills: 'Hills', mountain: 'Mountain', treadmill: 'Treadmill' };
@@ -949,7 +959,12 @@
     var paceSlow = !!(targetPaceRange && actualPace && actualPace > targetPaceRange.hiSecPerMi + 5);
     var paceInRange = !!(targetPaceRange && actualPace && !paceFast && !paceSlow);
 
-    if (distanceRatio != null && distanceRatio < 0.85) {
+    // Excludes quality days: qualityMiles is a holistic session-distance
+    // estimate (warm-up/cool-down/recovery jogs included), not a precise
+    // interval target -- a runner logging only their hard-interval distance
+    // (a plausible habit for e.g. "6 x 400m") would otherwise get an
+    // inappropriate "came up short" message for a workout done as prescribed.
+    if (distanceRatio != null && distanceRatio < 0.85 && dayData.type !== 'quality') {
       return 'You came up short of the planned distance – a partial session still counts toward your training, just keep an eye on why (time, fatigue, or how you felt).';
     }
     if (distanceRatio != null && distanceRatio > 1.3 && (dayData.type === 'easy' || dayData.type === 'long')) {
@@ -1663,10 +1678,16 @@
 
     var phases = assignPhases(planLengthWeeks, cfg.taperWeeks);
     var volumes = computeWeeklyVolumes(planLengthWeeks, phases, startVolume, peakVolume, level, cfg.taperWeeks);
-    var runDays = Math.max(3, Math.min(profile.availableDays || RUN_DAYS_DEFAULT[level], RUN_DAYS_DEFAULT[level] + (event === '5k' || event === '10k' || event === 'half' || event === 'marathon' ? 0 : 1)));
+    // docs/COACHING_SPEC.md "Weekly structure" -- frequency-aware opening
+    // schedule. targetRunDays is the plan's eventual day count (same formula
+    // as before, just without the old hardcoded Math.max(3, ...) floor);
+    // startRunDays begins at the runner's actual current frequency plus one
+    // and ramps up week by week (see the per-week loop below) rather than
+    // jumping straight to the target on day one.
+    var targetRunDays = Math.min(profile.availableDays || RUN_DAYS_DEFAULT[level], RUN_DAYS_DEFAULT[level] + (event === '5k' || event === '10k' || event === 'half' || event === 'marathon' ? 0 : 1));
+    var startRunDays = CoachingRulesDomain.startRunDaysFor(profile.runDaysPerWeek, targetRunDays);
     var wantCross = !(profile.crossOptions && profile.crossOptions.length === 1 && profile.crossOptions[0] === 'None');
     var qualityPool = QUALITY_POOL[event];
-    var longShare = LONG_RUN_SHARE[event] + (runDays <= 3 ? 0.15 : runDays === 4 ? 0.05 : 0);
     var longRunSafetyCap = Math.max(profile.longestRun * 1.15, 2);
     var terrainNote = terrainNoteFrom(profile.terrains);
 
@@ -1682,7 +1703,9 @@
     for (var w = 1; w <= planLengthWeeks; w++) {
       var phase = phases[w - 1];
       var targetVolume = volumes[w - 1];
-      var template = assignWeekTemplate(runDays, wantCross);
+      var weekRunDays = CoachingRulesDomain.runDaysForWeek(w, startRunDays, targetRunDays, 2);
+      var longShare = LONG_RUN_SHARE[event] + (weekRunDays <= 3 ? 0.15 : weekRunDays === 4 ? 0.05 : 0);
+      var template = assignWeekTemplate(weekRunDays, wantCross);
       var inRunWalkWindow = useRunWalk && phase !== 'race' && w <= runWalkWeeks;
       var runWalkStage = inRunWalkWindow ? CoachingRulesDomain.runWalkStageForWeek(w, runWalkWeeks) : null;
       var isEntry = (level === 'beginner') || (level === 'novice' && phase === 'base');
@@ -1728,7 +1751,13 @@
             day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, false);
             day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
           } else {
-            day.label = qualityText;
+            // docs/COACHING_SPEC.md "Quality-day volume math" -- qualityMiles
+            // is already a holistic session-distance budget (see where it's
+            // computed above), not a parse of the label's interval structure,
+            // so it's framed here as an approximate total including
+            // warm-up/cool-down rather than a precise breakdown.
+            day.miles = qualityMiles;
+            day.label = qualityMiles > 0 ? qualityText + ' (~' + toUnit(qualityMiles) + ' ' + unitLabel() + ' total, incl. warm-up/cool-down)' : qualityText;
           }
         } else if (tok === 'easy') {
           day.type = 'easy';
@@ -1847,7 +1876,8 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', recentInjury: false, canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName };
+    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName };
+    if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
     var step = 0;
     var steps = ['event', 'race', 'fitness', 'logistics'];
@@ -1907,8 +1937,8 @@
           '<div class="chip-grid">' + chipsHtml('terrains', TERRAINS, TERRAIN_LABEL, draft.terrains, true) + '</div>' +
           '<div class="ob-label">Cross-training available</div>' +
           '<div class="chip-grid">' + chipsHtml('crossOptions', CROSS_OPTIONS, null, draft.crossOptions, true) + '</div>' +
-          '<div class="ob-label">Recent injury or pain (last 3 months)?</div>' +
-          '<div class="chip-grid">' + chipsHtml('recentInjury', ['no', 'yes'], { no: 'No', yes: 'Yes' }, draft.recentInjury ? 'yes' : 'no', false) + '</div>' +
+          '<div class="ob-label">How\'s your running-related injury or pain situation right now?</div>' +
+          '<div class="chip-grid">' + chipsHtml('injuryStatus', INJURY_STATUSES, INJURY_STATUS_LABEL, draft.injuryStatus, false) + '</div>' +
           '<div class="ob-label">Your name</div>' +
           '<input class="ob-input" type="text" id="f_userName" value="' + escapeHtml(draft.userName || '') + '">';
       }
@@ -1962,8 +1992,6 @@
               else arr.push(value);
               draft[group] = arr;
             }
-          } else if (group === 'recentInjury') {
-            draft.recentInjury = value === 'yes';
           } else if (group === 'canRunContinuously') {
             draft.canRunContinuously = value === 'yes';
           } else {
@@ -1972,7 +2000,6 @@
           wrap.querySelectorAll('.chip[data-group="' + group + '"]').forEach(function (c) {
             var v = c.getAttribute('data-value');
             var sel = MULTI_GROUPS.hasOwnProperty(group) ? draft[group].indexOf(v) !== -1
-              : group === 'recentInjury' ? (draft.recentInjury ? 'yes' : 'no') === v
               : group === 'canRunContinuously' ? (draft.canRunContinuously ? 'yes' : 'no') === v
               : draft[group] === v;
             c.classList.toggle('selected', sel);
@@ -2023,7 +2050,7 @@
     var oldGoal = state.raceGoal, oldMeta = state.planMeta;
     var previewProfile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
-      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays
+      experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays
     };
     var level = classifyUser(previewProfile);
     var weeksAvailable = weeksBetween(parseDate(draft.startDate), parseDate(draft.raceDate));
@@ -2064,7 +2091,7 @@
     var raceResultValid = draft.recentRaceDistance && draft.recentRaceDistance !== 'none' && parseRaceTimeToMinutes(draft.recentRaceTime);
     var profile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
-      experienceLevel: draft.experienceLevel, recentInjury: draft.recentInjury, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays,
+      experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays,
       terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'],
       recentRaceDistance: raceResultValid ? draft.recentRaceDistance : null,
       recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : ''
@@ -2075,6 +2102,12 @@
     var level = classifyUser(profile);
     var weeksAvailable = weeksBetween(parseDate(raceGoal.startDate), parseDate(raceGoal.raceDate));
     var safety = evaluateSafety(raceGoal.event, weeksAvailable, level);
+    // docs/COACHING_SPEC.md "Runner classification" -- evaluateSafety/EVENT_TABLE
+    // have no injury-aware lever of their own, so this is added here rather
+    // than changing that function's signature.
+    if (profile.injuryStatus === 'medically_restricted') {
+      safety.warnings = safety.warnings.concat(['This plan is scaled down for a cautious return, but a medically-restricted status is worth clearing with a doctor or physical therapist before you start training toward it.']);
+    }
     state.userName = (draft.userName || '').trim();
     state.profile = profile;
     state.raceGoal = raceGoal;
@@ -2113,7 +2146,7 @@
       renderWizard({
         event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
-        experienceLevel: state.profile.experienceLevel, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
+        experienceLevel: state.profile.experienceLevel, injuryStatus: state.profile.injuryStatus, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
         terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
         recentRaceDistance: state.profile.recentRaceDistance || 'none', recentRaceTime: state.profile.recentRaceTime || '',
         userName: state.userName
@@ -2707,7 +2740,12 @@
     var countdownText = remaining > 0 ? remaining + ' DAYS TO RACE' : (remaining === 0 ? 'RACE DAY' : 'RACE COMPLETE');
 
     var warningsHtml = '';
-    if (state.planMeta.unsafe) {
+    // Was gated on state.planMeta.unsafe -- correct while this array only
+    // ever held the timeline-safety warning, but the medically_restricted
+    // injury-status warning (docs/COACHING_SPEC.md "Runner classification")
+    // shares this same array and isn't about timeline safety, so it never
+    // rendered under the old condition. Show whatever's actually in the array.
+    if (state.planMeta.warnings && state.planMeta.warnings.length) {
       warningsHtml += state.planMeta.warnings.map(function (w) { return '<div class="warn-banner"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(w) + '</span></div>'; }).join('');
     }
     if (result.note) {
@@ -3132,7 +3170,8 @@
             var p = {
               event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level,
               phase: weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : null,
-              currentWeek: currentWeek, totalWeeks: planLengthWeeks
+              currentWeek: currentWeek, totalWeeks: planLengthWeeks,
+              injuryStatus: state.profile.injuryStatus || null
             };
             // Real pace data, only when the runner actually supplied a recent race
             // result -- coach.js is instructed to use this instead of guessing at

@@ -113,6 +113,13 @@
   }
 
   // ── Classification + safety ──────────────────────────────────────────
+  // docs/COACHING_SPEC.md "Runner classification" -- injury/return-to-running
+  // status, keyed by profile.injuryStatus. `resolved` has no cap value (no
+  // classification constraint). Falls back to the legacy boolean
+  // profile.recentInjury for profiles created before this enum existed
+  // (true -> same cap as 'mild_discomfort', matching the old behavior exactly).
+  var INJURY_CAP = { resolved: null, mild_discomfort: 'novice', unable_to_run: 'beginner', medically_restricted: 'beginner' };
+
   function classifyUser(profile) {
     var freq = profile.runDaysPerWeek, mileage = profile.weeklyMileage;
     var computed;
@@ -123,8 +130,24 @@
     var selfRank = LEVELS.indexOf(profile.experienceLevel);
     var compRank = LEVELS.indexOf(computed);
     var rank = Math.min(selfRank >= 0 ? selfRank : compRank, compRank);
-    if (profile.recentInjury) rank = Math.min(rank, LEVELS.indexOf('novice'));
+    var injuryStatus = profile.injuryStatus || (profile.recentInjury ? 'mild_discomfort' : 'resolved');
+    var cap = INJURY_CAP[injuryStatus];
+    if (cap) rank = Math.min(rank, LEVELS.indexOf(cap));
     return LEVELS[rank];
+  }
+
+  // docs/COACHING_SPEC.md "Weekly structure" -- frequency-aware opening
+  // schedule. Starts at the runner's actual current frequency plus one
+  // (never the old hardcoded floor of 3), then ramps by one running day
+  // every `rampIntervalWeeks` until reaching the plan's eventual target.
+  function startRunDaysFor(runDaysPerWeek, targetRunDays) {
+    return Math.max(2, Math.min(targetRunDays, (runDaysPerWeek || 0) + 1));
+  }
+
+  function runDaysForWeek(week, startRunDays, targetRunDays, rampIntervalWeeks) {
+    if (targetRunDays <= startRunDays) return targetRunDays;
+    var stepsElapsed = Math.floor((week - 1) / rampIntervalWeeks);
+    return Math.min(targetRunDays, startRunDays + stepsElapsed);
   }
 
   function evaluateSafety(event, weeksAvailable, level) {
@@ -305,6 +328,8 @@
     classifyUser: classifyUser,
     evaluateSafety: evaluateSafety,
     choosePlanLength: choosePlanLength,
+    startRunDaysFor: startRunDaysFor,
+    runDaysForWeek: runDaysForWeek,
     applyMissedAdjustment: applyMissedAdjustment,
     applyDifficultyAdjustment: applyDifficultyAdjustment,
     RUN_WALK_STAGES: RUN_WALK_STAGES,
