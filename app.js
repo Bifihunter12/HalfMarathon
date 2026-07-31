@@ -41,7 +41,7 @@
   // ── Event + level tables (own synthesis, not any coach's copyrighted schedule) ──
   var EVENTS = ['5k', '10k', 'half', 'marathon', '50k', '50mi', '100k', '100mi'];
   var EVENT_LABEL = CoachingRulesDomain.EVENT_LABEL; // docs/COACHING_SPEC.md -- moved to coaching-rules.js
-  var RACE_LABEL = { '5k': '5K Race', '10k': '10K Race', half: 'Half Marathon', marathon: 'Marathon', '50k': '50K', '50mi': '50 Mile', '100k': '100K', '100mi': '100 Mile' };
+  var RACE_LABEL = CoachingRulesDomain.RACE_LABEL; // docs/COACHING_SPEC.md -- moved to coaching-rules.js
   var RACE_LABEL_SET = {};
   EVENTS.forEach(function (e) { RACE_LABEL_SET[RACE_LABEL[e].toLowerCase()] = true; });
   // legacy labels from the original Higdon-only version, kept recognizable for old overrides
@@ -61,35 +61,31 @@
     unable_to_run: "Can't currently run normally",
     medically_restricted: 'Medically restricted, or returning after a long layoff'
   };
-  var GOAL_FACTOR = { finish: 0.85, improve: 1.0, pr: 1.05, aggressive: 1.12 };
+  // docs/COACHING_SPEC.md "Weekly structure" -- moved to coaching-rules.js
+  // alongside buildStructuredWeeks. TERRAIN_LABEL/RACE_LABEL stay aliased
+  // here (still read directly by the wizard's terrain chips / isRace's
+  // RACE_LABEL_SET construction above); the rest are aliased for the same
+  // low-risk-default reason the first coaching-rules extraction used.
+  var GOAL_FACTOR = CoachingRulesDomain.GOAL_FACTOR;
   var TERRAINS = ['road', 'trail', 'hills', 'mountain', 'treadmill'];
-  var TERRAIN_LABEL = { road: 'Road', trail: 'Trail', hills: 'Hills', mountain: 'Mountain', treadmill: 'Treadmill' };
+  var TERRAIN_LABEL = CoachingRulesDomain.TERRAIN_LABEL;
   var CROSS_OPTIONS = ['Bike', 'Swim', 'Elliptical', 'Row', 'Hike', 'Strength', 'Yoga', 'Other', 'None'];
   var RACE_RESULT_DISTANCES = ['none', '5k', '10k', 'half', 'marathon'];
   var RACE_RESULT_LABEL = { none: 'None', '5k': '5K', '10k': '10K', half: 'Half', marathon: 'Marathon' };
 
-  var INCREASE_PCT = { beginner: 0.04, novice: 0.06, intermediate: 0.08, advanced: 0.10 };
-  var CUTBACK_PCT = { beginner: 0.20, novice: 0.17, intermediate: 0.15, advanced: 0.12 };
-  var CUTBACK_INTERVAL = { beginner: 3, novice: 3, intermediate: 4, advanced: 4 };
-  var RUN_DAYS_DEFAULT = { beginner: 3, novice: 3, intermediate: 5, advanced: 6 };
-  var STRENGTH_SESSIONS = { base: 2, build: 2, peak: 1, taper: 0, race: 0 };
+  var INCREASE_PCT = CoachingRulesDomain.INCREASE_PCT;
+  var CUTBACK_PCT = CoachingRulesDomain.CUTBACK_PCT;
+  var CUTBACK_INTERVAL = CoachingRulesDomain.CUTBACK_INTERVAL;
+  var RUN_DAYS_DEFAULT = CoachingRulesDomain.RUN_DAYS_DEFAULT;
+  var STRENGTH_SESSIONS = CoachingRulesDomain.STRENGTH_SESSIONS;
 
   // { idealWeeks, minWeeks, longRunPeak (mi), peakVolume (mi/wk), taperWeeks }
   // -- docs/COACHING_SPEC.md, moved to coaching-rules.js
   var EVENT_TABLE = CoachingRulesDomain.EVENT_TABLE;
 
-  var LONG_RUN_SHARE = { '5k': 0.32, '10k': 0.30, half: 0.30, marathon: 0.28, '50k': 0.35, '50mi': 0.38, '100k': 0.38, '100mi': 0.40 };
+  var LONG_RUN_SHARE = CoachingRulesDomain.LONG_RUN_SHARE;
 
-  var QUALITY_POOL = {
-    '5k': { entry: ['Easy + 4-6 x 20 sec strides'], trained: ['6 x 400m @ 5K pace', '5 x 3 min @ 5K effort', '4 x 5 min @ 10K effort', 'Fartlek: 8 x 1 min hard / 1 min easy'] },
-    '10k': { entry: ['Easy + strides', '20 min tempo, comfortably hard'], trained: ['Tempo: 25-30 min @ threshold', '5 x 1000m @ 10K pace', '6 x 800m @ 10K pace', 'Hills: 6 x 2 min uphill'] },
-    half: { entry: ['Easy + strides', '15-20 min tempo'], trained: ['Tempo: 3 x 10 min @ threshold', '4-6 mi @ half-marathon pace', '5 x 1 mi @ 10K pace'] },
-    marathon: { entry: ['Medium-long run', 'Easy + strides'], trained: ['8 mi w/ 4 mi @ marathon pace', '2 x 4 mi @ marathon pace', 'Medium-long run'] },
-    '50k': { entry: ['Hill repeats: 5 x 3 min uphill', 'Trail long run w/ climbing'], trained: ['Back-to-back long runs', 'Long climb + descent conditioning'] },
-    '50mi': { entry: ['Back-to-back long runs', 'Time-on-feet long run'], trained: ['Back-to-back long runs', 'Long climb + descent conditioning', 'Night run rehearsal'] },
-    '100k': { entry: ['Back-to-back long runs', 'Time-on-feet long run'], trained: ['Back-to-back long runs', 'Long climb + descent conditioning', 'Night run rehearsal'] },
-    '100mi': { entry: ['Back-to-back long runs', 'Time-on-feet long run', 'Gear + fueling rehearsal'], trained: ['Back-to-back long runs', 'Night run rehearsal', 'Downhill conditioning', 'Gear + fueling rehearsal'] }
-  };
+  var QUALITY_POOL = CoachingRulesDomain.QUALITY_POOL;
 
   var RED_FLAGS = [
     'Chest pain', 'Fainting', 'Severe shortness of breath', 'Severe dizziness',
@@ -1587,248 +1583,25 @@
   function evaluateSafety(event, weeksAvailable, level) { return CoachingRulesDomain.evaluateSafety(event, weeksAvailable, level); }
   function choosePlanLength(weeksAvailable, event, level) { return CoachingRulesDomain.choosePlanLength(weeksAvailable, event, level); }
 
-  // ── Weekly template: which of the 7 slots are long/quality/easy/cross/rest ──
-  var RUN_SLOT_PRIORITY = [1, 3, 5, 0, 2, 4]; // Tue, Thu, Sat, Mon, Wed, Fri (slot 6 = long, fixed)
-  function assignWeekTemplate(runDays, wantCross) {
-    // capped at 5 (not 6) so one of the 6 non-long slots is always structurally
-    // left as 'rest' below, satisfying the "at least one rest day" rule without
-    // ever having to overwrite an already-assigned run day after the fact
-    var additional = Math.max(0, Math.min(5, runDays - 1));
-    var slots = ['rest', 'rest', 'rest', 'rest', 'rest', 'rest', 'long'];
-    var chosen = RUN_SLOT_PRIORITY.slice(0, additional);
-    chosen.forEach(function (idx, i) { slots[idx] = i === 0 ? 'quality' : 'easy'; });
-    var restPref = [4, 0, 2, 3, 5, 1];
-    var restSlot = restPref.filter(function (i) { return slots[i] === 'rest'; })[0];
-    for (var j = 0; j < 6; j++) {
-      if (slots[j] === 'rest' && j !== restSlot && wantCross) slots[j] = 'cross';
-    }
-    return slots;
-  }
-
-  // ── Phase assignment across the whole plan ──────────────────────────
-  function assignPhases(planLengthWeeks, taperWeeksCfg) {
-    var taperWeeks = Math.max(0, Math.min(taperWeeksCfg, Math.floor(planLengthWeeks / 3)));
-    var raceWeek = planLengthWeeks;
-    var phases = [];
-    for (var w = 1; w <= planLengthWeeks; w++) {
-      if (w === raceWeek) phases.push('race');
-      else if (w > raceWeek - 1 - taperWeeks) phases.push('taper');
-      else phases.push(null); // filled below
-    }
-    var buildEnd = raceWeek - 1 - taperWeeks;
-    var baseCount = Math.round(buildEnd * 0.35);
-    var buildCount = Math.round(buildEnd * 0.40);
-    for (var w2 = 1; w2 <= buildEnd; w2++) {
-      if (w2 <= baseCount) phases[w2 - 1] = 'base';
-      else if (w2 <= baseCount + buildCount) phases[w2 - 1] = 'build';
-      else phases[w2 - 1] = 'peak';
-    }
-    return phases; // index 0 = week 1
-  }
-
-  function taperFraction(taperWeeks, idx) {
-    var curves = { 1: [0.55], 2: [0.65, 0.45], 3: [0.75, 0.55, 0.40], 4: [0.80, 0.65, 0.50, 0.38] };
-    var curve = curves[taperWeeks] || curves[3];
-    return curve[Math.min(idx, curve.length - 1)];
-  }
-
-  // ── Volume progression per week ──────────────────────────────────────
-  function computeWeeklyVolumes(planLengthWeeks, phases, startVolume, peakVolume, level, taperWeeks) {
-    var vols = [];
-    var blockPeak = startVolume;
-    var cutbackInterval = CUTBACK_INTERVAL[level];
-    var buildWeekCounter = 0;
-    var taperIdx = 0;
-    for (var i = 0; i < planLengthWeeks; i++) {
-      var phase = phases[i];
-      if (phase === 'race') {
-        vols.push(round5(blockPeak * 0.15));
-      } else if (phase === 'taper') {
-        vols.push(round5(blockPeak * taperFraction(taperWeeks, taperIdx)));
-        taperIdx++;
-      } else {
-        buildWeekCounter++;
-        var isCutback = buildWeekCounter % cutbackInterval === 0;
-        if (isCutback) {
-          vols.push(round5(blockPeak * (1 - CUTBACK_PCT[level])));
-        } else {
-          var candidate = Math.min(blockPeak * (1 + INCREASE_PCT[level]), peakVolume);
-          if (i === 0) candidate = startVolume;
-          blockPeak = candidate;
-          vols.push(round5(candidate));
-        }
-      }
-    }
-    return vols;
-  }
-
-  // ── Structured per-day generation (numeric, pre-formatting) ──────────
+  // docs/COACHING_SPEC.md "Weekly structure" -- assignWeekTemplate/assignPhases/
+  // computeWeeklyVolumes/buildStructuredWeeks all moved to coaching-rules.js
+  // (tested in tests/plan-scenarios.test.js) so the whole plan generator is
+  // testable in one place, not just its adaptation/scheduling helpers.
   function buildStructuredWeeks(profile, raceGoal, planMeta) {
-    var event = raceGoal.event;
-    var level = planMeta.level;
-    var cfg = EVENT_TABLE[event][level];
-    var planLengthWeeks = planMeta.planLengthWeeks;
-    var safetyScale = planMeta.unsafe ? Math.max(0.55, planMeta.weeksAvailable / cfg.minWeeks) : 1.0;
-    var goalFactor = GOAL_FACTOR[raceGoal.goal] || 1.0;
-
-    var peakVolume = cfg.peakVolume * goalFactor * safetyScale;
-    var longRunPeak = cfg.longRunPeak * safetyScale;
-    var startVolume = Math.max(profile.weeklyMileage, level === 'beginner' ? 4 : 6);
-    if (startVolume > peakVolume * 0.6) startVolume = peakVolume * 0.6;
-
-    var phases = assignPhases(planLengthWeeks, cfg.taperWeeks);
-    var volumes = computeWeeklyVolumes(planLengthWeeks, phases, startVolume, peakVolume, level, cfg.taperWeeks);
-    // docs/COACHING_SPEC.md "Weekly structure" -- frequency-aware opening
-    // schedule. targetRunDays is the plan's eventual day count (same formula
-    // as before, just without the old hardcoded Math.max(3, ...) floor);
-    // startRunDays begins at the runner's actual current frequency plus one
-    // and ramps up week by week (see the per-week loop below) rather than
-    // jumping straight to the target on day one.
-    var targetRunDays = Math.min(profile.availableDays || RUN_DAYS_DEFAULT[level], RUN_DAYS_DEFAULT[level] + (event === '5k' || event === '10k' || event === 'half' || event === 'marathon' ? 0 : 1));
-    var startRunDays = CoachingRulesDomain.startRunDaysFor(profile.runDaysPerWeek, targetRunDays);
-    var wantCross = !(profile.crossOptions && profile.crossOptions.length === 1 && profile.crossOptions[0] === 'None');
-    var qualityPool = QUALITY_POOL[event];
-    var longRunSafetyCap = Math.max(profile.longestRun * 1.15, 2);
-    var terrainNote = terrainNoteFrom(profile.terrains);
-
-    // docs/COACHING_SPEC.md "Run-walk programming" -- only when the runner
-    // explicitly said they can't yet run continuously. Spends roughly the
-    // first 60% of the plan on a time-based run/walk progression, then falls
-    // through to the normal continuous-mileage generation below unchanged,
-    // so the runner arrives at race day already running continuously.
-    var useRunWalk = profile.canRunContinuously === false;
-    var runWalkWeeks = useRunWalk ? CoachingRulesDomain.runWalkWeeksFor(planLengthWeeks) : 0;
-
-    var weeks = [];
-    for (var w = 1; w <= planLengthWeeks; w++) {
-      var phase = phases[w - 1];
-      var targetVolume = volumes[w - 1];
-      var weekRunDays = CoachingRulesDomain.runDaysForWeek(w, startRunDays, targetRunDays, 2);
-      var longShare = LONG_RUN_SHARE[event] + (weekRunDays <= 3 ? 0.15 : weekRunDays === 4 ? 0.05 : 0);
-      var template = assignWeekTemplate(weekRunDays, wantCross);
-      var inRunWalkWindow = useRunWalk && phase !== 'race' && w <= runWalkWeeks;
-      var runWalkStage = inRunWalkWindow ? CoachingRulesDomain.runWalkStageForWeek(w, runWalkWeeks) : null;
-      var isEntry = (level === 'beginner') || (level === 'novice' && phase === 'base');
-      var pool = isEntry ? qualityPool.entry : qualityPool.trained;
-      var qualityText = pool[(w - 1) % pool.length];
-      var strengthBudget = STRENGTH_SESSIONS[phase] != null ? STRENGTH_SESSIONS[phase] : 1;
-
-      var days = [];
-      var longRunCap = phase === 'base' ? Math.min(longRunPeak, longRunSafetyCap) : longRunPeak;
-      var longRunMiles = phase === 'race' ? 0 : round5(Math.min(longRunCap, targetVolume * longShare));
-      var qualityMiles = (phase === 'base' || phase === 'race') ? 0 : round5(Math.min(targetVolume * 0.18, 8));
-      var remaining = Math.max(0, targetVolume - longRunMiles - qualityMiles);
-      var easySlotCount = template.filter(function (t) { return t === 'easy'; }).length;
-      var easyCap = longRunMiles > 0 ? longRunMiles * 0.85 : remaining;
-      var easyEach = easySlotCount ? round5(Math.min(remaining / easySlotCount, easyCap)) : 0;
-
-      var strengthAssigned = 0;
-      var crossPref = profile.crossOptions && profile.crossOptions.length && profile.crossOptions[0] !== 'None' ? profile.crossOptions[0] : 'Cross-train';
-
-      for (var slot = 0; slot < 7; slot++) {
-        var tok = template[slot];
-        var day = { type: tok, miles: 0, label: '' };
-        if (phase === 'race' && slot === 6) {
-          day.type = 'race'; day.label = RACE_LABEL[event];
-        } else if (phase === 'race') {
-          day.type = 'rest'; day.label = 'Rest';
-        } else if (tok === 'long') {
-          day.type = 'long';
-          if (runWalkStage) {
-            day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, true);
-            day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
-          } else {
-            day.miles = longRunMiles;
-            day.label = formatLongRunLabel(longRunMiles, terrainNote);
-          }
-        } else if (tok === 'quality') {
-          day.type = 'quality';
-          if (runWalkStage) {
-            // Never hand a true beginner a tempo/interval prescription
-            // (QUALITY_POOL's entry text, e.g. "20 min tempo, comfortably
-            // hard") before they can run continuously at all -- another
-            // gentle run/walk session instead.
-            day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, false);
-            day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
-          } else {
-            // docs/COACHING_SPEC.md "Quality-day volume math" -- qualityMiles
-            // is already a holistic session-distance budget (see where it's
-            // computed above), not a parse of the label's interval structure,
-            // so it's framed here as an approximate total including
-            // warm-up/cool-down rather than a precise breakdown.
-            day.miles = qualityMiles;
-            day.label = qualityMiles > 0 ? qualityText + ' (~' + toUnit(qualityMiles) + ' ' + unitLabel() + ' total, incl. warm-up/cool-down)' : qualityText;
-          }
-        } else if (tok === 'easy') {
-          day.type = 'easy';
-          if (runWalkStage) {
-            day.runWalk = CoachingRulesDomain.buildRunWalkSession(runWalkStage, false);
-            day.label = CoachingRulesDomain.formatRunWalkLabel(day.runWalk);
-          } else {
-            day.miles = easyEach;
-            day.label = formatEasyRunLabel(easyEach);
-          }
-        } else if (tok === 'cross') {
-          var addStrength = strengthAssigned < strengthBudget;
-          if (addStrength) strengthAssigned++;
-          day.type = 'cross';
-          day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + Strength' : '');
-        } else {
-          day.type = 'rest'; day.label = 'Rest';
-        }
-        days.push(day);
-      }
-
-      weeks.push({ weekNum: w, phase: phase, targetVolume: targetVolume, days: days });
-    }
-    return weeks;
+    return CoachingRulesDomain.buildStructuredWeeks(profile, raceGoal, planMeta, state.units);
   }
 
   function findCurrentWeekIdx(raceDate, planLengthWeeks, today) { return CoachingRulesDomain.findCurrentWeekIdx(raceDate, planLengthWeeks, today); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
 
-  // ── Adaptive layer: pause days the user marked unavailable (illness/travel) ──
-  function applyUnavailableRanges(weeks, raceGoal, planMeta, ranges) {
-    if (!ranges || !ranges.length) return weeks;
-    var raceDate = parseDate(raceGoal.raceDate);
-    var planLengthWeeks = planMeta.planLengthWeeks;
-    weeks.forEach(function (wk) {
-      wk.days.forEach(function (day, di) {
-        if (day.type === 'race') return;
-        var iso = dateToISO(dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di));
-        var hit = ranges.filter(function (r) { return iso >= r.start && iso <= r.end; })[0];
-        if (hit) {
-          day.type = 'rest';
-          day.miles = 0;
-          day.label = 'Rest — ' + (hit.reason === 'vacation' ? 'away' : 'illness');
-        }
-      });
-    });
-    return weeks;
-  }
-
-  // ── Adaptive layer: dampen future weeks if recent training was mostly missed,
-  // and nudge future volume on a sustained RPE trend (docs/COACHING_SPEC.md
-  // "Adaptation rules") -- both moved to coaching-rules.js. state.units is
-  // threaded through explicitly now (previously read module-level state.units
-  // via formatLongRunLabel/formatEasyRunLabel inside these functions).
+  // docs/COACHING_SPEC.md / docs/SAFETY_POLICY.md -- applyUnavailableRanges,
+  // applyMissedAdjustment, and applyDifficultyAdjustment all moved to
+  // coaching-rules.js's generatePlan pipeline (tested in
+  // tests/plan-scenarios.test.js). generateAll is now a one-line wrapper
+  // supplying the two pieces of module state (state.unavailable, state.units)
+  // the pure pipeline function needs explicitly.
   var RPE_TARGET = CoachingRulesDomain.RPE_TARGET;
-  function applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote) {
-    return CoachingRulesDomain.applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, state.units);
-  }
-  function applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote) {
-    return CoachingRulesDomain.applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, state.units);
-  }
-
   function generateAll(profile, raceGoal, planMeta, logs, today) {
-    var weeks = buildStructuredWeeks(profile, raceGoal, planMeta);
-    weeks = applyUnavailableRanges(weeks, raceGoal, planMeta, state.unavailable);
-    var terrainNote = terrainNoteFrom(profile.terrains);
-    var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote);
-    if (!adjusted.note) {
-      var diffNote = applyDifficultyAdjustment(adjusted.weeks, raceGoal, planMeta, logs, today, terrainNote);
-      if (diffNote) adjusted.note = diffNote;
-    }
-    return adjusted;
+    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units);
   }
 
   function el(html) {
