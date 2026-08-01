@@ -131,6 +131,18 @@
     return d;
   }
 
+  // docs/COACHING_SPEC.md "Recurring workouts" -- a recurring workout's `day`
+  // is a real calendar weekday (Mon=0...Sun=6, matching app.js's DOW_SHORT
+  // labels), NOT a slot index. Since dateForSlot anchors slot 6 to whatever
+  // weekday the race itself falls on, slot 0 is only Monday when the race is
+  // on a Sunday -- for any other race weekday, the slot each weekday lands on
+  // shifts accordingly. This inverts dateForSlot's math to find which slot a
+  // given weekday occupies for THIS plan's race date.
+  function slotForFixedDay(raceDate, day) {
+    var raceWeekdayMon0 = (raceDate.getDay() + 6) % 7;
+    return ((day - raceWeekdayMon0 - 1) % 7 + 7) % 7;
+  }
+
   function findCurrentWeekIdx(raceDate, planLengthWeeks, today) {
     for (var w = 1; w <= planLengthWeeks; w++) {
       var wkStart = dateForSlot(raceDate, planLengthWeeks, w, 0);
@@ -179,6 +191,14 @@
     return Math.min(targetRunDays, startRunDays + stepsElapsed);
   }
 
+  // The plan's eventual (steady-state) running-day count -- extracted so
+  // app.js's finishWizard can run evaluateRecurringWorkoutSchedule against
+  // the same real target buildStructuredWeeks itself will use, instead of
+  // duplicating this formula.
+  function targetRunDaysFor(profile, event, level) {
+    return Math.min(profile.availableDays || RUN_DAYS_DEFAULT[level], RUN_DAYS_DEFAULT[level] + (event === '5k' || event === '10k' || event === 'half' || event === 'marathon' ? 0 : 1));
+  }
+
   function evaluateSafety(event, weeksAvailable, level) {
     var cfg = EVENT_TABLE[event][level];
     var unsafe = weeksAvailable < cfg.minWeeks;
@@ -192,6 +212,69 @@
   function choosePlanLength(weeksAvailable, event, level) {
     var idealWeeks = EVENT_TABLE[event][level].idealWeeks;
     return Math.min(weeksAvailable, Math.round(idealWeeks * 1.6), 40);
+  }
+
+  // ── Recurring workouts / existing commitments (docs/COACHING_SPEC.md) ──
+  // Two independent axes per activity type, deliberately kept separate:
+  // `contribution` (aerobic/strength/mobility) is inherent to the activity,
+  // independent of how hard the runner does it -- used only to avoid
+  // double-crediting strength/aerobic work the runner already gets elsewhere.
+  // `maxHardness` is the ceiling of how hard this activity type can
+  // realistically get; combined with the runner's own reported `intensity`,
+  // this (not `contribution`) is what decides `isHardDay`. Conflating the two
+  // breaks real cases: an easy spin is aerobic-contributing but not a hard
+  // day, while hot/power yoga is a hard day despite yoga's normally-gentle
+  // nature. Provisional coaching judgment, not clinically reviewed --
+  // documented as such in docs/COACHING_SPEC.md.
+  var RECURRING_ACTIVITY_TYPES = ['cycling', 'yoga', 'strength', 'pilates', 'swimming', 'hiking', 'walking', 'hiit', 'sport', 'other'];
+  var RECURRING_ACTIVITY_LABEL = {
+    cycling: 'Spinning / Cycling', yoga: 'Yoga', strength: 'Strength training', pilates: 'Pilates',
+    swimming: 'Swimming', hiking: 'Hiking', walking: 'Walking', hiit: 'HIIT', sport: 'Recreational sport', other: 'Other'
+  };
+  var RECURRING_ACTIVITY_PROFILE = {
+    cycling: { aerobic: 'high', strength: 'none', mobility: 'none', maxHardness: 'high' },
+    yoga: { aerobic: 'none', strength: 'low', mobility: 'high', maxHardness: 'high' },
+    strength: { aerobic: 'none', strength: 'high', mobility: 'low', maxHardness: 'high' },
+    pilates: { aerobic: 'low', strength: 'moderate', mobility: 'high', maxHardness: 'moderate' },
+    swimming: { aerobic: 'high', strength: 'low', mobility: 'none', maxHardness: 'high' },
+    hiking: { aerobic: 'moderate', strength: 'low', mobility: 'none', maxHardness: 'moderate' },
+    walking: { aerobic: 'low', strength: 'none', mobility: 'none', maxHardness: 'low' },
+    hiit: { aerobic: 'high', strength: 'moderate', mobility: 'none', maxHardness: 'high' },
+    sport: { aerobic: 'moderate', strength: 'low', mobility: 'none', maxHardness: 'high' },
+    other: { aerobic: 'moderate', strength: 'low', mobility: 'low', maxHardness: 'moderate' } // unknown activity -- conservative default
+  };
+
+  function classifyRecurringWorkout(workout) {
+    var profile = RECURRING_ACTIVITY_PROFILE[workout.activityType] || RECURRING_ACTIVITY_PROFILE.other;
+    var isHardDay = workout.intensity === 'high' && profile.maxHardness !== 'low';
+    return {
+      aerobicContribution: profile.aerobic,
+      strengthContribution: profile.strength,
+      mobilityContribution: profile.mobility,
+      isHardDay: isHardDay
+    };
+  }
+
+  // Deterministic schedule-safety check (docs/COACHING_SPEC.md) -- warns
+  // rather than silently overloading the runner, reusing the exact
+  // planMeta.warnings mechanism evaluateSafety already populates.
+  function evaluateRecurringWorkoutSchedule(recurringWorkouts, targetRunDays, raceDateIso) {
+    var warnings = [];
+    var list = recurringWorkouts || [];
+    var fixedCount = list.filter(function (w) { return w.fixed && w.day != null; }).length;
+    if (fixedCount + targetRunDays > 6) {
+      warnings.push('Your fixed weekly workouts (' + fixedCount + ') plus your running days (' + targetRunDays + ') leave no room for a rest day. Consider making one of your fixed sessions movable, or reducing running days available.');
+    }
+    // slotForFixedDay needs a real race date to know which weekday slot 6
+    // (the long run) falls on -- if it's not available yet (e.g. mid-wizard,
+    // before a race date is chosen), skip this specific check rather than
+    // guessing.
+    var raceDate = raceDateIso ? parseDate(raceDateIso) : null;
+    var onLongRunDay = raceDate ? list.filter(function (w) { return w.fixed && w.day != null && slotForFixedDay(raceDate, w.day) === 6; }) : [];
+    if (onLongRunDay.length) {
+      warnings.push('A fixed workout is scheduled on your long-run day. Cross-training can\'t replace the running-specific benefit of your long run, so this day still needs to be resolved manually.');
+    }
+    return { warnings: warnings };
   }
 
   // ── Weekly template: which of the 7 slots are long/quality/easy/cross/rest ──
@@ -390,7 +473,14 @@
   // whole plan generator is testable (tests/plan-scenarios.test.js), the
   // same "add a units parameter" treatment as applyMissedAdjustment/
   // applyDifficultyAdjustment (see exception #1 at the top of this file).
-  function buildStructuredWeeks(profile, raceGoal, planMeta, units) {
+  function formatRecurringWorkoutLabel(workout) {
+    var name = (workout.activityType === 'other' || workout.activityType === 'sport') && workout.customName
+      ? workout.customName
+      : RECURRING_ACTIVITY_LABEL[workout.activityType] || RECURRING_ACTIVITY_LABEL.other;
+    return workout.durationMinutes + ' min ' + name;
+  }
+
+  function buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts) {
     var event = raceGoal.event;
     var level = planMeta.level;
     var cfg = EVENT_TABLE[event][level];
@@ -411,7 +501,7 @@
     // startRunDays begins at the runner's actual current frequency plus one
     // and ramps up week by week (see the per-week loop below) rather than
     // jumping straight to the target on day one.
-    var targetRunDays = Math.min(profile.availableDays || RUN_DAYS_DEFAULT[level], RUN_DAYS_DEFAULT[level] + (event === '5k' || event === '10k' || event === 'half' || event === 'marathon' ? 0 : 1));
+    var targetRunDays = targetRunDaysFor(profile, event, level);
     var startRunDays = startRunDaysFor(profile.runDaysPerWeek, targetRunDays);
     var wantCross = !(profile.crossOptions && profile.crossOptions.length === 1 && profile.crossOptions[0] === 'None');
     var qualityPool = QUALITY_POOL[event];
@@ -426,6 +516,21 @@
     var useRunWalk = profile.canRunContinuously === false;
     var runWalkWeeks = useRunWalk ? runWalkWeeksFor(planLengthWeeks) : 0;
 
+    // docs/COACHING_SPEC.md "Recurring workouts" -- existing commitments the
+    // runner already does. `w.day` is a calendar weekday (Mon=0...Sun=6), not
+    // a slot index -- slotForFixedDay converts it to this plan's actual slot
+    // using the race date, since slot 6 (the long run) lands on whatever
+    // weekday the race itself falls on, not always Sunday. Fixed workouts
+    // whose slot is 6 are excluded here -- that's a real conflict, surfaced
+    // as a warning (evaluateRecurringWorkoutSchedule), never silently
+    // resolved by overriding the long run. Movable ones consume the plan's
+    // own auto-generated cross-training slots instead of occupying a
+    // specific day.
+    var raceDate = parseDate(raceGoal.raceDate);
+    var allRecurring = recurringWorkouts || [];
+    var fixedWorkouts = allRecurring.filter(function (w) { return w.fixed && w.day != null && slotForFixedDay(raceDate, w.day) !== 6; });
+    var movableWorkouts = allRecurring.filter(function (w) { return !w.fixed; });
+
     var weeks = [];
     for (var w = 1; w <= planLengthWeeks; w++) {
       var phase = phases[w - 1];
@@ -433,12 +538,43 @@
       var weekRunDays = runDaysForWeek(w, startRunDays, targetRunDays, 2);
       var longShare = LONG_RUN_SHARE[event] + (weekRunDays <= 3 ? 0.15 : weekRunDays === 4 ? 0.05 : 0);
       var template = assignWeekTemplate(weekRunDays, wantCross);
+
+      // Hard-day stacking guard: if a fixed workout this week is classified
+      // hard, don't also add the plan's own quality/interval session --
+      // checked against the ORIGINAL template (before fixed-workout slot
+      // overrides below), so it correctly covers both a hard fixed workout
+      // landing on a different day than quality (real stacking, avoided by
+      // demoting quality to easy) and landing on the same day as quality
+      // (the demotion is moot there since the fixed-workout override below
+      // replaces that slot anyway -- either way, no doubling).
+      var qualitySlotIdx = template.indexOf('quality');
+      var hasFixedHardWorkoutThisWeek = fixedWorkouts.some(function (w) { return classifyRecurringWorkout(w).isHardDay; });
+      if (qualitySlotIdx !== -1 && hasFixedHardWorkoutThisWeek) template[qualitySlotIdx] = 'easy';
+
+      // Fixed workouts override their designated weekday's slot (never slot 6 --
+      // filtered out of fixedWorkouts already).
+      fixedWorkouts.forEach(function (w) { template[slotForFixedDay(raceDate, w.day)] = 'recurring'; });
+
+      // Strength double-credit guard: reduce this week's auto "+ Strength"
+      // budget by however many recurring workouts (fixed, always placed; and
+      // movable, only the ones that will actually fit this week's remaining
+      // cross-slot capacity) already provide real strength contribution --
+      // computed up front, before the day loop, so the reduction applies
+      // regardless of slot iteration order.
+      var crossSlotCount = template.filter(function (t) { return t === 'cross'; }).length;
+      var placedMovable = movableWorkouts.slice(0, crossSlotCount);
+      var recurringStrengthCount = fixedWorkouts.concat(placedMovable).filter(function (w) {
+        var c = classifyRecurringWorkout(w);
+        return c.strengthContribution === 'moderate' || c.strengthContribution === 'high';
+      }).length;
+      var movableIdx = 0;
+
       var inRunWalkWindow = useRunWalk && phase !== 'race' && w <= runWalkWeeks;
       var runWalkStage = inRunWalkWindow ? runWalkStageForWeek(w, runWalkWeeks) : null;
       var isEntry = (level === 'beginner') || (level === 'novice' && phase === 'base');
       var pool = isEntry ? qualityPool.entry : qualityPool.trained;
       var qualityText = pool[(w - 1) % pool.length];
-      var strengthBudget = STRENGTH_SESSIONS[phase] != null ? STRENGTH_SESSIONS[phase] : 1;
+      var strengthBudget = Math.max(0, (STRENGTH_SESSIONS[phase] != null ? STRENGTH_SESSIONS[phase] : 1) - recurringStrengthCount);
 
       var days = [];
       var longRunCap = phase === 'base' ? Math.min(longRunPeak, longRunSafetyCap) : longRunPeak;
@@ -495,11 +631,24 @@
             day.miles = easyEach;
             day.label = formatEasyRunLabel(easyEach, units);
           }
-        } else if (tok === 'cross') {
-          var addStrength = strengthAssigned < strengthBudget;
-          if (addStrength) strengthAssigned++;
+        } else if (tok === 'recurring') {
+          var fixedWorkoutHere = fixedWorkouts.filter(function (w) { return slotForFixedDay(raceDate, w.day) === slot; })[0];
           day.type = 'cross';
-          day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + Strength' : '');
+          day.label = formatRecurringWorkoutLabel(fixedWorkoutHere);
+          day.recurringWorkout = { id: fixedWorkoutHere.id, activityType: fixedWorkoutHere.activityType, fixed: true };
+        } else if (tok === 'cross') {
+          var movableWorkoutHere = movableIdx < placedMovable.length ? placedMovable[movableIdx] : null;
+          if (movableWorkoutHere) {
+            movableIdx++;
+            day.type = 'cross';
+            day.label = formatRecurringWorkoutLabel(movableWorkoutHere);
+            day.recurringWorkout = { id: movableWorkoutHere.id, activityType: movableWorkoutHere.activityType, fixed: false };
+          } else {
+            var addStrength = strengthAssigned < strengthBudget;
+            if (addStrength) strengthAssigned++;
+            day.type = 'cross';
+            day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + Strength' : '');
+          }
         } else {
           day.type = 'rest'; day.label = 'Rest';
         }
@@ -538,8 +687,8 @@
   // missed week -> (if nothing was already adapted) adapt to an RPE trend.
   // Lets tests/plan-scenarios.test.js exercise the real end-to-end pipeline
   // instead of a hand-reconstructed approximation of it.
-  function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units) {
-    var weeks = buildStructuredWeeks(profile, raceGoal, planMeta, units);
+  function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units, recurringWorkouts) {
+    var weeks = buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts);
     weeks = applyUnavailableRanges(weeks, raceGoal, planMeta, unavailable);
     var terrainNote = terrainNoteFrom(profile.terrains);
     var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, units);
@@ -611,12 +760,20 @@
     parseDate: parseDate,
     dateToISO: dateToISO,
     dateForSlot: dateForSlot,
+    slotForFixedDay: slotForFixedDay,
     findCurrentWeekIdx: findCurrentWeekIdx,
     classifyUser: classifyUser,
     evaluateSafety: evaluateSafety,
     choosePlanLength: choosePlanLength,
+    RECURRING_ACTIVITY_TYPES: RECURRING_ACTIVITY_TYPES,
+    RECURRING_ACTIVITY_LABEL: RECURRING_ACTIVITY_LABEL,
+    RECURRING_ACTIVITY_PROFILE: RECURRING_ACTIVITY_PROFILE,
+    classifyRecurringWorkout: classifyRecurringWorkout,
+    evaluateRecurringWorkoutSchedule: evaluateRecurringWorkoutSchedule,
+    formatRecurringWorkoutLabel: formatRecurringWorkoutLabel,
     startRunDaysFor: startRunDaysFor,
     runDaysForWeek: runDaysForWeek,
+    targetRunDaysFor: targetRunDaysFor,
     assignWeekTemplate: assignWeekTemplate,
     assignPhases: assignPhases,
     computeWeeklyVolumes: computeWeeklyVolumes,

@@ -48,6 +48,22 @@
     }
     var feelingMap = mergeMap(toWeekMap(local.runningFeelingLog), toWeekMap(remote.runningFeelingLog));
 
+    // Recurring workouts (docs/COACHING_SPEC.md) need real edit-in-place
+    // (changing a workout's duration/intensity later shouldn't orphan the old
+    // entry under a content-derived key the way unavailable/sideQuestLog's
+    // union would) -- same reasoning and same mergeMap-by-real-id pattern as
+    // runningFeelingLog above, just keyed by `id` instead of `weekStartIso`.
+    // Known limitation, shared with logs/overrides/crossType: a pure map
+    // merge can't distinguish "deleted locally" from "never synced from this
+    // device" -- a workout removed on one device could reappear after
+    // syncing from another that never saw the deletion.
+    function toIdMap(arr) {
+      var out = {};
+      (arr || []).forEach(function (e) { out[e.id] = e; });
+      return out;
+    }
+    var recurringWorkoutsMap = mergeMap(toIdMap(local.recurringWorkouts), toIdMap(remote.recurringWorkouts));
+
     // Same union-by-natural-key treatment as unavailable/sideQuestLog above --
     // these are append-only records too, never overwritten in place.
     var completedTracksMap = {};
@@ -108,6 +124,7 @@
       unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
       sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
       runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),
+      recurringWorkouts: Object.keys(recurringWorkoutsMap).map(function (k) { return recurringWorkoutsMap[k]; }),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };
   }

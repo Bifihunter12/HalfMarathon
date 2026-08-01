@@ -13,7 +13,7 @@ function baseState(overrides) {
     badges: [], xp: 0, xpEvents: [], xpProfile: null,
     raceGoal: null, profile: null, planMeta: null,
     logs: {}, overrides: {}, crossType: {},
-    unavailable: [], sideQuestLog: [], runningFeelingLog: []
+    unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: []
   }, overrides || {});
 }
 
@@ -123,6 +123,22 @@ test('flags (beta feature toggles) prefer the newer device wholesale, defaulting
   const remoteNoFlags = baseState({ lastModified: 1000 });
   const mergedDefaults = mergeState.mergeRunnerState(localNoFlags, remoteNoFlags);
   assert.deepEqual(mergedDefaults.flags, { enableLongerDistances: false, quietGamification: false }, 'missing flags on both sides falls back to the safe default, not undefined');
+});
+
+test('recurringWorkouts added on different devices both survive the merge (union by id)', function () {
+  const local = baseState({ lastModified: 2000, recurringWorkouts: [{ id: 'rw1', activityType: 'cycling', day: 1, durationMinutes: 45, intensity: 'high', fixed: true }] });
+  const remote = baseState({ lastModified: 1000, recurringWorkouts: [{ id: 'rw2', activityType: 'yoga', day: null, durationMinutes: 60, intensity: 'low', fixed: false }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.recurringWorkouts.length, 2);
+  assert.ok(merged.recurringWorkouts.some((w) => w.id === 'rw2'), 'the older/remote-only workout must not be dropped');
+});
+
+test('editing the same recurringWorkout id on the newer device replaces it, not just unions -- unlike unavailable/sideQuestLog\'s append-only union', function () {
+  const local = baseState({ lastModified: 2000, recurringWorkouts: [{ id: 'rw1', activityType: 'cycling', day: 1, durationMinutes: 60, intensity: 'high', fixed: true }] });
+  const remote = baseState({ lastModified: 1000, recurringWorkouts: [{ id: 'rw1', activityType: 'cycling', day: 1, durationMinutes: 45, intensity: 'moderate', fixed: true }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.recurringWorkouts.length, 1, 'editing the same workout must not create a duplicate entry');
+  assert.equal(merged.recurringWorkouts[0].durationMinutes, 60, 'the newer device\'s edit wins');
 });
 
 test('lastModified in the merged result is always the max of both sides', function () {

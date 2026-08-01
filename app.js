@@ -48,6 +48,10 @@
   ['5-k race', '10-k race'].forEach(function (l) { RACE_LABEL_SET[l] = true; });
 
   var LEVELS = CoachingRulesDomain.LEVELS; // docs/COACHING_SPEC.md -- moved to coaching-rules.js
+  var RECURRING_ACTIVITY_TYPES = CoachingRulesDomain.RECURRING_ACTIVITY_TYPES;
+  var RECURRING_ACTIVITY_LABEL = CoachingRulesDomain.RECURRING_ACTIVITY_LABEL;
+  var DOW_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']; // slot index 0-6, same fixed mapping buildStructuredWeeks uses
+  var DOW_CHIP_LABEL = { none: 'No fixed day', '0': 'Mon', '1': 'Tue', '2': 'Wed', '3': 'Thu', '4': 'Fri', '5': 'Sat', '6': 'Sun' };
   var LEVEL_LABEL = { beginner: 'Beginner', novice: 'Novice', intermediate: 'Intermediate', advanced: 'Advanced' };
   var GOALS = ['finish', 'improve', 'pr', 'aggressive'];
   var GOAL_LABEL = { finish: 'Finish', improve: 'Improve', pr: 'PR', aggressive: 'Aggressive PR' };
@@ -833,6 +837,10 @@
     if (!s.userName) s.userName = '';
     if (!s.units) s.units = 'mi';
     if (!s.unavailable) s.unavailable = []; // [{ start, end, reason }] -- illness/vacation mode
+    // docs/COACHING_SPEC.md "Recurring workouts" -- existing commitments the
+    // runner already does outside the app (e.g. a Tuesday spin class).
+    // [{ id, activityType, customName, day (0-6 or null), durationMinutes, intensity, fixed }]
+    if (!s.recurringWorkouts) s.recurringWorkouts = [];
     if (!s.raceGoal) s.raceGoal = null; // { event, raceDate, goal }
     if (!s.profile) s.profile = null;
     if (!s.planMeta) s.planMeta = null; // { level, weeksAvailable, planLengthWeeks, unsafe, warnings }
@@ -1588,7 +1596,7 @@
   // (tested in tests/plan-scenarios.test.js) so the whole plan generator is
   // testable in one place, not just its adaptation/scheduling helpers.
   function buildStructuredWeeks(profile, raceGoal, planMeta) {
-    return CoachingRulesDomain.buildStructuredWeeks(profile, raceGoal, planMeta, state.units);
+    return CoachingRulesDomain.buildStructuredWeeks(profile, raceGoal, planMeta, state.units, state.recurringWorkouts);
   }
 
   function findCurrentWeekIdx(raceDate, planLengthWeeks, today) { return CoachingRulesDomain.findCurrentWeekIdx(raceDate, planLengthWeeks, today); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
@@ -1601,7 +1609,7 @@
   // the pure pipeline function needs explicitly.
   var RPE_TARGET = CoachingRulesDomain.RPE_TARGET;
   function generateAll(profile, raceGoal, planMeta, logs, today) {
-    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units);
+    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts);
   }
 
   function el(html) {
@@ -1649,15 +1657,22 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName };
+    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate' };
     if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
+    if (!draft.recurringWorkouts) draft.recurringWorkouts = [];
     var step = 0;
-    var steps = ['event', 'race', 'fitness', 'logistics'];
+    // docs/COACHING_SPEC.md "Recurring workouts" -- the "Existing workouts"
+    // step only appears for a brand-new plan. Once a plan exists, Settings is
+    // the sole editor of state.recurringWorkouts (see finishWizard) -- adding
+    // it to the edit flow too would let changes made here get silently
+    // discarded by that same guard, which is worse than not showing it.
+    var steps = isEdit ? ['event', 'race', 'fitness', 'logistics'] : ['event', 'race', 'fitness', 'recurring', 'logistics'];
 
     function renderStep() {
       app.innerHTML = '';
       var body = '';
+      var stepLabel = 'Step ' + (step + 1) + ' of ' + steps.length;
       if (steps[step] === 'event') {
         // Launch scope is 5K/10K (docs/COACHING_SPEC.md "Launch scope") --
         // longer distances stay in the codebase but are hidden here unless
@@ -1669,13 +1684,13 @@
           : EVENTS.filter(function (e) { return e === '5k' || e === '10k' || e === draft.event; });
         body =
           '<div class="ob-title">New Training Plan</div>' +
-          '<div class="ob-sub">Step 1 of 4 · Event</div>' +
+          '<div class="ob-sub">' + stepLabel + ' · Event</div>' +
           '<div class="ob-label">What are you training for?</div>' +
           '<div class="chip-grid">' + chipsHtml('event', visibleEvents, EVENT_LABEL, draft.event, false) + '</div>';
       } else if (steps[step] === 'race') {
         body =
           '<div class="ob-title">Race details</div>' +
-          '<div class="ob-sub">Step 2 of 4 · ' + EVENT_LABEL[draft.event] + '</div>' +
+          '<div class="ob-sub">' + stepLabel + ' · ' + EVENT_LABEL[draft.event] + '</div>' +
           '<div class="ob-label">Race date</div>' +
           '<input class="ob-input" type="date" id="f_raceDate" value="' + escapeHtml(draft.raceDate) + '">' +
           '<div class="ob-label">When do you want to start training?</div>' +
@@ -1685,7 +1700,7 @@
       } else if (steps[step] === 'fitness') {
         body =
           '<div class="ob-title">Current fitness</div>' +
-          '<div class="ob-sub">Step 3 of 4 · Be honest — this sets your safe starting point</div>' +
+          '<div class="ob-sub">' + stepLabel + ' · Be honest — this sets your safe starting point</div>' +
           '<div class="ob-label">Current weekly distance (' + unitLabel() + ')</div>' +
           '<input class="ob-input" type="number" min="0" step="0.5" id="f_weeklyMileage" value="' + toUnit(draft.weeklyMileage) + '">' +
           '<div class="ob-label">Longest run in the last 4 weeks (' + unitLabel() + ')</div>' +
@@ -1700,10 +1715,39 @@
           '<div class="chip-grid">' + chipsHtml('recentRaceDistance', RACE_RESULT_DISTANCES, RACE_RESULT_LABEL, draft.recentRaceDistance || 'none', false) + '</div>' +
           '<input class="ob-input" type="text" id="f_recentRaceTime" placeholder="Finish time, e.g. 24:30 or 1:45:30" value="' + escapeHtml(draft.recentRaceTime || '') + '">' +
           '<p class="ob-hint">Used only to suggest an easy-pace range &mdash; skip it and the app sticks to effort/RPE guidance instead.</p>';
+      } else if (steps[step] === 'recurring') {
+        var hasRecurring = draft.hasRecurringWorkouts || draft.recurringWorkouts.length > 0;
+        var rwActivity = draft.rwDraftActivity || RECURRING_ACTIVITY_TYPES[0];
+        body =
+          '<div class="ob-title">Existing workouts</div>' +
+          '<div class="ob-sub">' + stepLabel + ' · Optional</div>' +
+          '<div class="ob-label">Do you already do other workouts regularly (spin class, yoga, strength, etc.)?</div>' +
+          '<div class="chip-grid">' + chipsHtml('hasRecurringWorkouts', ['no', 'yes'], { no: 'No', yes: 'Yes' }, hasRecurring ? 'yes' : 'no', false) + '</div>' +
+          (hasRecurring ? (
+            (draft.recurringWorkouts.length ?
+              '<div class="ob-label" style="margin-top:18px">Your workouts</div>' +
+              '<div class="recurring-list" id="recurringList">' + draft.recurringWorkouts.map(function (w, i) {
+                var name = (w.activityType === 'other' || w.activityType === 'sport') && w.customName ? w.customName : RECURRING_ACTIVITY_LABEL[w.activityType];
+                var dayLabel = w.day != null ? DOW_SHORT[w.day] : 'No fixed day';
+                return '<div class="recurring-row"><span>' + escapeHtml(name) + ' &middot; ' + w.durationMinutes + ' min &middot; ' + dayLabel + '</span><button type="button" class="recurring-remove" data-idx="' + i + '">Remove</button></div>';
+              }).join('') + '</div>'
+              : '<p class="recap-empty">No workouts added yet.</p>') +
+            '<div class="ob-label" style="margin-top:18px">Add a workout</div>' +
+            '<div class="chip-grid">' + chipsHtml('rw_activity', RECURRING_ACTIVITY_TYPES, RECURRING_ACTIVITY_LABEL, rwActivity, false) + '</div>' +
+            ((rwActivity === 'other' || rwActivity === 'sport') ?
+              '<input class="ob-input" type="text" id="f_rwCustomName" placeholder="Activity name" style="margin-top:8px" value="' + escapeHtml(draft.rwDraftCustomName || '') + '">' : '') +
+            '<div class="ob-label" style="margin-top:14px">Fixed day (optional)</div>' +
+            '<div class="chip-grid">' + chipsHtml('rw_day', ['none', '0', '1', '2', '3', '4', '5', '6'], DOW_CHIP_LABEL, draft.rwDraftDay != null ? String(draft.rwDraftDay) : 'none', false) + '</div>' +
+            '<input class="ob-input" type="number" min="5" step="5" id="f_rwDuration" placeholder="Duration (minutes)" style="margin-top:8px" value="' + (draft.rwDraftDuration || '') + '">' +
+            '<div class="ob-label" style="margin-top:14px">Usual intensity</div>' +
+            '<div class="chip-grid">' + chipsHtml('rw_intensity', ['low', 'moderate', 'high'], { low: 'Low', moderate: 'Moderate', high: 'High' }, draft.rwDraftIntensity, false) + '</div>' +
+            '<button class="ob-btn ob-btn-secondary" id="addRecurringBtn" style="margin-top:10px">Add workout</button>'
+          ) : '') +
+          '<p class="ob-hint">You can add, edit, or remove these any time later in Settings.</p>';
       } else if (steps[step] === 'logistics') {
         body =
           '<div class="ob-title">Logistics</div>' +
-          '<div class="ob-sub">Step 4 of 4</div>' +
+          '<div class="ob-sub">' + stepLabel + '</div>' +
           '<div class="ob-label">Days per week you can train</div>' +
           '<input class="ob-input" type="number" min="3" max="7" step="1" id="f_availableDays" value="' + draft.availableDays + '">' +
           '<div class="ob-label">Terrain</div>' +
@@ -1767,6 +1811,23 @@
             }
           } else if (group === 'canRunContinuously') {
             draft.canRunContinuously = value === 'yes';
+          } else if (group === 'hasRecurringWorkouts') {
+            // Gates whether the add-workout form shows at all -- a
+            // structural change, not just a chip's own selected state, so
+            // this needs a full re-render like Settings' add/remove flows do.
+            draft.hasRecurringWorkouts = value === 'yes';
+            renderStep();
+            return;
+          } else if (group === 'rw_activity') {
+            // Re-render too -- the customName field's visibility depends on
+            // which activity is picked (only shown for 'other'/'sport').
+            draft.rwDraftActivity = value;
+            renderStep();
+            return;
+          } else if (group === 'rw_day') {
+            draft.rwDraftDay = value === 'none' ? null : parseInt(value, 10);
+          } else if (group === 'rw_intensity') {
+            draft.rwDraftIntensity = value;
           } else {
             draft[group] = value;
           }
@@ -1774,9 +1835,38 @@
             var v = c.getAttribute('data-value');
             var sel = MULTI_GROUPS.hasOwnProperty(group) ? draft[group].indexOf(v) !== -1
               : group === 'canRunContinuously' ? (draft.canRunContinuously ? 'yes' : 'no') === v
+              : group === 'rw_day' ? (draft.rwDraftDay != null ? String(draft.rwDraftDay) : 'none') === v
               : draft[group] === v;
             c.classList.toggle('selected', sel);
           });
+        });
+      });
+
+      var addRecurringBtn = document.getElementById('addRecurringBtn');
+      if (addRecurringBtn) {
+        addRecurringBtn.addEventListener('click', function () {
+          var durInput = document.getElementById('f_rwDuration');
+          var duration = parseInt((durInput && durInput.value) || '0', 10);
+          if (!duration || duration <= 0) { if (durInput) durInput.focus(); return; }
+          var customNameInput = document.getElementById('f_rwCustomName');
+          draft.recurringWorkouts.push({
+            id: 'rw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+            activityType: draft.rwDraftActivity || RECURRING_ACTIVITY_TYPES[0],
+            customName: customNameInput ? customNameInput.value.trim() : '',
+            day: draft.rwDraftDay != null ? draft.rwDraftDay : null,
+            durationMinutes: duration,
+            intensity: draft.rwDraftIntensity || 'moderate',
+            fixed: draft.rwDraftDay != null
+          });
+          // Reset the mini-form for the next entry.
+          draft.rwDraftActivity = null; draft.rwDraftDay = null; draft.rwDraftIntensity = 'moderate'; draft.rwDraftCustomName = '';
+          renderStep();
+        });
+      }
+      wrap.querySelectorAll('.recurring-remove').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          draft.recurringWorkouts.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+          renderStep();
         });
       });
       var backBtn = document.getElementById('backBtn');
@@ -1881,9 +1971,22 @@
     if (profile.injuryStatus === 'medically_restricted') {
       safety.warnings = safety.warnings.concat(['This plan is scaled down for a cautious return, but a medically-restricted status is worth clearing with a doctor or physical therapist before you start training toward it.']);
     }
+    // docs/COACHING_SPEC.md "Recurring workouts" -- warn rather than
+    // silently overload when the runner's fixed commitments plus required
+    // running days can't fit in a week, reusing the exact planMeta.warnings
+    // mechanism evaluateSafety already populates.
+    var recurringForWarning = isEdit ? state.recurringWorkouts : draft.recurringWorkouts;
+    var targetRunDaysForWarning = CoachingRulesDomain.targetRunDaysFor(profile, raceGoal.event, level);
+    var scheduleCheck = CoachingRulesDomain.evaluateRecurringWorkoutSchedule(recurringForWarning, targetRunDaysForWarning, raceGoal.raceDate);
+    if (scheduleCheck.warnings.length) safety.warnings = safety.warnings.concat(scheduleCheck.warnings);
     state.userName = (draft.userName || '').trim();
     state.profile = profile;
     state.raceGoal = raceGoal;
+    // Settings is the sole editor of state.recurringWorkouts once a plan
+    // exists (see renderWizard's steps -- the "Existing workouts" step only
+    // appears for a brand-new plan) -- editing race/goal details through the
+    // wizard must never overwrite workouts added later in Settings.
+    if (!isEdit) state.recurringWorkouts = draft.recurringWorkouts || [];
     if (raceUnchanged) {
       state.planMeta = { level: level, weeksAvailable: state.planMeta.weeksAvailable, planLengthWeeks: state.planMeta.planLengthWeeks, unsafe: safety.unsafe, warnings: safety.warnings };
     } else {
@@ -3601,6 +3704,19 @@
         '<input class="ob-input" type="date" id="set_toEnd" style="margin-top:8px">' +
         '<div class="chip-grid" id="set_toReason" style="margin-top:8px">' + chipsHtml('toReason', ['illness', 'vacation'], { illness: 'Illness', vacation: 'Away' }, 'illness', false) + '</div>' +
         '<button class="ob-btn ob-btn-secondary" id="markUnavailableBtn" style="margin-top:8px">Mark unavailable</button>' +
+        '<div class="ob-label" style="margin-top:26px">Recurring workouts</div>' +
+        '<p class="recap-empty">Existing workouts you already do regularly (spin class, yoga, strength, etc.) &mdash; the plan places fixed ones on their day and avoids double-crediting strength/hard-day work you already get elsewhere.</p>' +
+        (state.recurringWorkouts.length ? '<div class="recurring-list" id="recurringWorkoutsList">' + state.recurringWorkouts.map(function (w, i) {
+          var name = (w.activityType === 'other' || w.activityType === 'sport') && w.customName ? w.customName : RECURRING_ACTIVITY_LABEL[w.activityType];
+          var dayLabel = w.day != null ? DOW_SHORT[w.day] : 'No fixed day';
+          return '<div class="recurring-row"><span>' + escapeHtml(name) + ' &middot; ' + w.durationMinutes + ' min &middot; ' + dayLabel + '</span><button type="button" class="recurring-workout-remove" data-idx="' + i + '">Remove</button></div>';
+        }).join('') + '</div>' : '<p class="recap-empty">No recurring workouts added.</p>') +
+        '<div class="chip-grid" id="set_rwActivity" style="margin-top:10px">' + chipsHtml('rwActivity', RECURRING_ACTIVITY_TYPES, RECURRING_ACTIVITY_LABEL, RECURRING_ACTIVITY_TYPES[0], false) + '</div>' +
+        '<input class="ob-input" type="text" id="set_rwCustomName" placeholder="Activity name (only used for Other / Recreational sport)" style="margin-top:8px">' +
+        '<div class="chip-grid" id="set_rwDay" style="margin-top:8px">' + chipsHtml('rwDay', ['none', '0', '1', '2', '3', '4', '5', '6'], DOW_CHIP_LABEL, 'none', false) + '</div>' +
+        '<input class="ob-input" type="number" min="5" step="5" id="set_rwDuration" placeholder="Duration (minutes)" style="margin-top:8px">' +
+        '<div class="chip-grid" id="set_rwIntensity" style="margin-top:8px">' + chipsHtml('rwIntensity', ['low', 'moderate', 'high'], { low: 'Low', moderate: 'Moderate', high: 'High' }, 'moderate', false) + '</div>' +
+        '<button class="ob-btn ob-btn-secondary" id="addRecurringWorkoutBtn" style="margin-top:8px">Add workout</button>' +
         '<div class="ob-label" style="margin-top:26px">Account &amp; sync</div>' +
         '<div id="accountSection">' + (CloudSync.isSignedIn ?
           '<p class="recap-empty">Signed in as ' + escapeHtml(CloudSync.userEmail || '') + '</p>' +
@@ -3711,6 +3827,44 @@
     wrap.querySelectorAll('.timeoff-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
         state.unavailable.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+        saveState(state);
+        renderSettings();
+      });
+    });
+
+    var rwActivity = RECURRING_ACTIVITY_TYPES[0], rwDay = 'none', rwIntensity = 'moderate';
+    function wireRwChipGroup(containerId, groupName, onChange) {
+      wrap.querySelectorAll('#' + containerId + ' .chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var value = chip.getAttribute('data-value');
+          onChange(value);
+          wrap.querySelectorAll('#' + containerId + ' .chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === value);
+          });
+        });
+      });
+    }
+    wireRwChipGroup('set_rwActivity', 'rwActivity', function (v) { rwActivity = v; });
+    wireRwChipGroup('set_rwDay', 'rwDay', function (v) { rwDay = v; });
+    wireRwChipGroup('set_rwIntensity', 'rwIntensity', function (v) { rwIntensity = v; });
+    document.getElementById('addRecurringWorkoutBtn').addEventListener('click', function () {
+      var duration = parseInt(document.getElementById('set_rwDuration').value || '0', 10);
+      if (!duration || duration <= 0) { document.getElementById('set_rwDuration').focus(); return; }
+      state.recurringWorkouts.push({
+        id: 'rw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        activityType: rwActivity,
+        customName: document.getElementById('set_rwCustomName').value.trim(),
+        day: rwDay === 'none' ? null : parseInt(rwDay, 10),
+        durationMinutes: duration,
+        intensity: rwIntensity,
+        fixed: rwDay !== 'none'
+      });
+      saveState(state);
+      renderSettings();
+    });
+    wrap.querySelectorAll('.recurring-workout-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.recurringWorkouts.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
         saveState(state);
         renderSettings();
       });
