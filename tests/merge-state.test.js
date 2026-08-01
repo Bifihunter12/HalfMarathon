@@ -13,7 +13,8 @@ function baseState(overrides) {
     badges: [], xp: 0, xpEvents: [], xpProfile: null,
     raceGoal: null, profile: null, planMeta: null,
     logs: {}, overrides: {}, crossType: {},
-    unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: []
+    unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: [],
+    weightTrackingEnabled: false, weightUnits: 'lb', weightEntries: []
   }, overrides || {});
 }
 
@@ -146,4 +147,37 @@ test('lastModified in the merged result is always the max of both sides', functi
   const remote = baseState({ lastModified: 5000 });
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.lastModified, 5000);
+});
+
+test('weigh-ins logged on different devices on different dates both survive the merge (union by date)', function () {
+  const local = baseState({ lastModified: 2000, weightEntries: [{ dateIso: '2026-07-20', weightLb: 160 }] });
+  const remote = baseState({ lastModified: 1000, weightEntries: [{ dateIso: '2026-07-15', weightLb: 162 }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.weightEntries.length, 2);
+  assert.ok(merged.weightEntries.some((w) => w.dateIso === '2026-07-15'), 'the older/remote-only entry must not be dropped');
+});
+
+test('two weigh-ins on the same date (a correction) resolve to one entry, the newer device\'s value -- not a duplicate for that day', function () {
+  const local = baseState({ lastModified: 2000, weightEntries: [{ dateIso: '2026-07-20', weightLb: 159 }] });
+  const remote = baseState({ lastModified: 1000, weightEntries: [{ dateIso: '2026-07-20', weightLb: 161 }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.weightEntries.length, 1, 'same-date entries must not create a duplicate');
+  assert.equal(merged.weightEntries[0].weightLb, 159, 'the newer device\'s correction wins');
+});
+
+test('weightTrackingEnabled/weightUnits prefer the newer device wholesale, same pattern as flags/units', function () {
+  const local = baseState({ lastModified: 2000, weightTrackingEnabled: true, weightUnits: 'kg' });
+  const remote = baseState({ lastModified: 1000, weightTrackingEnabled: false, weightUnits: 'lb' });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.weightTrackingEnabled, true);
+  assert.equal(merged.weightUnits, 'kg');
+});
+
+test('legacy states missing weight fields entirely still merge to safe defaults', function () {
+  const local = { lastModified: 2000, units: 'km' };
+  const remote = { lastModified: 1000, units: 'km' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.weightTrackingEnabled, false);
+  assert.equal(merged.weightUnits, 'kg', 'falls back to a units-consistent default, not undefined');
+  assert.deepEqual(merged.weightEntries, []);
 });

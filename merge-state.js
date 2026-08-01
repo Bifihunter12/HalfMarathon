@@ -64,6 +64,19 @@
     }
     var recurringWorkoutsMap = mergeMap(toIdMap(local.recurringWorkouts), toIdMap(remote.recurringWorkouts));
 
+    // docs/PROGRESS_SPEC.md "Weight tracking" -- same real-edit-in-place
+    // reasoning as recurringWorkouts/runningFeelingLog above, keyed by
+    // `dateIso` instead of `id`/`weekStartIso`: a weigh-in is upserted by
+    // date (adding again for the same date is how a runner "corrects" an
+    // entry), so the merge must let the newer device's edit win outright
+    // rather than union both into two entries for the same day.
+    function toDateMap(arr) {
+      var out = {};
+      (arr || []).forEach(function (e) { out[e.dateIso] = e; });
+      return out;
+    }
+    var weightEntriesMap = mergeMap(toDateMap(local.weightEntries), toDateMap(remote.weightEntries));
+
     // Same union-by-natural-key treatment as unavailable/sideQuestLog above --
     // these are append-only records too, never overwritten in place.
     var completedTracksMap = {};
@@ -100,6 +113,8 @@
       units: prefer.units,
       notifications: prefer.notifications || { enabled: false },
       flags: prefer.flags || { enableLongerDistances: false, quietGamification: false },
+      weightTrackingEnabled: prefer.weightTrackingEnabled || false,
+      weightUnits: prefer.weightUnits || (prefer.units === 'km' ? 'kg' : 'lb'),
       activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
       activeWeeklyChallenge: prefer.activeWeeklyChallenge !== undefined ? prefer.activeWeeklyChallenge : null,
       sideQuestOnboarding: prefer.sideQuestOnboarding !== undefined ? prefer.sideQuestOnboarding : null,
@@ -125,6 +140,7 @@
       sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
       runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),
       recurringWorkouts: Object.keys(recurringWorkoutsMap).map(function (k) { return recurringWorkoutsMap[k]; }),
+      weightEntries: Object.keys(weightEntriesMap).map(function (k) { return weightEntriesMap[k]; }),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };
   }

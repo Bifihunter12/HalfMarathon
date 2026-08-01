@@ -7,6 +7,7 @@
   var XpDomain = window.RACRXp || {};
   var MergeStateDomain = window.RACRMergeState || {};
   var CoachingRulesDomain = window.RACRCoachingRules || {};
+  var ProgressStatsDomain = window.RACRProgressStats || {};
 
   // ── Minimal self-hosted crash/event logging (docs/RELEASE_BLOCKERS.md
   // CRITICAL-2 + CRITICAL-3) -- fire-and-forget POSTs to a Netlify function
@@ -867,6 +868,13 @@
     // quietGamification defaults off (unchanged current behavior) since no
     // one has yet evaluated the quiet variant.
     if (!s.flags) s.flags = { enableLongerDistances: false, quietGamification: false };
+    // docs/PROGRESS_SPEC.md "Weight tracking" -- fully optional, off by
+    // default. Canonical storage is always lb (mirrors miles-as-canonical
+    // for distance) -- weightUnits only affects display/entry, converted at
+    // the boundary via progress-stats.js's toWeightUnit/fromWeightUnit.
+    if (s.weightTrackingEnabled === undefined) s.weightTrackingEnabled = false;
+    if (!s.weightEntries) s.weightEntries = []; // [{ dateIso, weightLb }], one entry per date (adding again for the same date replaces it)
+    if (!s.weightUnits) s.weightUnits = s.units === 'km' ? 'kg' : 'lb';
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
@@ -1657,7 +1665,8 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate' };
+    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate' };
+    if (draft.raceName === undefined) draft.raceName = ''; // editing a plan created before this field existed
     if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
     if (!draft.recurringWorkouts) draft.recurringWorkouts = [];
@@ -1691,6 +1700,8 @@
         body =
           '<div class="ob-title">Race details</div>' +
           '<div class="ob-sub">' + stepLabel + ' · ' + EVENT_LABEL[draft.event] + '</div>' +
+          '<div class="ob-label">Race name (optional)</div>' +
+          '<input class="ob-input" type="text" id="f_raceName" placeholder="e.g. Santa Fe Half Marathon" value="' + escapeHtml(draft.raceName || '') + '">' +
           '<div class="ob-label">Race date</div>' +
           '<input class="ob-input" type="date" id="f_raceDate" value="' + escapeHtml(draft.raceDate) + '">' +
           '<div class="ob-label">When do you want to start training?</div>' +
@@ -1730,7 +1741,10 @@
                 var name = (w.activityType === 'other' || w.activityType === 'sport') && w.customName ? w.customName : RECURRING_ACTIVITY_LABEL[w.activityType];
                 var dayLabel = w.day != null ? DOW_SHORT[w.day] : 'No fixed day';
                 return '<div class="recurring-row"><span>' + escapeHtml(name) + ' &middot; ' + w.durationMinutes + ' min &middot; ' + dayLabel + '</span><button type="button" class="recurring-remove" data-idx="' + i + '">Remove</button></div>';
-              }).join('') + '</div>'
+              }).join('') + '</div>' +
+              (draft.raceDate ? CoachingRulesDomain.generateRecurringWorkoutNotes(draft.recurringWorkouts, draft.raceDate).map(function (note) {
+                return '<p class="recap-empty" style="font-style:normal">' + escapeHtml(note) + '</p>';
+              }).join('') : '')
               : '<p class="recap-empty">No workouts added yet.</p>') +
             '<div class="ob-label" style="margin-top:18px">Add a workout</div>' +
             '<div class="chip-grid">' + chipsHtml('rw_activity', RECURRING_ACTIVITY_TYPES, RECURRING_ACTIVITY_LABEL, rwActivity, false) + '</div>' +
@@ -1771,6 +1785,8 @@
       if (cancelBtn) cancelBtn.addEventListener('click', renderMain);
 
       function syncFieldsToDraft() {
+        var raceNameInput = document.getElementById('f_raceName');
+        if (raceNameInput) draft.raceName = raceNameInput.value;
         var dateInput = document.getElementById('f_raceDate');
         if (dateInput) draft.raceDate = dateInput.value;
         var startInput = document.getElementById('f_startDate');
@@ -1959,7 +1975,7 @@
       recentRaceDistance: raceResultValid ? draft.recentRaceDistance : null,
       recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : ''
     };
-    var raceGoal = { event: draft.event, raceDate: draft.raceDate, startDate: draft.startDate, goal: draft.goal };
+    var raceGoal = { event: draft.event, raceName: (draft.raceName || '').trim(), raceDate: draft.raceDate, startDate: draft.startDate, goal: draft.goal };
     var raceUnchanged = isEdit && state.raceGoal && state.raceGoal.event === raceGoal.event
       && state.raceGoal.raceDate === raceGoal.raceDate && state.raceGoal.startDate === raceGoal.startDate;
     var level = classifyUser(profile);
@@ -2020,7 +2036,7 @@
   function wireHeaderIcons() {
     document.getElementById('editPlanBtn').addEventListener('click', function () {
       renderWizard({
-        event: state.raceGoal.event, raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
+        event: state.raceGoal.event, raceName: state.raceGoal.raceName || '', raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
         experienceLevel: state.profile.experienceLevel, injuryStatus: state.profile.injuryStatus, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
         terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
@@ -2615,6 +2631,55 @@
     var remaining = daysBetween(today, raceDate);
     var countdownText = remaining > 0 ? remaining + ' DAYS TO RACE' : (remaining === 0 ? 'RACE DAY' : 'RACE COMPLETE');
 
+    // docs/PROGRESS_SPEC.md "Main Dashboard" -- one compact weekly-progress
+    // stat, one small chart, one insight. Same day-record shape and same
+    // computeProgressInsight priority order as renderProgressPanel's fuller
+    // version (Progress screen), just without the monthly-detail stat line
+    // that belongs to the deeper screen, per the spec's own density rule.
+    var weeklyRecords = weeks.map(function (wk) {
+      return {
+        weekNum: wk.weekNum,
+        days: wk.days.map(function (day, di) {
+          var key = wk.weekNum + '-' + di;
+          var entry = getLog(key);
+          return { type: day.type, plannedMiles: day.miles || 0, loggedMiles: (entry && entry.distance) ? entry.distance : null };
+        })
+      };
+    });
+    var dashThisWeekStats = ProgressStatsDomain.computeThisWeekStats(weeklyRecords[currentWeek - 1] ? weeklyRecords[currentWeek - 1].days : []);
+    var dashMileageSeries = ProgressStatsDomain.computeWeeklyMileageSeries(weeklyRecords, currentWeek, 8);
+    var dashAllDayRecords = [];
+    weeks.forEach(function (wk) {
+      wk.days.forEach(function (day, di) {
+        var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+        if (d > today) return;
+        var key = wk.weekNum + '-' + di;
+        var entry = getLog(key);
+        dashAllDayRecords.push({ dateIso: dateToISO(d), type: day.type, loggedMiles: (entry && entry.distance) ? entry.distance : null });
+      });
+    });
+    var dashMonthlyTotals = ProgressStatsDomain.computeMonthlyTotals(dashAllDayRecords);
+    var dashCurrentMonthKey = dateToISO(today).slice(0, 7);
+    var dashLongestRun = 0, dashPreviousLongestRun = 0;
+    var dashCurrentWeekStart = dateToISO(dateForSlot(raceDate, planLengthWeeks, currentWeek, 0));
+    dashAllDayRecords.forEach(function (r) {
+      if (!ProgressStatsDomain.isRunType(r.type) || r.loggedMiles == null) return;
+      if (r.loggedMiles > dashLongestRun) dashLongestRun = r.loggedMiles;
+      if (r.dateIso < dashCurrentWeekStart && r.loggedMiles > dashPreviousLongestRun) dashPreviousLongestRun = r.loggedMiles;
+    });
+    var dashInsight = ProgressStatsDomain.computeProgressInsight({
+      longestRunMiles: dashLongestRun ? round1(toUnit(dashLongestRun)) : null,
+      previousLongestRunMiles: dashPreviousLongestRun ? round1(toUnit(dashPreviousLongestRun)) : null,
+      thisWeek: {
+        plannedMiles: round1(toUnit(dashThisWeekStats.plannedMiles)),
+        completedMiles: round1(toUnit(dashThisWeekStats.completedMiles)),
+        runsCompleted: dashThisWeekStats.runsCompleted
+      },
+      monthlyTotals: dashMonthlyTotals.map(function (m) { return { monthKey: m.monthKey, totalMiles: round1(toUnit(m.totalMiles)) }; }),
+      currentMonthKey: dashCurrentMonthKey,
+      unitLabel: unitLabel()
+    });
+
     var warningsHtml = '';
     // Was gated on state.planMeta.unsafe -- correct while this array only
     // ever held the timeline-safety warning, but the medically_restricted
@@ -2628,13 +2693,28 @@
       warningsHtml += '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>' + escapeHtml(result.note) + '</span></div>';
     }
 
+    // Race identity (docs/PROGRESS_SPEC.md "Race identity") -- when the
+    // runner has named their race, it becomes the headline (the emotionally
+    // present part of the spec's "Santa Fe Half Marathon / 43 days away"
+    // example); the generic "X's Event Training" line demotes into the
+    // subtitle alongside level/goal instead of disappearing. Legacy plans
+    // and anyone who skipped the optional name keep today's exact text --
+    // no empty state to design around, just the untouched original line.
+    var hasRaceName = !!(state.raceGoal.raceName && state.raceGoal.raceName.trim());
+    var hdTitleText = hasRaceName
+      ? escapeHtml(state.raceGoal.raceName.trim())
+      : (state.userName ? escapeHtml(state.userName) + '&rsquo;s ' : '') + EVENT_LABEL[state.raceGoal.event] + ' Training';
+    var hdSubText = hasRaceName
+      ? EVENT_LABEL[state.raceGoal.event] + ' · ' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal]
+      : LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal];
+
     var header = el(
       '<div>' +
         '<div class="hd">' +
           '<div>' +
             '<div class="brand-mark">Runner</div>' +
-            '<div class="hd-title">' + (state.userName ? escapeHtml(state.userName) + '&rsquo;s ' : '') + EVENT_LABEL[state.raceGoal.event] + ' Training</div>' +
-            '<div class="hd-sub">' + LEVEL_LABEL[state.planMeta.level] + ' · ' + GOAL_LABEL[state.raceGoal.goal] + '</div>' +
+            '<div class="hd-title">' + hdTitleText + '</div>' +
+            '<div class="hd-sub">' + hdSubText + '</div>' +
           '</div>' +
           headerIconsHtml(null) +
         '</div>' +
@@ -2704,6 +2784,22 @@
       }
       document.getElementById('aiCoachOpenBtn').addEventListener('click', renderCoachChat);
     }
+
+    // docs/PROGRESS_SPEC.md "Main Dashboard" -- one primary number (this
+    // week's distance), one primary chart (mileage), one insight. Placed
+    // after today's workout so it never competes with "what should I do
+    // today," matching the spec's own recommended hierarchy.
+    var progressCard = el(
+      '<div class="today-card">' +
+        '<div class="today-eyebrow">THIS WEEK</div>' +
+        '<div class="progress-mini-stat">' + round1(toUnit(dashThisWeekStats.completedMiles)) + ' of ' + round1(toUnit(dashThisWeekStats.plannedMiles)) + ' ' + unitLabel() + '</div>' +
+        (dashInsight ? '<p class="progress-insight">' + escapeHtml(dashInsight.text) + '</p>' : '') +
+        buildMileageChartHtml(dashMileageSeries) +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="dashProgressBtn" style="margin-top:10px">View progress</button>' +
+      '</div>'
+    );
+    app.appendChild(progressCard);
+    document.getElementById('dashProgressBtn').addEventListener('click', renderProgressPanel);
 
     var list = el('<div id="weekList"></div>');
     app.appendChild(list);
@@ -3694,6 +3790,8 @@
         '<div class="ob-title">Settings</div>' +
         '<div class="ob-label">Your name</div>' +
         '<input class="ob-input" type="text" id="set_name" value="' + escapeHtml(state.userName || '') + '">' +
+        (state.raceGoal ? '<div class="ob-label">Race name (optional)</div>' +
+          '<input class="ob-input" type="text" id="set_raceName" placeholder="e.g. Santa Fe Half Marathon" value="' + escapeHtml(state.raceGoal.raceName || '') + '">' : '') +
         '<div class="ob-label">Units</div>' +
         '<div class="chip-grid" id="set_units">' + chipsHtml('units', ['mi', 'km'], { mi: 'Miles', km: 'Kilometers' }, state.units, false) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Time off</div>' +
@@ -3711,12 +3809,31 @@
           var dayLabel = w.day != null ? DOW_SHORT[w.day] : 'No fixed day';
           return '<div class="recurring-row"><span>' + escapeHtml(name) + ' &middot; ' + w.durationMinutes + ' min &middot; ' + dayLabel + '</span><button type="button" class="recurring-workout-remove" data-idx="' + i + '">Remove</button></div>';
         }).join('') + '</div>' : '<p class="recap-empty">No recurring workouts added.</p>') +
+        // docs/COACHING_SPEC.md "Plan explanations" -- short, positive notes
+        // on how each workout affects the plan, shown right next to the
+        // list they describe rather than buried in the calendar.
+        (state.recurringWorkouts.length ? CoachingRulesDomain.generateRecurringWorkoutNotes(state.recurringWorkouts, state.raceGoal.raceDate).map(function (note) {
+          return '<p class="recap-empty" style="font-style:normal">' + escapeHtml(note) + '</p>';
+        }).join('') : '') +
         '<div class="chip-grid" id="set_rwActivity" style="margin-top:10px">' + chipsHtml('rwActivity', RECURRING_ACTIVITY_TYPES, RECURRING_ACTIVITY_LABEL, RECURRING_ACTIVITY_TYPES[0], false) + '</div>' +
         '<input class="ob-input" type="text" id="set_rwCustomName" placeholder="Activity name (only used for Other / Recreational sport)" style="margin-top:8px">' +
         '<div class="chip-grid" id="set_rwDay" style="margin-top:8px">' + chipsHtml('rwDay', ['none', '0', '1', '2', '3', '4', '5', '6'], DOW_CHIP_LABEL, 'none', false) + '</div>' +
         '<input class="ob-input" type="number" min="5" step="5" id="set_rwDuration" placeholder="Duration (minutes)" style="margin-top:8px">' +
         '<div class="chip-grid" id="set_rwIntensity" style="margin-top:8px">' + chipsHtml('rwIntensity', ['low', 'moderate', 'high'], { low: 'Low', moderate: 'Moderate', high: 'High' }, 'moderate', false) + '</div>' +
         '<button class="ob-btn ob-btn-secondary" id="addRecurringWorkoutBtn" style="margin-top:8px">Add workout</button>' +
+        '<div class="ob-label" style="margin-top:26px">Weight tracking (optional)</div>' +
+        '<p class="recap-empty">Fully optional and private &mdash; enable it to log occasional weigh-ins and see a trend on the Progress screen. Off by default, and nothing is shown here or on the dashboard unless you turn it on.</p>' +
+        '<div class="chip-grid" id="set_weightEnabled">' + chipsHtml('weightEnabled', ['off', 'on'], { off: 'Off', on: 'On' }, state.weightTrackingEnabled ? 'on' : 'off', false) + '</div>' +
+        (state.weightTrackingEnabled ?
+          '<div class="chip-grid" id="set_weightUnits" style="margin-top:10px">' + chipsHtml('weightUnits', ['lb', 'kg'], { lb: 'lb', kg: 'kg' }, state.weightUnits, false) + '</div>' +
+          (state.weightEntries.length ? '<div class="weight-list" id="weightEntriesList">' + state.weightEntries.slice().sort(function (a, b) { return a.dateIso < b.dateIso ? 1 : a.dateIso > b.dateIso ? -1 : 0; }).map(function (e) {
+            return '<div class="weight-row"><span>' + escapeHtml(e.dateIso) + ' &middot; ' + ProgressStatsDomain.toWeightUnit(e.weightLb, state.weightUnits) + ' ' + ProgressStatsDomain.weightUnitLabel(state.weightUnits) + '</span><button type="button" class="weight-remove" data-date="' + escapeHtml(e.dateIso) + '">Remove</button></div>';
+          }).join('') + '</div>' : '<p class="recap-empty">No weigh-ins logged yet.</p>') +
+          '<input class="ob-input" type="date" id="set_weightDate" style="margin-top:10px" value="' + escapeHtml(dateToISO(new Date())) + '">' +
+          '<input class="ob-input" type="number" min="0" step="0.1" id="set_weightValue" placeholder="Weight (' + ProgressStatsDomain.weightUnitLabel(state.weightUnits) + ')" style="margin-top:8px">' +
+          '<button class="ob-btn ob-btn-secondary" id="addWeightEntryBtn" style="margin-top:8px">Log weigh-in</button>' +
+          (state.weightEntries.length >= 2 ? '<p class="recap-empty" style="margin-top:8px">' + weightTrendText(state.weightEntries) + '</p>' : '')
+          : '') +
         '<div class="ob-label" style="margin-top:26px">Account &amp; sync</div>' +
         '<div id="accountSection">' + (CloudSync.isSignedIn ?
           '<p class="recap-empty">Signed in as ' + escapeHtml(CloudSync.userEmail || '') + '</p>' +
@@ -3776,6 +3893,19 @@
       state.userName = e.target.value.trim();
       saveState(state);
     });
+
+    // Race name is edited directly here, not through the wizard's goal-change
+    // confirmation flow -- it's cosmetic, not a timeline/safety-affecting
+    // change, so it shouldn't require re-running onboarding or risk the
+    // wizard's "logs will be cleared" warning (which only fires for real
+    // event/date changes, see finishWizard's raceUnchanged check).
+    var raceNameInput = document.getElementById('set_raceName');
+    if (raceNameInput) {
+      raceNameInput.addEventListener('change', function (e) {
+        state.raceGoal.raceName = e.target.value.trim();
+        saveState(state);
+      });
+    }
 
     wrap.querySelectorAll('#set_units .chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
@@ -3865,6 +3995,47 @@
     wrap.querySelectorAll('.recurring-workout-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
         state.recurringWorkouts.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+        saveState(state);
+        renderSettings();
+      });
+    });
+
+    wrap.querySelectorAll('#set_weightEnabled .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.weightTrackingEnabled = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        renderSettings(); // full re-render -- toggling this shows/hides the rest of the section
+      });
+    });
+    var weightUnitsGroup = document.getElementById('set_weightUnits');
+    if (weightUnitsGroup) {
+      weightUnitsGroup.querySelectorAll('.chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          state.weightUnits = chip.getAttribute('data-value');
+          saveState(state);
+          renderSettings(); // re-render so already-logged entries redisplay in the new unit
+        });
+      });
+    }
+    var addWeightEntryBtn = document.getElementById('addWeightEntryBtn');
+    if (addWeightEntryBtn) {
+      addWeightEntryBtn.addEventListener('click', function () {
+        var dateVal = document.getElementById('set_weightDate').value;
+        var enteredVal = parseFloat(document.getElementById('set_weightValue').value);
+        if (!dateVal || !enteredVal || enteredVal <= 0) { window.alert('Enter a valid date and weight.'); return; }
+        // Upsert by date -- adding again for a date that already has an entry
+        // replaces it (this is how a runner "corrects" a weigh-in), and it
+        // also prevents two entries existing for the same day.
+        var lb = ProgressStatsDomain.fromWeightUnit(enteredVal, state.weightUnits);
+        state.weightEntries = state.weightEntries.filter(function (e) { return e.dateIso !== dateVal; }).concat([{ dateIso: dateVal, weightLb: lb }]);
+        saveState(state);
+        renderSettings();
+      });
+    }
+    wrap.querySelectorAll('.weight-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var d = btn.getAttribute('data-date');
+        state.weightEntries = state.weightEntries.filter(function (e) { return e.dateIso !== d; });
         saveState(state);
         renderSettings();
       });
@@ -4006,6 +4177,91 @@
     document.getElementById('settingsBackBtn').addEventListener('click', renderMain);
   }
 
+  // docs/PROGRESS_SPEC.md "Required Visualization" -- a restrained, hand-rolled
+  // SVG bar chart (no charting library, matching this project's zero-dependency
+  // convention). Uses only existing design tokens (--surface-2/--border-active
+  // for the planned bar, --accent for completed) so it never invents a new
+  // color. `series` is progress-stats.js's computeWeeklyMileageSeries output
+  // (raw miles) -- converted to the display unit here, at the render boundary,
+  // same as every other distance value in this file.
+  function buildMileageChartHtml(series) {
+    if (!series || series.length < 2) return '<p class="recap-empty">Not enough weeks logged yet to chart.</p>';
+    var rows = series.map(function (w) {
+      return { weekNum: w.weekNum, planned: toUnit(w.plannedMiles), completed: toUnit(w.completedMiles), isCurrent: w.isCurrent };
+    });
+    var maxVal = Math.max(1, Math.max.apply(null, rows.map(function (r) { return Math.max(r.planned, r.completed); })));
+    var chartW = 320, chartH = 110, padTop = 6, padBottom = 18;
+    var barAreaH = chartH - padTop - padBottom;
+    var slotW = chartW / rows.length;
+    var barW = Math.max(10, Math.min(28, slotW * 0.55));
+    var bars = rows.map(function (r, i) {
+      var x = i * slotW + (slotW - barW) / 2;
+      var plannedH = (r.planned / maxVal) * barAreaH;
+      var completedH = (r.completed / maxVal) * barAreaH;
+      return (
+        '<rect x="' + round1(x) + '" y="' + round1(padTop + barAreaH - plannedH) + '" width="' + round1(barW) + '" height="' + round1(plannedH) + '" rx="2" fill="var(--surface-2)" stroke="var(--border-active)" stroke-width="1"></rect>' +
+        (completedH > 0 ? '<rect x="' + round1(x) + '" y="' + round1(padTop + barAreaH - completedH) + '" width="' + round1(barW) + '" height="' + round1(completedH) + '" rx="2" fill="var(--accent)"></rect>' : '') +
+        '<text x="' + round1(x + barW / 2) + '" y="' + (chartH - 4) + '" font-size="9" fill="var(--text-faint)" text-anchor="middle">' + (r.isCurrent ? 'Now' : r.weekNum) + '</text>'
+      );
+    }).join('');
+    var latest = rows[rows.length - 1];
+    var caption = 'Week ' + latest.weekNum + ': ' + round1(latest.completed) + ' of ' + round1(latest.planned) + ' ' + unitLabel() + ' completed.';
+    var srSummary = rows.map(function (r) { return 'Week ' + r.weekNum + ': ' + round1(r.completed) + ' of ' + round1(r.planned) + ' ' + unitLabel() + ' completed'; }).join(', ');
+    return (
+      '<div class="mileage-chart">' +
+        '<svg viewBox="0 0 ' + chartW + ' ' + chartH + '" role="img" aria-label="Weekly mileage chart, planned versus completed">' + bars + '</svg>' +
+        '<p class="chart-caption">' + escapeHtml(caption) + '</p>' +
+        '<p class="sr-only">' + escapeHtml(srSummary) + '.</p>' +
+      '</div>'
+    );
+  }
+
+  // docs/PROGRESS_SPEC.md "Weight Tracking" -- a compact line/dot chart, same
+  // zero-dependency SVG approach as the mileage chart. The y-domain is padded
+  // well beyond the real data range specifically so ordinary day-to-day
+  // fluctuation isn't rendered as a dramatic swing -- a flat minimum padding
+  // even when the actual range is tiny, plus a proportional pad otherwise.
+  function buildWeightChartHtml(entries, weightUnits) {
+    var sorted = entries.slice().sort(function (a, b) { return a.dateIso < b.dateIso ? -1 : a.dateIso > b.dateIso ? 1 : 0; });
+    var vals = sorted.map(function (e) { return ProgressStatsDomain.toWeightUnit(e.weightLb, weightUnits); });
+    var minV = Math.min.apply(null, vals), maxV = Math.max.apply(null, vals);
+    var span = Math.max(maxV - minV, 0.001);
+    var pad = Math.max(span * 0.4, 3);
+    var domainMin = minV - pad, domainMax = maxV + pad;
+    var chartW = 320, chartH = 100, padX = 8;
+    var usableW = chartW - padX * 2;
+    var points = sorted.map(function (e, i) {
+      var x = padX + (sorted.length > 1 ? (i / (sorted.length - 1)) * usableW : usableW / 2);
+      var v = ProgressStatsDomain.toWeightUnit(e.weightLb, weightUnits);
+      var y = chartH - ((v - domainMin) / (domainMax - domainMin)) * chartH;
+      return { x: x, y: y, v: v, dateIso: e.dateIso };
+    });
+    var pathD = points.map(function (p, i) { return (i === 0 ? 'M' : 'L') + round1(p.x) + ' ' + round1(p.y); }).join(' ');
+    var dots = points.map(function (p) { return '<circle cx="' + round1(p.x) + '" cy="' + round1(p.y) + '" r="2.5" fill="var(--accent)"></circle>'; }).join('');
+    var unitLbl = ProgressStatsDomain.weightUnitLabel(weightUnits);
+    var srSummary = points.map(function (p) { return p.dateIso + ': ' + round1(p.v) + ' ' + unitLbl; }).join(', ');
+    return (
+      '<div class="mileage-chart">' +
+        '<svg viewBox="0 0 ' + chartW + ' ' + chartH + '" role="img" aria-label="Weight over time chart">' +
+          '<path d="' + pathD + '" fill="none" stroke="var(--accent)" stroke-width="2"></path>' + dots +
+        '</svg>' +
+        '<p class="sr-only">' + escapeHtml(srSummary) + '.</p>' +
+      '</div>'
+    );
+  }
+
+  // docs/PROGRESS_SPEC.md "Weight Tracking" -- deliberately neutral, never
+  // judgmental language, matching the spec's own examples verbatim ("Your
+  // recent trend is stable") -- no "gained weight"/"failed goal" phrasing,
+  // no health inference, just a description of the recent direction.
+  function weightTrendText(entries) {
+    var trend = ProgressStatsDomain.computeWeightTrend(entries);
+    if (trend.status === 'up') return 'Your recent trend is trending up.';
+    if (trend.status === 'down') return 'Your recent trend is trending down.';
+    if (trend.status === 'stable') return 'Your recent trend is stable.';
+    return 'Log a few more weigh-ins to see a trend.';
+  }
+
   function renderProgressPanel() {
     var app = document.getElementById('app');
     app.innerHTML = '';
@@ -4066,6 +4322,64 @@
     var pathCompleted = pathModel ? pathModel.nodes.filter(function (n) { return n.status === 'completed'; }).length : 0;
     var pathTotal = pathModel ? pathModel.nodes.length : 0;
     var badgesEarned = state.badges ? state.badges.length : 0;
+
+    // docs/PROGRESS_SPEC.md "Running Progress" -- flat day records for
+    // progress-stats.js's weekly/monthly/run-count math. Deliberately a
+    // SEPARATE pass from the totalDistance/longestRun loop above, which
+    // intentionally keeps its original "any non-rest day" definition --
+    // this is a new, stricter "real running only" definition (day.type in
+    // easy/long/quality/race). See docs/PROGRESS_SPEC.md for why the two
+    // coexist rather than one silently replacing the other.
+    var weeklyRecords = weeks.map(function (wk) {
+      return {
+        weekNum: wk.weekNum,
+        days: wk.days.map(function (day, di) {
+          var key = wk.weekNum + '-' + di;
+          var entry = getLog(key);
+          return { type: day.type, plannedMiles: day.miles || 0, loggedMiles: (entry && entry.distance) ? entry.distance : null };
+        })
+      };
+    });
+    var allDayRecords = [];
+    weeks.forEach(function (wk) {
+      wk.days.forEach(function (day, di) {
+        var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+        if (d > today) return;
+        var key = wk.weekNum + '-' + di;
+        var entry = getLog(key);
+        allDayRecords.push({ dateIso: dateToISO(d), type: day.type, loggedMiles: (entry && entry.distance) ? entry.distance : null });
+      });
+    });
+    var thisWeekStats = ProgressStatsDomain.computeThisWeekStats(weeklyRecords[currentWeekIdx - 1] ? weeklyRecords[currentWeekIdx - 1].days : []);
+    var monthlyTotals = ProgressStatsDomain.computeMonthlyTotals(allDayRecords);
+    var currentMonthKey = dateToISO(today).slice(0, 7);
+    var thisMonthEntry = monthlyTotals.filter(function (m) { return m.monthKey === currentMonthKey; })[0];
+    var thisMonthMiles = thisMonthEntry ? thisMonthEntry.totalMiles : 0;
+    var mileageSeries = ProgressStatsDomain.computeWeeklyMileageSeries(weeklyRecords, currentWeekIdx, 8);
+
+    // "Previous longest run" for the insight's new-PR check -- the lifetime
+    // max BEFORE this week started, compared against `longestRun` (the
+    // lifetime max including this week, computed above). If they differ, a
+    // new longest run happened specifically this week. Derived fresh each
+    // render, no separate history needs to be persisted for this.
+    var currentWeekStart = dateToISO(dateForSlot(raceDate, planLengthWeeks, currentWeekIdx, 0));
+    var previousLongestRun = 0;
+    allDayRecords.forEach(function (r) {
+      if (r.dateIso >= currentWeekStart) return;
+      if (ProgressStatsDomain.isRunType(r.type) && r.loggedMiles != null && r.loggedMiles > previousLongestRun) previousLongestRun = r.loggedMiles;
+    });
+    var progressInsight = ProgressStatsDomain.computeProgressInsight({
+      longestRunMiles: longestRun ? round1(toUnit(longestRun)) : null,
+      previousLongestRunMiles: previousLongestRun ? round1(toUnit(previousLongestRun)) : null,
+      thisWeek: {
+        plannedMiles: round1(toUnit(thisWeekStats.plannedMiles)),
+        completedMiles: round1(toUnit(thisWeekStats.completedMiles)),
+        runsCompleted: thisWeekStats.runsCompleted
+      },
+      monthlyTotals: monthlyTotals.map(function (m) { return { monthKey: m.monthKey, totalMiles: round1(toUnit(m.totalMiles)) }; }),
+      currentMonthKey: currentMonthKey,
+      unitLabel: unitLabel()
+    });
 
     var lastWeek = currentWeekIdx >= 2 ? weeks[currentWeekIdx - 2] : null;
     var nextWeek = currentWeekIdx <= planLengthWeeks - 1 ? weeks[currentWeekIdx] : null;
@@ -4142,6 +4456,14 @@
         varietyBannerHtml +
         feelingSummaryHtml +
         feelingFormHtml +
+        '<div class="ob-sub" style="margin-top:20px">This week &amp; this month</div>' +
+        (progressInsight ? '<p class="progress-insight">' + escapeHtml(progressInsight.text) + '</p>' : '') +
+        '<dl class="wd-info">' +
+          '<dt>This week</dt><dd>' + round1(toUnit(thisWeekStats.completedMiles)) + ' of ' + round1(toUnit(thisWeekStats.plannedMiles)) + ' ' + unitLabel() + ' planned</dd>' +
+          '<dt>Runs completed this week</dt><dd>' + thisWeekStats.runsCompleted + '</dd>' +
+          '<dt>This month</dt><dd>' + round1(toUnit(thisMonthMiles)) + ' ' + unitLabel() + '</dd>' +
+        '</dl>' +
+        buildMileageChartHtml(mileageSeries) +
         '<div class="ob-sub" style="margin-top:20px">This far</div>' +
         overallHtml +
         '<div class="ob-sub" style="margin-top:20px">Last week</div>' +
@@ -4149,6 +4471,12 @@
         (aiRecapContext ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiRecapBtn">Ask AI for a recap</button><div class="ai-why-result" id="aiRecapResult" style="display:none"></div></div>' : '') +
         '<div class="ob-sub" style="margin-top:20px">Next week</div>' +
         nextWeekHtml +
+        (state.weightTrackingEnabled ?
+          '<div class="ob-sub" style="margin-top:20px">Weight</div>' +
+          (state.weightEntries.length >= 2 ? buildWeightChartHtml(state.weightEntries, state.weightUnits) + '<p class="recap-empty">' + weightTrendText(state.weightEntries) + '</p>' :
+            state.weightEntries.length === 1 ? '<p class="recap-empty">Log one more weigh-in to see a trend.</p>' :
+              '<p class="recap-empty">No weigh-ins logged yet &mdash; add one in Settings.</p>')
+          : '') +
         '<button class="ob-btn" id="progressBackBtn">Back to plan</button>' +
       '</div>'
     );

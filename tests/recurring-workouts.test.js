@@ -198,3 +198,83 @@ test('generatePlan accepts and threads recurringWorkouts through the full pipeli
   var result = rules.generatePlan(BASE_PROFILE, BASE_RACE_GOAL, planMeta, {}, today, [], 'mi', workouts);
   assert.equal(result.weeks[0].days[2].recurringWorkout.id, 'rw1');
 });
+
+// ── Quality-slot conflict "smart" handling (product decision, 2026-07-31) ──
+
+test('a HARD fixed workout landing on the quality slot substitutes for it -- no relocation, quality is simply not duplicated', function () {
+  var planMeta = buildPlanMeta(BASE_PROFILE, BASE_RACE_GOAL);
+  // day:0 (Monday) lands on slot 1 (the quality slot) for this Saturday race.
+  var workouts = [{ id: 'hiit1', activityType: 'hiit', day: 0, durationMinutes: 30, intensity: 'high', fixed: true }];
+  var weeks = rules.buildStructuredWeeks(BASE_PROFILE, BASE_RACE_GOAL, planMeta, 'mi', workouts);
+  var types = weeks[0].days.map(function (d) { return d.type; });
+  assert.equal(types.indexOf('quality'), -1, 'no separate quality session should exist -- the hard fixed workout covers that role');
+  assert.equal(weeks[0].days[1].recurringWorkout.id, 'hiit1', 'the hard workout still lands on its real weekday');
+});
+
+test('a non-hard (easy) fixed workout landing on the quality slot gets relocated to a different day, not silently dropped', function () {
+  var planMeta = buildPlanMeta(BASE_PROFILE, BASE_RACE_GOAL);
+  // day:0 (Monday) lands on slot 1 (the quality slot); low intensity -> not hard.
+  var workouts = [{ id: 'rw1', activityType: 'cycling', day: 0, durationMinutes: 30, intensity: 'low', fixed: true }];
+  var weeks = rules.buildStructuredWeeks(BASE_PROFILE, BASE_RACE_GOAL, planMeta, 'mi', workouts);
+  var types = weeks[0].days.map(function (d) { return d.type; });
+  assert.notEqual(types.indexOf('quality'), -1, 'quality must still exist somewhere this week, just not on the conflicting day');
+  assert.notEqual(types.indexOf('quality'), 1, 'quality must have moved off slot 1, where the fixed workout now sits');
+  assert.equal(weeks[0].days[1].recurringWorkout.id, 'rw1', 'the fixed workout still lands on its real weekday');
+});
+
+test('when a week has no spare easy slot to relocate quality to (very low run-day count), evaluateRecurringWorkoutSchedule warns instead of silently dropping speed work', function () {
+  var lowFreqProfile = { weeklyMileage: 8, longestRun: 3, runDaysPerWeek: 1, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 2, terrains: ['road'], crossOptions: ['Bike'] };
+  var raceGoal = { event: '5k', goal: 'finish', startDate: '2026-08-01', raceDate: '2026-10-24' };
+  var level = rules.classifyUser(lowFreqProfile);
+  var targetRunDays = rules.targetRunDaysFor(lowFreqProfile, raceGoal.event, level);
+  var workouts = [{ id: 'rw1', activityType: 'walking', day: 0, durationMinutes: 20, intensity: 'low', fixed: true }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, targetRunDays, raceGoal.raceDate);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /speed-work day/);
+});
+
+test('no quality-conflict warning when the conflicting workout is hard (it substitutes fine, no relocation needed)', function () {
+  var level = rules.classifyUser({ weeklyMileage: 8, longestRun: 3, runDaysPerWeek: 1, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 2, terrains: ['road'], crossOptions: ['Bike'] });
+  var targetRunDays = rules.targetRunDaysFor({ weeklyMileage: 8, longestRun: 3, runDaysPerWeek: 1, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 2, terrains: ['road'], crossOptions: ['Bike'] }, '5k', level);
+  var workouts = [{ id: 'rw1', activityType: 'hiit', day: 0, durationMinutes: 20, intensity: 'high', fixed: true }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, targetRunDays, '2026-10-24');
+  assert.deepEqual(result.warnings, []);
+});
+
+// ── Plan explanations (generateRecurringWorkoutNotes) ─────────────────────
+
+test('a movable workout gets a positive cross-training note', function () {
+  var notes = rules.generateRecurringWorkoutNotes([{ id: 'rw1', activityType: 'yoga', day: null, durationMinutes: 60, intensity: 'low', fixed: false }], '2026-10-24');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /counts as this week's cross-training/);
+});
+
+test('a fixed strength workout gets a "fulfills strength session" note', function () {
+  // day:2 (Wednesday) -> slot 3 for the Saturday race, not the quality/long-run slot.
+  var notes = rules.generateRecurringWorkoutNotes([{ id: 'rw1', activityType: 'strength', day: 2, durationMinutes: 40, intensity: 'moderate', fixed: true }], '2026-10-24');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /fulfills this week's main strength session/);
+});
+
+test('a fixed mobility (yoga) workout gets a "supports mobility and recovery" note', function () {
+  var notes = rules.generateRecurringWorkoutNotes([{ id: 'rw1', activityType: 'yoga', day: 2, durationMinutes: 60, intensity: 'low', fixed: true }], '2026-10-24');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /supports mobility and recovery/);
+});
+
+test('a fixed hard workout on the quality slot gets the "covers this week\'s hard session" note', function () {
+  var notes = rules.generateRecurringWorkoutNotes([{ id: 'rw1', activityType: 'hiit', day: 0, durationMinutes: 30, intensity: 'high', fixed: true }], '2026-10-24');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /covers this week's hard session/);
+});
+
+test('a fixed easy workout on the quality slot gets the "scheduled on a different day" relocation note', function () {
+  var notes = rules.generateRecurringWorkoutNotes([{ id: 'rw1', activityType: 'cycling', day: 0, durationMinutes: 30, intensity: 'low', fixed: true }], '2026-10-24');
+  assert.equal(notes.length, 1);
+  assert.match(notes[0], /scheduled on a different day this week/);
+});
+
+test('a fixed workout on the long-run day gets no positive note (that case is already a warning, not a note)', function () {
+  var notes = rules.generateRecurringWorkoutNotes([{ id: 'rw1', activityType: 'cycling', day: 5, durationMinutes: 30, intensity: 'low', fixed: true }], '2026-10-24');
+  assert.deepEqual(notes, []);
+});

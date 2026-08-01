@@ -457,6 +457,43 @@ body {
   border-radius: 10px;
 }
 .today-card.is-rest { border-color: var(--border); opacity: 0.85; }
+
+/* ── Progress stats / charts (docs/PROGRESS_SPEC.md) ─────────────────── */
+.progress-mini-stat {
+  margin-top: 8px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+.progress-insight {
+  margin-top: 8px;
+  font-size: 13.5px;
+  color: var(--accent);
+}
+.mileage-chart { margin-top: 12px; }
+.mileage-chart svg { width: 100%; height: auto; display: block; }
+.chart-caption {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* Visually hidden but still reachable by screen readers -- standard clip
+   technique, not display:none (which would remove it from the accessibility
+   tree too). Used for chart data that's already summarized visibly in a
+   short caption but needs the full per-week/per-entry detail available to
+   assistive tech (docs/PROGRESS_SPEC.md "Accessible chart summaries"). */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .today-eyebrow {
   font-size: 11px;
   font-weight: 700;
@@ -865,8 +902,8 @@ dl.wd-info dd {
 }
 .recap-list li:last-child { border-bottom: none; }
 
-.timeoff-list { margin-top: 8px; }
-.timeoff-row {
+.timeoff-list, .recurring-list, .weight-list { margin-top: 8px; }
+.timeoff-row, .recurring-row, .weight-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -876,8 +913,8 @@ dl.wd-info dd {
   font-size: 13.5px;
   color: var(--text-dim);
 }
-.timeoff-row:last-child { border-bottom: none; }
-.timeoff-remove {
+.timeoff-row:last-child, .recurring-row:last-child, .weight-row:last-child { border-bottom: none; }
+.timeoff-remove, .recurring-workout-remove, .weight-remove {
   appearance: none;
   background: transparent;
   border: none;
@@ -890,7 +927,7 @@ dl.wd-info dd {
   cursor: pointer;
   flex: none;
 }
-.timeoff-remove:hover { color: #d96a6a; }
+.timeoff-remove:hover, .recurring-workout-remove:hover, .weight-remove:hover { color: #d96a6a; }
 
 @media (max-width: 420px) {
   #app { padding: 22px 14px 40px; }

@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.07.31.3";
+const APP_VERSION = "2026.07.31.4";
 const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
@@ -10,6 +10,7 @@ const APP_FILES = [
   `/xp-system.js?v=${APP_VERSION}`,
   `/merge-state.js?v=${APP_VERSION}`,
   `/coaching-rules.js?v=${APP_VERSION}`,
+  `/progress-stats.js?v=${APP_VERSION}`,
   `/app.js?v=${APP_VERSION}`,
   `/app-version.json?v=${APP_VERSION}`,
   "/sw.js",

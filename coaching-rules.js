@@ -227,6 +227,10 @@
   // nature. Provisional coaching judgment, not clinically reviewed --
   // documented as such in docs/COACHING_SPEC.md.
   var RECURRING_ACTIVITY_TYPES = ['cycling', 'yoga', 'strength', 'pilates', 'swimming', 'hiking', 'walking', 'hiit', 'sport', 'other'];
+  // Same Mon=0...Sun=6 encoding as a recurring workout's `day` field (see
+  // app.js's DOW_SHORT/DOW_CHIP_LABEL) -- full names here since these feed
+  // full-sentence plan explanations, not compact chip labels.
+  var DOW_LABEL = { 0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 3: 'Thursday', 4: 'Friday', 5: 'Saturday', 6: 'Sunday' };
   var RECURRING_ACTIVITY_LABEL = {
     cycling: 'Spinning / Cycling', yoga: 'Yoga', strength: 'Strength training', pilates: 'Pilates',
     swimming: 'Swimming', hiking: 'Hiking', walking: 'Walking', hiit: 'HIIT', sport: 'Recreational sport', other: 'Other'
@@ -274,7 +278,67 @@
     if (onLongRunDay.length) {
       warnings.push('A fixed workout is scheduled on your long-run day. Cross-training can\'t replace the running-specific benefit of your long run, so this day still needs to be resolved manually.');
     }
+    // Quality/speed-work slot conflict (docs/COACHING_SPEC.md "Recurring
+    // workouts smart relocation") -- the quality slot is always slot 1
+    // whenever a week has >=2 running days (see assignWeekTemplate's
+    // RUN_SLOT_PRIORITY). buildStructuredWeeks relocates quality to a
+    // different day automatically whenever that week has a spare easy slot
+    // to move it to -- but at targetRunDays<=2, a week never has a spare
+    // easy slot (only quality+rest+long exist), so relocation is never
+    // possible there. A HARD fixed workout on that slot is a fine
+    // substitution (no warning needed, see classifyRecurringWorkout), so
+    // this only fires for a non-hard one.
+    var nonHardFixedOnSpeedDaySlot = raceDate ? list.filter(function (w) {
+      return w.fixed && w.day != null && slotForFixedDay(raceDate, w.day) === 1 && !classifyRecurringWorkout(w).isHardDay;
+    }) : [];
+    if (nonHardFixedOnSpeedDaySlot.length && targetRunDays <= 2) {
+      warnings.push('A fixed workout falls on your plan\'s usual speed-work day, and your running frequency is low enough that there\'s no other day to move it to. Some weeks may not include a separate structured speed session.');
+    }
     return { warnings: warnings };
+  }
+
+  // docs/COACHING_SPEC.md "Plan Explanations" -- short, positive, specific
+  // notes about how an existing commitment changed the plan, shown next to
+  // the runner's recurring-workout list rather than buried in the schedule.
+  // Deliberately plain language, no workload-scoring jargon. Static (not
+  // simulated week-by-week) since every effect described here recurs
+  // identically for the whole plan -- a fixed workout's real weekday maps to
+  // the same slot in every week (the race date never changes mid-plan), so
+  // one note per workout is accurate without walking the actual weeks array.
+  function generateRecurringWorkoutNotes(recurringWorkouts, raceDateIso) {
+    var list = recurringWorkouts || [];
+    var raceDate = raceDateIso ? parseDate(raceDateIso) : null;
+    var notes = [];
+    list.forEach(function (w) {
+      var c = classifyRecurringWorkout(w);
+      // Plain activity name only (no duration) -- these are short prose
+      // sentences, not the structured day-card label formatRecurringWorkoutLabel builds.
+      var label = (w.activityType === 'other' || w.activityType === 'sport') && w.customName
+        ? w.customName
+        : RECURRING_ACTIVITY_LABEL[w.activityType] || RECURRING_ACTIVITY_LABEL.other;
+      var dayLabel = w.fixed && w.day != null ? DOW_LABEL[w.day] : null;
+      if (!w.fixed) {
+        notes.push('Your ' + label + ' counts as this week\'s cross-training.');
+        return;
+      }
+      if (raceDate == null || w.day == null) return;
+      var slot = slotForFixedDay(raceDate, w.day);
+      if (slot === 6) return; // already covered by the long-run-day warning, not a "positive" note
+      if (slot === 1) {
+        notes.push(c.isHardDay
+          ? 'Your ' + dayLabel + ' ' + label + ' covers this week\'s hard session, so a separate speed workout isn\'t scheduled.'
+          : 'Your speed session is scheduled on a different day this week to avoid overlapping with your fixed ' + dayLabel + ' ' + label + '.');
+        return;
+      }
+      if (c.strengthContribution === 'moderate' || c.strengthContribution === 'high') {
+        notes.push('Your ' + dayLabel + ' ' + label + ' fulfills this week\'s main strength session.');
+      } else if (c.mobilityContribution === 'moderate' || c.mobilityContribution === 'high') {
+        notes.push(dayLabel + ' ' + label + ' supports mobility and recovery.');
+      } else {
+        notes.push('Your ' + dayLabel + ' ' + label + ' counts as this week\'s cross-training.');
+      }
+    });
+    return notes;
   }
 
   // ── Weekly template: which of the 7 slots are long/quality/easy/cross/rest ──
@@ -539,15 +603,46 @@
       var longShare = LONG_RUN_SHARE[event] + (weekRunDays <= 3 ? 0.15 : weekRunDays === 4 ? 0.05 : 0);
       var template = assignWeekTemplate(weekRunDays, wantCross);
 
+      // Existing-commitments quality-slot conflict, "make it smart" per the
+      // product decision in docs/COACHING_SPEC.md -- the quality/speed slot
+      // is structurally always slot 1 whenever a week has >=2 running days
+      // (RUN_SLOT_PRIORITY's first entry), so a fixed workout landing there
+      // isn't a one-off fluke, it recurs every such week for the whole plan.
+      // A HARD fixed workout there is a fine substitution for that week's
+      // hard-day role -- handled by the existing demotion guard just below,
+      // no relocation needed. A non-hard one (easy spin, gentle yoga) would
+      // otherwise silently and permanently erase structured speed work for
+      // the entire plan, so if this week's template has a spare 'easy'
+      // slot, swap the two labels (one deterministic swap, not a general
+      // optimizer) so quality moves to a different day instead of just
+      // disappearing. If there's no spare 'easy' slot this week (only
+      // possible at very low run-day counts), there's nowhere to move it --
+      // evaluateRecurringWorkoutSchedule surfaces that as an explicit
+      // warning rather than solving it here.
+      var qualitySlotIdx = template.indexOf('quality');
+      if (qualitySlotIdx !== -1) {
+        var conflictingEasyFixed = fixedWorkouts.filter(function (fw) {
+          return slotForFixedDay(raceDate, fw.day) === qualitySlotIdx && !classifyRecurringWorkout(fw).isHardDay;
+        })[0];
+        if (conflictingEasyFixed) {
+          var altEasyIdx = template.indexOf('easy');
+          if (altEasyIdx !== -1) {
+            template[qualitySlotIdx] = 'easy';
+            template[altEasyIdx] = 'quality';
+            qualitySlotIdx = altEasyIdx;
+          }
+        }
+      }
+
       // Hard-day stacking guard: if a fixed workout this week is classified
       // hard, don't also add the plan's own quality/interval session --
-      // checked against the ORIGINAL template (before fixed-workout slot
-      // overrides below), so it correctly covers both a hard fixed workout
-      // landing on a different day than quality (real stacking, avoided by
-      // demoting quality to easy) and landing on the same day as quality
-      // (the demotion is moot there since the fixed-workout override below
-      // replaces that slot anyway -- either way, no doubling).
-      var qualitySlotIdx = template.indexOf('quality');
+      // checked against qualitySlotIdx as of the relocation above (before
+      // fixed-workout slot overrides below), so it correctly covers both a
+      // hard fixed workout landing on a different day than quality (real
+      // stacking, avoided by demoting quality to easy) and landing on the
+      // same day as quality (the demotion is moot there since the
+      // fixed-workout override below replaces that slot anyway -- either
+      // way, no doubling).
       var hasFixedHardWorkoutThisWeek = fixedWorkouts.some(function (w) { return classifyRecurringWorkout(w).isHardDay; });
       if (qualitySlotIdx !== -1 && hasFixedHardWorkoutThisWeek) template[qualitySlotIdx] = 'easy';
 
@@ -770,6 +865,7 @@
     RECURRING_ACTIVITY_PROFILE: RECURRING_ACTIVITY_PROFILE,
     classifyRecurringWorkout: classifyRecurringWorkout,
     evaluateRecurringWorkoutSchedule: evaluateRecurringWorkoutSchedule,
+    generateRecurringWorkoutNotes: generateRecurringWorkoutNotes,
     formatRecurringWorkoutLabel: formatRecurringWorkoutLabel,
     startRunDaysFor: startRunDaysFor,
     runDaysForWeek: runDaysForWeek,
