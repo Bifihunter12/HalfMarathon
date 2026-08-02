@@ -631,7 +631,15 @@
   var painGuidance = CoachingRulesDomain.painGuidance;
 
   function isRest(label) { return /^rest\b/i.test(label.trim()); }
-  function isLoggable(label) { return !isRest(label); }
+  // docs/COACHING_SPEC.md "Optional activity logging on rest days" -- every
+  // day is loggable now, rest included. A rest day has no prescribed target
+  // (nothing to be "completed as planned" against), but a runner who walks,
+  // hikes, or otherwise moves on a scheduled rest day should still be able
+  // to record it -- both by hand and via the Google Health import/auto-sync,
+  // both of which are gated behind this same check. isRest itself is
+  // unchanged and still drives the distinct "no target, optional" copy/
+  // styling for that day (see renderWorkoutDetail's rest-specific summary).
+  function isLoggable(label) { return true; }
   function isRace(label) { return !!RACE_LABEL_SET[label.trim().toLowerCase()]; }
   function hasCross(label) { return /\bcross\b/i.test(label); }
   // The per-day cross-training <select> (state.crossType[key]) previously
@@ -1271,6 +1279,17 @@
   var GOOGLE_HEALTH_SCOPE = 'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly';
   var GH_TOKEN_KEY = 'runner_google_health_tokens';
   var GH_OAUTH_STATE_KEY = 'runner_gh_oauth_state';
+  // Device-local sync cursor, deliberately NOT on `state` -- same reasoning
+  // as the tokens above (never rides along in CloudSync's synced blob).
+  // Holds the last calendar date (YYYY-MM-DD) autoSyncRecentActivity has
+  // already checked; today itself is always rechecked (new activity can
+  // still land later in the day), everything before it is only ever
+  // checked once.
+  var GH_LAST_SYNC_KEY = 'runner_gh_last_sync';
+  // A first-ever sync (or one after a long absence) never scans further
+  // back than this many days -- bounds how many sequential Netlify function
+  // calls one boot can trigger.
+  var GH_SYNC_MAX_LOOKBACK_DAYS = 14;
 
   function ghRedirectUri() { return window.location.origin + window.location.pathname; }
   function loadGHTokens() {
@@ -1278,6 +1297,25 @@
   }
   function saveGHTokens(tokens) { localStorage.setItem(GH_TOKEN_KEY, JSON.stringify(tokens)); }
   function clearGHTokens() { localStorage.removeItem(GH_TOKEN_KEY); }
+
+  // Google Health only ever reports whole minutes (see google-health-activities.js's
+  // Math.round), so this always produces a :00 seconds component -- still a
+  // valid parseDurationToSeconds input (`[h:]mm:ss`), just never lossy in
+  // the other direction since there was no seconds precision to begin with.
+  function formatMinutesAsDuration(mins) {
+    var totalSec = Math.round(mins * 60);
+    var h = Math.floor(totalSec / 3600);
+    var m = Math.floor((totalSec % 3600) / 60);
+    var s = totalSec % 60;
+    var mm = h > 0 ? String(m).padStart(2, '0') : String(m);
+    var ss = String(s).padStart(2, '0');
+    return (h > 0 ? h + ':' + mm : mm) + ':' + ss;
+  }
+  // Google Health's own exerciseType enum (e.g. "RUNNING", "WALKING") used
+  // only as a fallback label when a session has no displayName of its own.
+  function titleCaseExerciseType(t) {
+    return (t || 'activity').toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
 
   var GoogleHealth = {
     get isConnected() { return !!loadGHTokens(); },
@@ -1364,6 +1402,71 @@
         if (!res.ok || data.error) return { error: (data && data.error) || 'Request failed' };
         return { sessions: data.sessions || [] };
       } catch (e) { return { error: String((e && e.message) || e) }; }
+    },
+
+    // docs/COACHING_SPEC.md "Google Health auto-sync" -- unlike
+    // fetchActivitiesForDate (a manual, single-day, user-clicked lookup),
+    // this runs once at boot and pulls in whatever Google Health has for
+    // any day in the current plan that doesn't already have a log entry,
+    // going back at most GH_SYNC_MAX_LOOKBACK_DAYS. It reuses
+    // logAndCelebrate for every import -- the exact same path a manual
+    // Save already goes through -- so an imported run gets real XP, and a
+    // genuine personal best still gets the AI-phrased celebration via
+    // /celebrate, not a separate parallel reward mechanism.
+    //
+    // Never overwrites an existing entry (manual or previously imported) --
+    // this only fills gaps. Never touches the race day itself. Only the
+    // single largest-distance session on a day is imported if Google
+    // Health reports more than one; a full multi-session-per-day model is
+    // out of scope for this pass.
+    async autoSyncRecentActivity() {
+      if (!this.isConnected) return [];
+      if (!state.raceGoal || !state.profile || !state.planMeta) return []; // no plan generated yet
+
+      var today = new Date(); today.setHours(0, 0, 0, 0);
+      var floor = new Date(today.getTime() - GH_SYNC_MAX_LOOKBACK_DAYS * 86400000);
+      var lastSynced = null;
+      try { lastSynced = localStorage.getItem(GH_LAST_SYNC_KEY) ? parseDate(localStorage.getItem(GH_LAST_SYNC_KEY)) : null; } catch (e) { lastSynced = null; }
+      var startDate = lastSynced && lastSynced > floor ? new Date(lastSynced.getTime() + 86400000) : floor;
+      if (startDate > today) startDate = today;
+
+      var raceDate = parseDate(state.raceGoal.raceDate);
+      var planLengthWeeks = state.planMeta.planLengthWeeks;
+      var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+
+      var dateKeyMap = {};
+      result.weeks.forEach(function (wk) {
+        wk.days.forEach(function (dd, di) {
+          var iso = dateToISO(dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di));
+          dateKeyMap[iso] = { key: wk.weekNum + '-' + di, dayData: dd };
+        });
+      });
+
+      var imported = [];
+      for (var t = startDate.getTime(); t <= today.getTime(); t += 86400000) {
+        var iso = dateToISO(new Date(t));
+        var match = dateKeyMap[iso];
+        if (!match || match.dayData.type === 'race' || getLog(match.key)) continue;
+        var res = await this.fetchActivitiesForDate(iso);
+        if (res.error || !res.sessions.length) continue;
+        var best = res.sessions.reduce(function (a, b) { return (b.distanceMiles || 0) > (a.distanceMiles || 0) ? b : a; });
+        var activityName = best.displayName || titleCaseExerciseType(best.exerciseType);
+        logAndCelebrate(match.key, {
+          time: best.durationMinutes != null ? formatMinutesAsDuration(best.durationMinutes) : null,
+          distance: best.distanceMiles != null ? best.distanceMiles : null,
+          notes: 'Imported from Google Health (' + activityName + ')'
+        }, match.dayData.type, result.weeks, match.dayData, match.dayData.label);
+        imported.push({ key: match.key, iso: iso, activityName: activityName });
+      }
+
+      // Yesterday, not today -- today stays eligible for a re-check on the
+      // next boot too, since new activity can still land later in the day.
+      localStorage.setItem(GH_LAST_SYNC_KEY, dateToISO(new Date(today.getTime() - 86400000)));
+      // Only refreshes the visible screen if it's still the main calendar --
+      // never yanks the user back to it from wherever they've since
+      // navigated (Settings, a workout detail, etc.).
+      if (imported.length && document.querySelector('.day-list')) renderMain();
+      return imported;
     }
   };
 
@@ -2879,7 +2982,7 @@
         var classes = 'day-row';
         if (isToday) classes += ' is-today';
         if (race) classes += ' is-race';
-        if (!loggable) classes += ' is-rest';
+        if (isRest(label)) classes += ' is-rest';
 
         var row = el(
           '<div class="' + classes + '">' +
@@ -3354,27 +3457,50 @@
       var actualPaceDisplay = actualPaceSecPerMi ?
         formatPace(state.units === 'km' ? actualPaceSecPerMi / KM_PER_MI : actualPaceSecPerMi) + ' /' + unitLabel() : '&mdash;';
       var interpretation = interpretRunResult(dayData, entry, targetPaceRange);
-      plannedVsActualHtml =
-        '<div class="wd-review">' +
-          '<div class="wd-review-col">' +
-            '<div class="wd-review-label">Planned</div>' +
-            '<dl class="wd-info">' +
-              (dayData.miles ? '<dt>Distance</dt><dd>' + toUnit(dayData.miles) + ' ' + unitLabel() + '</dd>' : '') +
-              (dayData.runWalk ? '<dt>Duration</dt><dd>' + dayData.runWalk.totalMin + ' min</dd>' : '') +
-              (targetPaceRange ? '<dt>Target pace</dt><dd>' + formatPace(state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi) + '&ndash;' + formatPace(state.units === 'km' ? targetPaceRange.hiSecPerMi / KM_PER_MI : targetPaceRange.hiSecPerMi) + ' /' + unitLabel() + '</dd>' : '') +
-            '</dl>' +
+      // A rest day has no prescribed distance/pace to plan against -- a
+      // two-column Planned/Actual table would just render an empty Planned
+      // side. Optional activity logged on a rest day gets a single
+      // "Logged" column instead, plus its own encouraging line rather than
+      // interpretRunResult's plan-comparison phrasing (which still returns
+      // a generic fallback for a rest day, but this reads better for
+      // activity nobody actually prescribed).
+      if (dayData.type === 'rest') {
+        plannedVsActualHtml =
+          '<div class="wd-review">' +
+            '<div class="wd-review-col">' +
+              '<div class="wd-review-label">Logged</div>' +
+              '<dl class="wd-info">' +
+                (entry.distance != null ? '<dt>Distance</dt><dd>' + toUnit(entry.distance) + ' ' + unitLabel() + '</dd>' : '') +
+                (entry.time ? '<dt>Duration</dt><dd>' + escapeHtml(entry.time) + '</dd>' : '') +
+                '<dt>Pace</dt><dd>' + actualPaceDisplay + '</dd>' +
+                (entry.effort ? '<dt>Effort</dt><dd>RPE ' + entry.effort + '</dd>' : '') +
+              '</dl>' +
+            '</div>' +
           '</div>' +
-          '<div class="wd-review-col">' +
-            '<div class="wd-review-label">Actual</div>' +
-            '<dl class="wd-info">' +
-              (entry.distance != null ? '<dt>Distance</dt><dd>' + toUnit(entry.distance) + ' ' + unitLabel() + '</dd>' : '') +
-              (entry.time ? '<dt>Duration</dt><dd>' + escapeHtml(entry.time) + '</dd>' : '') +
-              '<dt>Pace</dt><dd>' + actualPaceDisplay + '</dd>' +
-              (entry.effort ? '<dt>Effort</dt><dd>RPE ' + entry.effort + '</dd>' : '') +
-            '</dl>' +
+          '<p class="wd-interpretation">Nice work staying active on a rest day &mdash; light movement like this supports recovery without adding real training load.</p>';
+      } else {
+        plannedVsActualHtml =
+          '<div class="wd-review">' +
+            '<div class="wd-review-col">' +
+              '<div class="wd-review-label">Planned</div>' +
+              '<dl class="wd-info">' +
+                (dayData.miles ? '<dt>Distance</dt><dd>' + toUnit(dayData.miles) + ' ' + unitLabel() + '</dd>' : '') +
+                (dayData.runWalk ? '<dt>Duration</dt><dd>' + dayData.runWalk.totalMin + ' min</dd>' : '') +
+                (targetPaceRange ? '<dt>Target pace</dt><dd>' + formatPace(state.units === 'km' ? targetPaceRange.loSecPerMi / KM_PER_MI : targetPaceRange.loSecPerMi) + '&ndash;' + formatPace(state.units === 'km' ? targetPaceRange.hiSecPerMi / KM_PER_MI : targetPaceRange.hiSecPerMi) + ' /' + unitLabel() + '</dd>' : '') +
+              '</dl>' +
+            '</div>' +
+            '<div class="wd-review-col">' +
+              '<div class="wd-review-label">Actual</div>' +
+              '<dl class="wd-info">' +
+                (entry.distance != null ? '<dt>Distance</dt><dd>' + toUnit(entry.distance) + ' ' + unitLabel() + '</dd>' : '') +
+                (entry.time ? '<dt>Duration</dt><dd>' + escapeHtml(entry.time) + '</dd>' : '') +
+                '<dt>Pace</dt><dd>' + actualPaceDisplay + '</dd>' +
+                (entry.effort ? '<dt>Effort</dt><dd>RPE ' + entry.effort + '</dd>' : '') +
+              '</dl>' +
+            '</div>' +
           '</div>' +
-        '</div>' +
-        (interpretation ? '<p class="wd-interpretation">' + escapeHtml(interpretation) + '</p>' : '');
+          (interpretation ? '<p class="wd-interpretation">' + escapeHtml(interpretation) + '</p>' : '');
+      }
     }
 
     var detailHtml = detail ? (
@@ -4646,7 +4772,8 @@
   CloudSync.init();
   GoogleHealth.handleOAuthRedirect().then(function () {
     if (document.getElementById('googleHealthSection')) renderSettings();
-  });
+    return GoogleHealth.autoSyncRecentActivity();
+  }).catch(function () { /* silent -- same "just stays not connected/synced" tolerance as handleOAuthRedirect above */ });
 
   // Re-check notification rules periodically while the tab/installed PWA
   // stays open -- catches e.g. the evening today's-workout reminder even if
