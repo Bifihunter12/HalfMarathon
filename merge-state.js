@@ -64,6 +64,12 @@
     }
     var recurringWorkoutsMap = mergeMap(toIdMap(local.recurringWorkouts), toIdMap(remote.recurringWorkouts));
 
+    // docs/COACHING_SPEC.md "Travel / temporary schedule overrides" -- same
+    // real-edit-in-place reasoning and same mergeMap-by-id pattern as
+    // recurringWorkouts above (a trip's dates/mode can be edited after
+    // creation; a content-key union would orphan the old entry on edit).
+    var travelPeriodsMap = mergeMap(toIdMap(local.travelPeriods), toIdMap(remote.travelPeriods));
+
     // docs/PROGRESS_SPEC.md "Weight tracking" -- same real-edit-in-place
     // reasoning as recurringWorkouts/runningFeelingLog above, keyed by
     // `dateIso` instead of `id`/`weekStartIso`: a weigh-in is upserted by
@@ -140,6 +146,7 @@
       sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
       runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),
       recurringWorkouts: Object.keys(recurringWorkoutsMap).map(function (k) { return recurringWorkoutsMap[k]; }),
+      travelPeriods: Object.keys(travelPeriodsMap).map(function (k) { return travelPeriodsMap[k]; }),
       weightEntries: Object.keys(weightEntriesMap).map(function (k) { return weightEntriesMap[k]; }),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };

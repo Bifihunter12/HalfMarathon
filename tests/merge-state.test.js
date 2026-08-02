@@ -181,3 +181,28 @@ test('legacy states missing weight fields entirely still merge to safe defaults'
   assert.equal(merged.weightUnits, 'kg', 'falls back to a units-consistent default, not undefined');
   assert.deepEqual(merged.weightEntries, []);
 });
+
+// docs/COACHING_SPEC.md "Travel / temporary schedule overrides" -- same
+// upsert-by-id semantics as recurringWorkouts, verified independently here.
+test('travelPeriods from both devices survive the merge, upserted by id like recurringWorkouts', function () {
+  const local = baseState({ lastModified: 2000, travelPeriods: [{ id: 'tp1', start: '2026-08-25', end: '2026-09-08', mode: 'travel', indoorOnly: true }] });
+  const remote = baseState({ lastModified: 1000, travelPeriods: [{ id: 'tp2', start: '2026-11-01', end: '2026-11-05', mode: 'travel', indoorOnly: false }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.travelPeriods.length, 2, 'both devices\' travel periods must survive the union');
+  assert.ok(merged.travelPeriods.some((t) => t.id === 'tp2'), 'the older/remote-only period must not be dropped');
+});
+
+test('editing a travel period\'s dates on the newer device wins outright, not a duplicate entry', function () {
+  const local = baseState({ lastModified: 2000, travelPeriods: [{ id: 'tp1', start: '2026-08-25', end: '2026-09-10', mode: 'travel', indoorOnly: true }] });
+  const remote = baseState({ lastModified: 1000, travelPeriods: [{ id: 'tp1', start: '2026-08-25', end: '2026-09-08', mode: 'travel', indoorOnly: true }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.travelPeriods.length, 1, 'editing in place must not orphan the old version under the same id');
+  assert.equal(merged.travelPeriods[0].end, '2026-09-10', 'the newer device\'s edit wins');
+});
+
+test('legacy states missing travelPeriods entirely still merge to a safe empty array', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = { lastModified: 1000, units: 'mi' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.travelPeriods, []);
+});

@@ -843,6 +843,16 @@
     // runner already does outside the app (e.g. a Tuesday spin class).
     // [{ id, activityType, customName, day (0-6 or null), durationMinutes, intensity, fixed }]
     if (!s.recurringWorkouts) s.recurringWorkouts = [];
+    // docs/COACHING_SPEC.md "Travel / temporary schedule overrides" --
+    // deliberately separate from `unavailable` (illness/away, a blanket
+    // rest override): [{ id, start, end, mode ('travel'|'reduced'|'custom'),
+    // indoorOnly, minDurationMinutes, preferredDurationMinutes }].
+    if (!s.travelPeriods) s.travelPeriods = [];
+    // docs/COACHING_SPEC.md "Goal decision checkpoints" -- whether the
+    // runner has already responded to the current plan's checkpoint (see
+    // planMeta.checkpointDateIso); reset to false whenever a new plan is
+    // created (finishWizard).
+    if (s.goalCheckpointResolved === undefined) s.goalCheckpointResolved = false;
     if (!s.raceGoal) s.raceGoal = null; // { event, raceDate, goal }
     if (!s.profile) s.profile = null;
     if (!s.planMeta) s.planMeta = null; // { level, weeksAvailable, planLengthWeeks, unsafe, warnings }
@@ -898,7 +908,7 @@
   }
   function setLog(key, patch) {
     var next = Object.assign({}, getLog(key), patch);
-    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType);
+    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType || next.eveningIntervals);
     if (hasContent) state.logs[key] = next;
     else delete state.logs[key];
     saveState(state);
@@ -1713,7 +1723,7 @@
   // the pure pipeline function needs explicitly.
   var RPE_TARGET = CoachingRulesDomain.RPE_TARGET;
   function generateAll(profile, raceGoal, planMeta, logs, today) {
-    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts);
+    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts, state.travelPeriods);
   }
 
   function el(html) {
@@ -1761,7 +1771,7 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', preferRunWalkThroughRace: false };
+    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null, preferRunWalkThroughRace: false, customizeWeeklyAvailability: false, weeklyAvailabilityDays: ['0', '1', '2', '3', '4', '5', '6'] };
     if (draft.raceName === undefined) draft.raceName = ''; // editing a plan created before this field existed
     if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
@@ -1856,6 +1866,12 @@
             '<input class="ob-input" type="number" min="5" step="5" id="f_rwDuration" placeholder="Duration (minutes)" style="margin-top:8px" value="' + (draft.rwDraftDuration || '') + '">' +
             '<div class="ob-label" style="margin-top:14px">Usual intensity</div>' +
             '<div class="chip-grid">' + chipsHtml('rw_intensity', ['low', 'moderate', 'high'], { low: 'Low', moderate: 'Moderate', high: 'High' }, draft.rwDraftIntensity, false) + '</div>' +
+            (draft.rwDraftDay != null ?
+              '<div class="ob-label" style="margin-top:14px">Time of day (so a same-day morning run isn\'t blocked unnecessarily)</div>' +
+              '<div class="chip-grid">' + chipsHtml('rw_timeWindow', ['unset', 'morning', 'midday', 'evening'], { unset: 'Not sure', morning: 'Morning', midday: 'Midday', evening: 'Evening' }, draft.rwDraftTimeWindow || 'unset', false) + '</div>' +
+              '<div class="ob-label" style="margin-top:14px">How often</div>' +
+              '<div class="chip-grid">' + chipsHtml('rw_recurrence', ['weekly', 'alternating'], { weekly: 'Every week', alternating: 'Every other week' }, draft.rwDraftRecurrence, false) + '</div>'
+              : '') +
             '<button class="ob-btn ob-btn-secondary" id="addRecurringBtn" style="margin-top:10px">Add workout</button>'
           ) : '') +
           '<p class="ob-hint">You can add, edit, or remove these any time later in Settings.</p>';
@@ -1865,7 +1881,14 @@
           '<div class="ob-sub">' + stepLabel + '</div>' +
           '<div class="ob-label">Days per week you can train</div>' +
           '<input class="ob-input" type="number" min="3" max="7" step="1" id="f_availableDays" value="' + draft.availableDays + '">' +
-          '<div class="ob-label">Terrain</div>' +
+          '<div class="ob-label" style="margin-top:14px">Do specific weekdays work better for running than others?</div>' +
+          '<div class="chip-grid">' + chipsHtml('customizeWeeklyAvailability', ['no', 'yes'], { no: 'No, any day works', yes: 'Yes, let me pick' }, draft.customizeWeeklyAvailability ? 'yes' : 'no', false) + '</div>' +
+          (draft.customizeWeeklyAvailability ?
+            '<div class="ob-label" style="margin-top:10px">I can run on these mornings</div>' +
+            '<div class="chip-grid">' + chipsHtml('weeklyAvailabilityDays', ['0', '1', '2', '3', '4', '5', '6'], DOW_CHIP_LABEL, draft.weeklyAvailabilityDays.map(String), true) + '</div>' +
+            '<p class="ob-hint">Other days can still get an easy cross-training or recovery session &mdash; this just marks which mornings work for an actual run.</p>'
+            : '') +
+          '<div class="ob-label" style="margin-top:14px">Terrain</div>' +
           '<div class="chip-grid">' + chipsHtml('terrains', TERRAINS, TERRAIN_LABEL, draft.terrains, true) + '</div>' +
           '<div class="ob-label">Cross-training available</div>' +
           '<div class="chip-grid">' + chipsHtml('crossOptions', CROSS_OPTIONS, null, draft.crossOptions, true) + '</div>' +
@@ -1909,7 +1932,7 @@
         input.addEventListener('input', syncFieldsToDraft);
       });
 
-      var MULTI_GROUPS = { crossOptions: 'None', terrains: null };
+      var MULTI_GROUPS = { crossOptions: 'None', terrains: null, weeklyAvailabilityDays: null };
       wrap.querySelectorAll('.chip').forEach(function (chip) {
         chip.addEventListener('click', function () {
           var group = chip.getAttribute('data-group');
@@ -1948,9 +1971,24 @@
             renderStep();
             return;
           } else if (group === 'rw_day') {
+            // Re-render -- the time-of-day/recurrence fields below only
+            // make sense (and only show) for a fixed day, same visibility-
+            // depends-on-this-value reasoning as rw_activity above.
             draft.rwDraftDay = value === 'none' ? null : parseInt(value, 10);
+            renderStep();
+            return;
           } else if (group === 'rw_intensity') {
             draft.rwDraftIntensity = value;
+          } else if (group === 'rw_recurrence') {
+            draft.rwDraftRecurrence = value;
+          } else if (group === 'rw_timeWindow') {
+            draft.rwDraftTimeWindow = value === 'unset' ? null : value;
+          } else if (group === 'customizeWeeklyAvailability') {
+            // Re-render -- reveals/hides the weekday chip grid, a structural
+            // change like hasRecurringWorkouts/canRunContinuously above.
+            draft.customizeWeeklyAvailability = value === 'yes';
+            renderStep();
+            return;
           } else {
             draft[group] = value;
           }
@@ -1960,6 +1998,9 @@
               : group === 'canRunContinuously' ? (draft.canRunContinuously ? 'yes' : 'no') === v
               : group === 'preferRunWalkThroughRace' ? (draft.preferRunWalkThroughRace ? 'yes' : 'no') === v
               : group === 'rw_day' ? (draft.rwDraftDay != null ? String(draft.rwDraftDay) : 'none') === v
+              : group === 'rw_recurrence' ? draft.rwDraftRecurrence === v
+              : group === 'rw_timeWindow' ? (draft.rwDraftTimeWindow || 'unset') === v
+              : group === 'customizeWeeklyAvailability' ? (draft.customizeWeeklyAvailability ? 'yes' : 'no') === v
               : draft[group] === v;
             c.classList.toggle('selected', sel);
           });
@@ -1980,10 +2021,21 @@
             day: draft.rwDraftDay != null ? draft.rwDraftDay : null,
             durationMinutes: duration,
             intensity: draft.rwDraftIntensity || 'moderate',
-            fixed: draft.rwDraftDay != null
+            fixed: draft.rwDraftDay != null,
+            timeWindow: draft.rwDraftDay != null ? draft.rwDraftTimeWindow : null,
+            recurrence: draft.rwDraftDay != null ? draft.rwDraftRecurrence : 'weekly',
+            // docs/COACHING_SPEC.md "Alternating recurrence" -- left null
+            // (no explicit anchor) rather than set to the runner's typed
+            // start date: coaching-rules.js's own buildStructuredWeeks
+            // computes the plan's REAL week-1 date and uses that as the
+            // fallback anchor, which is not always the same calendar date
+            // the runner typed (dateForSlot anchors backward from the race
+            // date, so the two can land a few days apart) -- anchoring here
+            // to the typed date risked flipping week 1's on/off parity.
+            recurrenceAnchorIso: null
           });
           // Reset the mini-form for the next entry.
-          draft.rwDraftActivity = null; draft.rwDraftDay = null; draft.rwDraftIntensity = 'moderate'; draft.rwDraftCustomName = '';
+          draft.rwDraftActivity = null; draft.rwDraftDay = null; draft.rwDraftIntensity = 'moderate'; draft.rwDraftCustomName = ''; draft.rwDraftTimeWindow = null; draft.rwDraftRecurrence = 'weekly';
           renderStep();
         });
       }
@@ -2082,7 +2134,17 @@
       preferRunWalkThroughRace: !!draft.preferRunWalkThroughRace, availableDays: draft.availableDays,
       terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'],
       recentRaceDistance: raceResultValid ? draft.recentRaceDistance : null,
-      recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : ''
+      recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : '',
+      // docs/COACHING_SPEC.md "Weekly availability" -- left undefined
+      // (never even the key) unless the runner explicitly customized it,
+      // so `weeklyAvailabilityCanRunSlots` correctly falls back to the
+      // legacy RUN_SLOT_PRIORITY-based scheduling for everyone who didn't
+      // touch this -- the overwhelming majority of existing and new plans.
+      weeklyAvailability: draft.customizeWeeklyAvailability ? (function () {
+        var map = {};
+        for (var d = 0; d <= 6; d++) map[d] = { canRun: draft.weeklyAvailabilityDays.indexOf(String(d)) !== -1 };
+        return map;
+      })() : undefined
     };
     var raceGoal = { event: draft.event, raceName: (draft.raceName || '').trim(), raceDate: draft.raceDate, startDate: draft.startDate, goal: draft.goal };
     var raceUnchanged = isEdit && state.raceGoal && state.raceGoal.event === raceGoal.event
@@ -2134,11 +2196,21 @@
     // wizard must never overwrite workouts added later in Settings.
     if (!isEdit) state.recurringWorkouts = draft.recurringWorkouts || [];
     if (raceUnchanged) {
-      state.planMeta = { level: level, weeksAvailable: state.planMeta.weeksAvailable, planLengthWeeks: state.planMeta.planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings };
+      state.planMeta = { level: level, weeksAvailable: state.planMeta.weeksAvailable, planLengthWeeks: state.planMeta.planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings, checkpointDateIso: state.planMeta.checkpointDateIso };
     } else {
       var planLengthWeeks = choosePlanLength(weeksAvailable, raceGoal.event, level);
-      state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings };
+      // docs/COACHING_SPEC.md "Goal decision checkpoints" -- only for a half
+      // marathon goal (the only pairing this app currently offers a
+      // shorter-distance fallback for via evaluateGoalCheckpoint), set once
+      // at plan creation to roughly 45% through the build -- early enough
+      // to still safely pivot to a 10K with a real taper, late enough to
+      // reflect real accumulated training evidence rather than week-1 noise.
+      var checkpointDateIso = raceGoal.event === 'half'
+        ? dateToISO(new Date(parseDate(raceGoal.startDate).getTime() + Math.round(planLengthWeeks * 0.45) * 7 * 86400000))
+        : null;
+      state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings, checkpointDateIso: checkpointDateIso };
       state.logs = {}; state.overrides = {}; state.crossType = {};
+      state.goalCheckpointResolved = false;
     }
     // docs/COACHING_SPEC.md "Race readiness" -- evaluateReadiness above is
     // only a pre-generation estimate; it can say "ready" while the actual
@@ -2176,17 +2248,28 @@
       '</div>'
     );
   }
+  // Shared by editPlanBtn's handler and the goal-checkpoint's "Switch to
+  // 10K" button -- both need the same wizard-shaped draft rebuilt from the
+  // current state.profile/raceGoal.
+  function buildEditDraftFromState() {
+    return {
+      event: state.raceGoal.event, raceName: state.raceGoal.raceName || '', raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
+      weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
+      experienceLevel: state.profile.experienceLevel, injuryStatus: state.profile.injuryStatus, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
+      preferRunWalkThroughRace: !!state.profile.preferRunWalkThroughRace,
+      terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
+      recentRaceDistance: state.profile.recentRaceDistance || 'none', recentRaceTime: state.profile.recentRaceTime || '',
+      userName: state.userName,
+      customizeWeeklyAvailability: !!state.profile.weeklyAvailability,
+      weeklyAvailabilityDays: state.profile.weeklyAvailability
+        ? Object.keys(state.profile.weeklyAvailability).filter(function (d) { return state.profile.weeklyAvailability[d].canRun; })
+        : ['0', '1', '2', '3', '4', '5', '6'],
+      recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null
+    };
+  }
   function wireHeaderIcons() {
     document.getElementById('editPlanBtn').addEventListener('click', function () {
-      renderWizard({
-        event: state.raceGoal.event, raceName: state.raceGoal.raceName || '', raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
-        weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
-        experienceLevel: state.profile.experienceLevel, injuryStatus: state.profile.injuryStatus, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
-        preferRunWalkThroughRace: !!state.profile.preferRunWalkThroughRace,
-        terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
-        recentRaceDistance: state.profile.recentRaceDistance || 'none', recentRaceTime: state.profile.recentRaceTime || '',
-        userName: state.userName
-      });
+      renderWizard(buildEditDraftFromState());
     });
     document.getElementById('gearBtn').addEventListener('click', renderSettings);
     document.getElementById('safetyBtn').addEventListener('click', renderSafetyPanel);
@@ -2824,6 +2907,14 @@
       unitLabel: unitLabel()
     });
 
+    // docs/COACHING_SPEC.md "Goal decision checkpoints" -- deterministic,
+    // evidence-based, and never applied automatically -- the runner always
+    // confirms. Computed fresh on every render (cheap, pure) rather than
+    // cached, so it reflects whatever's actually been logged as of right now.
+    var goalCheckpoint = (state.planMeta.checkpointDateIso && !state.goalCheckpointResolved)
+      ? CoachingRulesDomain.evaluateGoalCheckpoint(state.profile, state.raceGoal, state.planMeta, weeks, state.logs, parseDate(state.planMeta.checkpointDateIso), today)
+      : { due: false };
+
     var warningsHtml = '';
     // Was gated on state.planMeta.unsafe -- correct while this array only
     // ever held the timeline-safety warning, but the medically_restricted
@@ -2877,6 +2968,35 @@
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
     wireHeaderIcons();
+
+    // docs/COACHING_SPEC.md "Goal decision checkpoints" -- shown once the
+    // checkpoint date passes, until the runner explicitly confirms either
+    // way. Never applies a race change on its own.
+    if (goalCheckpoint.due) {
+      var checkpointCard = el(
+        '<div class="today-card">' +
+          '<div class="today-eyebrow">CHECK-IN</div>' +
+          '<p class="progress-insight">' + escapeHtml(CoachingRulesDomain.formatGoalCheckpointMessage(goalCheckpoint, state.raceGoal.event)) + '</p>' +
+          '<button class="ob-btn" id="checkpointKeepHalfBtn" style="margin-top:10px">Keep Half Marathon</button>' +
+          '<button class="ob-btn ob-btn-secondary" id="checkpointSwitch10kBtn" style="margin-top:8px">Switch to 10K</button>' +
+        '</div>'
+      );
+      app.appendChild(checkpointCard);
+      document.getElementById('checkpointKeepHalfBtn').addEventListener('click', function () {
+        state.goalCheckpointResolved = true;
+        saveState(state);
+        renderMain();
+      });
+      document.getElementById('checkpointSwitch10kBtn').addEventListener('click', function () {
+        // Same "recompute plan length/safety for the new event" work
+        // finishWizard already does for any event change -- reused here
+        // rather than duplicated, since a checkpoint-driven switch isn't
+        // conceptually different from picking a new event in the wizard.
+        state.goalCheckpointResolved = true;
+        finishWizard(Object.assign({}, buildEditDraftFromState(), { event: '10k' }), true);
+      });
+    }
+
     var mainTabs = el(bottomTabsHtml('main'));
     app.appendChild(mainTabs);
     wireBottomTabs(mainTabs);
@@ -3567,6 +3687,12 @@
         '<div class="chip-grid" id="wd_rpe">' + rpeChips + '</div>' +
         '<div class="ob-label">Completion</div>' +
         '<div class="chip-grid" id="wd_completion">' + chipsHtml('completion', COMPLETION_TYPES, COMPLETION_TYPE_LABEL, completionSelected, false) + '</div>' +
+        // docs/COACHING_SPEC.md "Conditional preferences" -- the one small,
+        // deterministic trigger for "prefer a hike/recovery session the
+        // morning after unplanned evening intervals." User-flagged, not
+        // AI-inferred -- see applyEveningIntervalAdaptation.
+        '<div class="ob-label">Was this an unplanned evening interval session?</div>' +
+        '<div class="chip-grid" id="wd_eveningIntervals">' + chipsHtml('eveningIntervals', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.eveningIntervals ? 'yes' : 'no', false) + '</div>' +
         '<div class="ob-label">Notes</div>' +
         '<textarea class="ob-input wd-notes" id="wd_notes" rows="3" placeholder="How did it feel?">' + escapeHtml(entry.notes || '') + '</textarea>' +
         '<div class="pain-toggle" id="painToggle">' + (entry.pain ? 'Update pain report' : 'Report pain or discomfort') + '</div>' +
@@ -3805,6 +3931,17 @@
         });
       });
 
+      var eveningIntervalsSelected = !!entry.eveningIntervals;
+      var eveningIntervalsWrap = document.getElementById('wd_eveningIntervals');
+      eveningIntervalsWrap.querySelectorAll('.chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          eveningIntervalsSelected = chip.getAttribute('data-value') === 'yes';
+          eveningIntervalsWrap.querySelectorAll('.chip').forEach(function (c) {
+            c.classList.toggle('selected', (c.getAttribute('data-value') === 'yes') === eveningIntervalsSelected);
+          });
+        });
+      });
+
       var painToggle = document.getElementById('painToggle');
       var painForm = document.getElementById('painForm');
       painToggle.addEventListener('click', function () {
@@ -3924,7 +4061,8 @@
           effort: effortSelected,
           notes: notes || null,
           pain: pain,
-          completionType: completionSelected
+          completionType: completionSelected,
+          eveningIntervals: eveningIntervalsSelected || null
         }, dayData.type, result.weeks, dayData, label);
         renderMain();
       });
@@ -4048,6 +4186,22 @@
         '<input class="ob-input" type="date" id="set_toEnd" style="margin-top:8px">' +
         '<div class="chip-grid" id="set_toReason" style="margin-top:8px">' + chipsHtml('toReason', ['illness', 'vacation'], { illness: 'Illness', vacation: 'Away' }, 'illness', false) + '</div>' +
         '<button class="ob-btn ob-btn-secondary" id="markUnavailableBtn" style="margin-top:8px">Mark unavailable</button>' +
+        // docs/COACHING_SPEC.md "Travel / temporary schedule overrides" --
+        // deliberately separate from "Time off" above: travel still trains,
+        // just indoors and on a reduced schedule, rather than a blanket
+        // rest override.
+        '<div class="ob-label" style="margin-top:26px">Travel</div>' +
+        '<p class="recap-empty">Different from Time off above &mdash; travel still trains, just indoors and on a lighter schedule instead of pausing entirely.</p>' +
+        (state.travelPeriods.length ? '<div class="timeoff-list" id="travel_list">' + state.travelPeriods.map(function (t, i) {
+          return '<div class="timeoff-row"><span>' + t.start + ' &ndash; ' + t.end + (t.indoorOnly ? ' &middot; indoor-only' : '') + '</span><button type="button" class="travel-remove" data-idx="' + i + '">Remove</button></div>';
+        }).join('') + '</div>' : '<p class="recap-empty">No travel periods marked.</p>') +
+        '<input class="ob-input" type="date" id="set_travelStart" style="margin-top:10px">' +
+        '<input class="ob-input" type="date" id="set_travelEnd" style="margin-top:8px">' +
+        '<div class="ob-label" style="margin-top:10px">Indoor only (e.g. a city you won\'t run outdoors in)</div>' +
+        '<div class="chip-grid" id="set_travelIndoor">' + chipsHtml('travelIndoor', ['no', 'yes'], { no: 'No', yes: 'Yes' }, 'no', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:10px">Minimum minutes available most days</div>' +
+        '<input class="ob-input" type="number" min="10" step="5" id="set_travelMinDuration" placeholder="e.g. 30" style="margin-top:4px">' +
+        '<button class="ob-btn ob-btn-secondary" id="addTravelPeriodBtn" style="margin-top:8px">Add travel period</button>' +
         '<div class="ob-label" style="margin-top:26px">Recurring workouts</div>' +
         '<p class="recap-empty">Existing workouts you already do regularly (spin class, yoga, strength, etc.) &mdash; the plan places fixed ones on their day and avoids double-crediting strength/hard-day work you already get elsewhere.</p>' +
         (state.recurringWorkouts.length ? '<div class="recurring-list" id="recurringWorkoutsList">' + state.recurringWorkouts.map(function (w, i) {
@@ -4203,6 +4357,36 @@
     wrap.querySelectorAll('.timeoff-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
         state.unavailable.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+        saveState(state);
+        renderSettings();
+      });
+    });
+
+    var travelIndoor = 'no';
+    wrap.querySelectorAll('#set_travelIndoor .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        travelIndoor = chip.getAttribute('data-value');
+        wrap.querySelectorAll('#set_travelIndoor .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === travelIndoor); });
+      });
+    });
+    document.getElementById('addTravelPeriodBtn').addEventListener('click', function () {
+      var startVal = document.getElementById('set_travelStart').value;
+      var endVal = document.getElementById('set_travelEnd').value;
+      if (!startVal || !endVal || startVal > endVal) { window.alert('Pick a valid start and end date.'); return; }
+      var minDur = parseInt(document.getElementById('set_travelMinDuration').value, 10) || 30;
+      state.travelPeriods.push({
+        id: 'tp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        start: startVal, end: endVal, mode: 'travel',
+        indoorOnly: travelIndoor === 'yes',
+        minDurationMinutes: minDur,
+        preferredDurationMinutes: Math.max(minDur, 45)
+      });
+      saveState(state);
+      renderSettings();
+    });
+    wrap.querySelectorAll('.travel-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.travelPeriods.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
         saveState(state);
         renderSettings();
       });
