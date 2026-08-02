@@ -2037,6 +2037,19 @@
       state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings };
       state.logs = {}; state.overrides = {}; state.crossType = {};
     }
+    // docs/COACHING_SPEC.md "Race readiness" -- evaluateReadiness above is
+    // only a pre-generation estimate; it can say "ready" while the actual
+    // generator still falls short of the event's real targets (a
+    // previously-disclosed, unresolved gap). This checks the plan
+    // buildStructuredWeeks/generatePlan will ACTUALLY produce and adds a
+    // second, concrete warning when that real output -- not a projection --
+    // doesn't reach an adequate peak.
+    var adequacyToday = new Date(); adequacyToday.setHours(0, 0, 0, 0);
+    var generatedForAdequacy = generateAll(profile, raceGoal, state.planMeta, isEdit ? state.logs : {}, adequacyToday);
+    var adequacy = CoachingRulesDomain.evaluatePlanAdequacy(generatedForAdequacy.weeks, raceGoal, state.planMeta, profile);
+    if (!adequacy.adequate) {
+      state.planMeta.warnings = state.planMeta.warnings.concat([CoachingRulesDomain.formatPlanAdequacyWarning(adequacy, raceGoal.event)]);
+    }
     saveState(state);
     if (!isEdit) logTelemetryEvent('onboarding_completed', raceGoal.event);
     didAutoScroll = false;

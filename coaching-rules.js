@@ -392,13 +392,98 @@
 
   function formatReadinessWarning(readiness, event) {
     if (!readiness || readiness.ready) return null;
-    var parts = ['Based on your current weekly mileage, a fully safe ' + EVENT_LABEL[event] + ' build at your level would take about ' + readiness.neededWeeks + ' week' + (readiness.neededWeeks === 1 ? '' : 's') + ' -- this timeline is shorter than that, so the plan is more compressed than ideal.'];
+    // Wording fix: this estimate is driven by profile.longestRun (via the
+    // 10% rule), never weekly mileage -- the text previously claimed
+    // otherwise, misdescribing which input actually produced the number.
+    var parts = ['Based on your current longest run, a fully safe ' + EVENT_LABEL[event] + ' build at your level would take about ' + readiness.neededWeeks + ' week' + (readiness.neededWeeks === 1 ? '' : 's') + ' -- this timeline is shorter than that, so the plan is more compressed than ideal.'];
     var extraWeeks = Math.ceil(readiness.alternatives.extraWeeksNeeded);
     parts.push('A race about ' + extraWeeks + ' more week' + (extraWeeks === 1 ? '' : 's') + ' out would give you a safer runway at this same distance.');
     if (readiness.alternatives.shorterEvent) {
       parts.push(EVENT_LABEL[readiness.alternatives.shorterEvent] + ' would comfortably fit your current timeline instead.');
     }
     parts.push("This plan still generates as requested -- these are just options worth considering, not a requirement.");
+    return parts.join(' ');
+  }
+
+  // docs/COACHING_SPEC.md "Race readiness" -- evaluateReadiness (above) is a
+  // PRE-generation estimate: it asks whether the runner's current long run
+  // could theoretically grow to the event's long-run peak using the 10%
+  // rule, in the time available. It never looks at what buildStructuredWeeks
+  // actually produces, and that real weekly-volume ramp grows slower than
+  // the 10%-rule estimate assumes (see weeksToGrowDistance's comment) -- so
+  // a runner can be told "ready: true" and still be handed a plan whose
+  // actual peak volume and long run fall well short of EVENT_TABLE's own
+  // targets, silently, with no warning at all. This is the gap a prior
+  // review flagged as the central unresolved issue in this feature.
+  //
+  // evaluatePlanAdequacy closes it by inspecting the ACTUAL generated weeks
+  // (post buildStructuredWeeks/generatePlan) instead of a projection of what
+  // could theoretically happen. Tolerance (85% of nominal peakVolume/
+  // longRunPeak) is a coaching judgment call, not clinically reviewed: a
+  // plan landing close to but not exactly at its nominal peak (rounding, a
+  // taper phase, a slightly-early plan end) shouldn't itself be flagged --
+  // only a material shortfall should. Frequency (actualPeakRunDays vs.
+  // targetRunDaysFor) is reported but deliberately NOT part of the
+  // adequate/inadequate verdict -- a fixed recurring workout can legitimately
+  // occupy what would otherwise be a running slot (see "Recurring workouts"),
+  // so a lower running-day count doesn't by itself signal an inadequate
+  // plan the way a shortfall in volume or long run does.
+  //
+  // A runner who opted into run/walk through race day
+  // (profile.preferRunWalkThroughRace) never has a continuous-mileage long
+  // run to measure at all -- an intentional, separately-disclosed choice
+  // (see "Run-walk programming"), not a plan defect -- so the long-run
+  // portion of the check is skipped (longRunApplicable: false) rather than
+  // always failing it; the volume check still applies.
+  var PLAN_ADEQUACY_TOLERANCE = 0.85;
+
+  function evaluatePlanAdequacy(weeks, raceGoal, planMeta, profile) {
+    var event = raceGoal.event;
+    var level = planMeta.level;
+    var cfg = EVENT_TABLE[event][level];
+    var targetRunDays = targetRunDaysFor(profile, event, level);
+
+    var actualPeakVolume = 0, actualPeakLongRun = 0, actualPeakRunDays = 0;
+    var anyContinuousLongRun = false;
+    weeks.forEach(function (wk) {
+      if (wk.phase === 'race') return; // taper/race week is intentionally reduced, not a peak
+      if (wk.targetVolume > actualPeakVolume) actualPeakVolume = wk.targetVolume;
+      var runDaysThisWeek = 0;
+      wk.days.forEach(function (day) {
+        if (day.type === 'long' || day.type === 'quality' || day.type === 'easy') runDaysThisWeek++;
+        if (day.type === 'long' && !day.runWalk) {
+          anyContinuousLongRun = true;
+          if (day.miles > actualPeakLongRun) actualPeakLongRun = day.miles;
+        }
+      });
+      if (runDaysThisWeek > actualPeakRunDays) actualPeakRunDays = runDaysThisWeek;
+    });
+
+    var volumeRatio = cfg.peakVolume > 0 ? actualPeakVolume / cfg.peakVolume : 1;
+    var longRunRatio = anyContinuousLongRun && cfg.longRunPeak > 0 ? actualPeakLongRun / cfg.longRunPeak : 1;
+    var adequate = volumeRatio >= PLAN_ADEQUACY_TOLERANCE && longRunRatio >= PLAN_ADEQUACY_TOLERANCE;
+
+    return {
+      adequate: adequate,
+      actualPeakVolume: round5(actualPeakVolume),
+      targetPeakVolume: cfg.peakVolume,
+      actualPeakLongRun: round5(actualPeakLongRun),
+      targetLongRunPeak: cfg.longRunPeak,
+      actualPeakRunDays: actualPeakRunDays,
+      targetRunDays: targetRunDays,
+      longRunApplicable: anyContinuousLongRun
+    };
+  }
+
+  function formatPlanAdequacyWarning(adequacy, event) {
+    if (!adequacy || adequacy.adequate) return null;
+    var parts = ["This plan's actual peak -- " + adequacy.actualPeakVolume + ' mi/week' +
+      (adequacy.longRunApplicable ? ' with a ' + adequacy.actualPeakLongRun + '-mi long run' : '') +
+      ' -- falls short of the ' + adequacy.targetPeakVolume + ' mi/week' +
+      (adequacy.longRunApplicable ? ' and ' + adequacy.targetLongRunPeak + '-mi long run' : '') +
+      ' a ' + EVENT_LABEL[event] + ' build at your level is designed around, given your current fitness and timeline.'];
+    parts.push('This is a genuine gap between what this plan actually reaches and what the event calls for -- not just a compressed-but-adequate build. More weeks before race day, or a shorter-distance goal, would let the plan actually reach an adequate peak instead of stopping short of it.');
+    parts.push('This plan still generates as requested -- this is information worth weighing, not a requirement.');
     return parts.join(' ');
   }
 
@@ -1191,6 +1276,8 @@
     effectiveGoalFactor: effectiveGoalFactor,
     weeksToGrowDistance: weeksToGrowDistance,
     formatReadinessWarning: formatReadinessWarning,
+    evaluatePlanAdequacy: evaluatePlanAdequacy,
+    formatPlanAdequacyWarning: formatPlanAdequacyWarning,
     choosePlanLength: choosePlanLength,
     RECURRING_ACTIVITY_TYPES: RECURRING_ACTIVITY_TYPES,
     RECURRING_ACTIVITY_LABEL: RECURRING_ACTIVITY_LABEL,

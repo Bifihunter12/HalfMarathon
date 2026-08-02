@@ -323,3 +323,60 @@ test('long-run share of weekly volume is capped, even at low frequency where the
     assert.ok(longDay.miles / totalMiles < 0.56, 'week ' + wk.weekNum + ': long run is ' + (100 * longDay.miles / totalMiles).toFixed(1) + '% of weekly volume, should stay well under the old uncapped ~55%+ ceiling for this profile shape');
   });
 });
+
+// docs/COACHING_SPEC.md "Race readiness" -- evaluatePlanAdequacy closes the
+// previously-disclosed gap between evaluateReadiness's pre-generation
+// 10%-rule ESTIMATE and what buildStructuredWeeks/generatePlan actually
+// produce. These tests exercise the exact reported scenario (a true
+// beginner, 6 mi/week, 2-mi longest run, 2 days/week, 18 weeks to a half
+// marathon) that evaluateReadiness alone said "ready: true" for, even
+// though the real generated plan peaks at roughly 8.5 mi/week with a 4-mi
+// long run against the event's 22 mi/week / 9-mi targets.
+test('evaluatePlanAdequacy flags the reported beginner-half scenario as inadequate even though evaluateReadiness says ready', function () {
+  var profile = { weeklyMileage: 6, longestRun: 2, runDaysPerWeek: 2, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 3, terrains: ['road'], crossOptions: ['None'] };
+  var raceGoal = { event: 'half', goal: 'finish', startDate: '2026-08-02', raceDate: '2026-12-06' }; // 18 weeks
+  var level = rules.classifyUser(profile);
+  var weeksAvailable = 18;
+  var readiness = rules.evaluateReadiness(profile, raceGoal, level, weeksAvailable);
+  assert.equal(readiness.ready, true, 'sanity check: the pre-generation estimate must say ready for this exact scenario -- that\'s the reported gap');
+
+  var planLengthWeeks = rules.choosePlanLength(weeksAvailable, raceGoal.event, level);
+  var planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: !readiness.ready, neededWeeks: readiness.neededWeeks, warnings: [] };
+  var result = rules.generatePlan(profile, raceGoal, planMeta, {}, rules.parseDate(raceGoal.startDate), [], 'mi', undefined);
+  var adequacy = rules.evaluatePlanAdequacy(result.weeks, raceGoal, planMeta, profile);
+
+  assert.equal(adequacy.adequate, false, 'the actual generated plan should be flagged inadequate despite readiness saying ready');
+  assert.ok(adequacy.actualPeakVolume < 22 * 0.85, 'actual peak volume (' + adequacy.actualPeakVolume + ') should fall well short of the 22 mi/week target');
+  assert.ok(adequacy.actualPeakLongRun < 9 * 0.85, 'actual peak long run (' + adequacy.actualPeakLongRun + ') should fall well short of the 9-mi target');
+  assert.equal(adequacy.targetPeakVolume, 22);
+  assert.equal(adequacy.targetLongRunPeak, 9);
+
+  var warning = rules.formatPlanAdequacyWarning(adequacy, raceGoal.event);
+  assert.ok(warning.indexOf(String(adequacy.actualPeakVolume)) !== -1, 'warning text should cite the actual peak volume figure');
+  assert.ok(warning.indexOf(String(adequacy.actualPeakLongRun)) !== -1, 'warning text should cite the actual long-run figure');
+  assert.ok(warning.indexOf('22') !== -1 && warning.indexOf('9') !== -1, 'warning text should cite the event\'s real targets, not just the shortfall');
+});
+
+test('evaluatePlanAdequacy passes a realistic, adequately-timelined plan', function () {
+  // An advanced runner already close to 10K/advanced's own peakVolume (38)
+  // and longRunPeak (11) before the plan even starts, with a long runway
+  // (choosePlanLength caps this at 13 weeks -- idealWeeks(8) * 1.6) -- the
+  // case the real ramp (not just the 10%-rule estimate) can actually reach.
+  var profile = { weeklyMileage: 30, longestRun: 10, runDaysPerWeek: 6, experienceLevel: 'advanced', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 6, terrains: ['road'], crossOptions: ['Bike'] };
+  var raceGoal = { event: '10k', goal: 'finish', startDate: '2026-08-01', raceDate: '2027-01-01' };
+  var planMeta = buildPlanMeta(profile, raceGoal);
+  var result = rules.generatePlan(profile, raceGoal, planMeta, {}, rules.parseDate(raceGoal.startDate), [], 'mi', undefined);
+  var adequacy = rules.evaluatePlanAdequacy(result.weeks, raceGoal, planMeta, profile);
+  assert.equal(adequacy.adequate, true, 'an advanced runner who already starts near the event\'s own peak targets should reach an adequate peak (got ' + JSON.stringify(adequacy) + ')');
+  assert.equal(rules.formatPlanAdequacyWarning(adequacy, raceGoal.event), null, 'no warning should be produced for an adequate plan');
+});
+
+test('evaluatePlanAdequacy skips the long-run check (but still checks volume) for a runner who opted into run/walk through race day', function () {
+  var profile = { weeklyMileage: 8, longestRun: 2, runDaysPerWeek: 3, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: false, preferRunWalkThroughRace: true, availableDays: 3, terrains: ['road'], crossOptions: ['None'] };
+  var raceGoal = { event: '5k', goal: 'finish', startDate: '2026-08-01', raceDate: '2026-11-14' };
+  var planMeta = buildPlanMeta(profile, raceGoal);
+  var result = rules.generatePlan(profile, raceGoal, planMeta, {}, rules.parseDate(raceGoal.startDate), [], 'mi', undefined);
+  var adequacy = rules.evaluatePlanAdequacy(result.weeks, raceGoal, planMeta, profile);
+  assert.equal(adequacy.longRunApplicable, false, 'a full-plan run/walk profile never has a continuous-mileage long run to measure');
+  assert.equal(adequacy.actualPeakLongRun, 0);
+});
