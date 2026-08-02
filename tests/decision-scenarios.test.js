@@ -86,6 +86,34 @@ test('Context: most of last week was missed (>60%). Approved outcome: future vol
   assert.equal(weeks[5].days[0].miles, 4, 'forbidden outcome: race week is never dampened');
 });
 
+test('Partial-session credit: stopped-early/partial entries count as HALF credit, not full credit -- can flip the missed-ratio threshold versus the old bare-truthiness check', function () {
+  var weeks = sixWeekPlan();
+  // 5 loggable slots (0,1,2,5,6). Only slots 0/1 have entries at all, both
+  // stopped_early. Under the OLD bare-truthiness check, 2 logged entries
+  // out of 5 gives missedRatio = 1 - 2/5 = 0.6 -- NOT > 0.6, so the old code
+  // would never dampen here. With half credit for stopped_early, the real
+  // credited total is 1.0 (0.5 + 0.5), giving missedRatio = 1 - 1/5 = 0.8,
+  // correctly crossing the 0.6 threshold -- two stopped-early sessions
+  // shouldn't count the same as two fully completed ones.
+  var logs = {
+    '2-0': { effort: 4, completionType: 'stopped_early' },
+    '2-1': { effort: 4, completionType: 'partial' }
+  };
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(result.note, /reduced about 15%/, 'partial credit correctly reveals a real >60% miss the old bare-truthiness check would have hidden');
+});
+
+test('Partial-session credit: a stopped-early long run (something WAS logged) still triggers the same "shorten next long run" treatment as a fully missed one', function () {
+  var weeks = sixWeekPlan();
+  var logs = {
+    '2-0': { effort: 4 }, '2-1': { effort: 4 }, '2-2': { effort: 4 }, '2-5': { effort: 4 },
+    '2-6': { effort: 6, completionType: 'stopped_early', distance: 2 } // the long run itself was logged, but stopped early
+  };
+  var result = rules.applyMissedAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(result.note, /long run was shortened/, 'a stopped-early long run must not be silently treated as a full completion just because something was logged');
+  assert.equal(weeks[2].days[6].miles, 5, 'this week\'s long run shortens ~20% (6mi -> 5mi), same treatment as a fully missed long run');
+});
+
 test('Context: last week had several illness/away days already converted to rest (simulating applyUnavailableRanges). Approved outcome (docs/SAFETY_POLICY.md): illness time never counts against the runner, even when only a few loggable days remained.', function () {
   var weeks = sixWeekPlan();
   weeks[1].days[0] = day('rest', 0); // illness-converted easy day
@@ -132,6 +160,23 @@ test('Context: fewer than 3 logged RPE samples exist in the lookback window. App
   var note = rules.applyDifficultyAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
   assert.equal(note, null, 'fewer than 3 samples must never produce a volume adjustment');
   assert.equal(weeks[2].days[0].miles, 4, 'nothing is touched');
+});
+
+test('Adjustment re-capping: a low-RPE nudge never pushes a day past the event\'s own long-run peak, even from an already-at-peak starting point', function () {
+  // Neither applyMissedAdjustment nor applyDifficultyAdjustment previously
+  // re-checked their result against ANY safety ceiling -- this uses a real
+  // event/level (unlike RACE_GOAL/PLAN_META above, which deliberately omit
+  // them to test pure week-math) so adjustmentCaps has a real cap to enforce.
+  var level = 'intermediate';
+  var cfg = rules.EVENT_TABLE['10k'][level];
+  var raceGoal = { raceDate: RACE_GOAL.raceDate, event: '10k', goal: 'finish' };
+  var planMeta = { planLengthWeeks: PLAN_LENGTH, level: level, unsafe: false };
+  var weeks = sixWeekPlan();
+  weeks[3].days[6].miles = cfg.longRunPeak; // already at the cap
+  var logs = { '1-0': { effort: 1 }, '1-2': { effort: 2 }, '1-6': { effort: 1 }, '2-0': { effort: 2 } }; // triggers the +5% nudge
+  var note = rules.applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, TODAY, null, UNITS);
+  assert.match(note, /nudged up about 5%/, 'sanity check: the nudge really did fire');
+  assert.ok(weeks[3].days[6].miles <= cfg.longRunPeak, 'the long run must never be pushed past the event\'s own long-run peak cap (' + cfg.longRunPeak + '), got ' + weeks[3].days[6].miles);
 });
 
 // ── Formerly a known gap, fixed (docs/COACHING_SPEC.md "Adaptation rules") ──

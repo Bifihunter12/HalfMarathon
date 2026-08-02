@@ -626,16 +626,9 @@
   var COMPLETION_TYPE_LABEL = { planned: 'Completed as planned', modified: 'Modified', partial: 'Partially completed', stopped_early: 'Stopped early' };
 
   var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
-  // Never diagnoses -- only routes toward "keep going / back off / get it checked."
-  function painGuidance(severity, worsens, canWalk) {
-    if (severity >= 7 || (worsens && !canWalk)) {
-      return { level: 'urgent', text: "This sounds like it needs a professional evaluation before you keep training. Consider resting from running until you've been checked out." };
-    }
-    if (severity >= 4 && worsens) {
-      return { level: 'caution', text: "Consider replacing today's run with cross-training or rest, and keep an eye on it. If it's still there in a few days or gets worse, get it checked out." };
-    }
-    return { level: 'mild', text: 'Mild and not worsening — okay to continue cautiously, but back off if anything changes.' };
-  }
+  // docs/SAFETY_POLICY.md -- moved to coaching-rules.js so this safety-critical
+  // triage rubric can finally have automated test coverage.
+  var painGuidance = CoachingRulesDomain.painGuidance;
 
   function isRest(label) { return /^rest\b/i.test(label.trim()); }
   function isLoggable(label) { return !isRest(label); }
@@ -1665,7 +1658,7 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate' };
+    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', preferRunWalkThroughRace: false };
     if (draft.raceName === undefined) draft.raceName = ''; // editing a plan created before this field existed
     if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
@@ -1720,6 +1713,11 @@
           '<input class="ob-input" type="number" min="0" max="7" step="1" id="f_runDaysPerWeek" value="' + draft.runDaysPerWeek + '">' +
           '<div class="ob-label">Can you run continuously for a few minutes right now, without needing to walk?</div>' +
           '<div class="chip-grid">' + chipsHtml('canRunContinuously', ['yes', 'no'], { yes: 'Yes', no: 'No — I\'m starting from walking' }, draft.canRunContinuously ? 'yes' : 'no', false) + '</div>' +
+          (draft.canRunContinuously === false ?
+            '<div class="ob-label">Do you want to keep using run/walk intervals all the way through race day?</div>' +
+            '<div class="chip-grid">' + chipsHtml('preferRunWalkThroughRace', ['no', 'yes'], { no: 'No — transition to continuous running as I progress', yes: 'Yes — I prefer run/walk and want to keep it' }, draft.preferRunWalkThroughRace ? 'yes' : 'no', false) + '</div>' +
+            '<p class="ob-hint">Totally fine either way — continuous running isn\'t required for a successful race.</p>'
+            : '') +
           '<div class="ob-label">Experience level</div>' +
           '<div class="chip-grid">' + chipsHtml('experienceLevel', LEVELS, LEVEL_LABEL, draft.experienceLevel, false) + '</div>' +
           '<div class="ob-label" style="margin-top:18px">Recent race result (optional)</div>' +
@@ -1826,7 +1824,13 @@
               draft[group] = arr;
             }
           } else if (group === 'canRunContinuously') {
+            // Re-render -- the run/walk-through-race toggle's visibility
+            // depends on this value, same reasoning as hasRecurringWorkouts below.
             draft.canRunContinuously = value === 'yes';
+            renderStep();
+            return;
+          } else if (group === 'preferRunWalkThroughRace') {
+            draft.preferRunWalkThroughRace = value === 'yes';
           } else if (group === 'hasRecurringWorkouts') {
             // Gates whether the add-workout form shows at all -- a
             // structural change, not just a chip's own selected state, so
@@ -1851,6 +1855,7 @@
             var v = c.getAttribute('data-value');
             var sel = MULTI_GROUPS.hasOwnProperty(group) ? draft[group].indexOf(v) !== -1
               : group === 'canRunContinuously' ? (draft.canRunContinuously ? 'yes' : 'no') === v
+              : group === 'preferRunWalkThroughRace' ? (draft.preferRunWalkThroughRace ? 'yes' : 'no') === v
               : group === 'rw_day' ? (draft.rwDraftDay != null ? String(draft.rwDraftDay) : 'none') === v
               : draft[group] === v;
             c.classList.toggle('selected', sel);
@@ -1970,7 +1975,8 @@
     var raceResultValid = draft.recentRaceDistance && draft.recentRaceDistance !== 'none' && parseRaceTimeToMinutes(draft.recentRaceTime);
     var profile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
-      experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays,
+      experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously,
+      preferRunWalkThroughRace: !!draft.preferRunWalkThroughRace, availableDays: draft.availableDays,
       terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'],
       recentRaceDistance: raceResultValid ? draft.recentRaceDistance : null,
       recentRaceTime: raceResultValid ? draft.recentRaceTime.trim() : ''
@@ -1981,11 +1987,32 @@
     var level = classifyUser(profile);
     var weeksAvailable = weeksBetween(parseDate(raceGoal.startDate), parseDate(raceGoal.raceDate));
     var safety = evaluateSafety(raceGoal.event, weeksAvailable, level);
+    // docs/COACHING_SPEC.md "Race readiness" -- evaluateSafety alone only
+    // checks calendar length, never the runner's actual current mileage.
+    // This adds a genuine minimum-readiness check on top, and if THIS
+    // triggers where the calendar check alone didn't, the plan still gets
+    // the same safety-scale-down treatment (unsafe below folds both checks
+    // together) -- readiness can be a real problem even when the timeline
+    // looks technically long enough for a "typical" runner at that level.
+    var readiness = CoachingRulesDomain.evaluateReadiness(profile, raceGoal, level, weeksAvailable);
+    if (!readiness.ready) {
+      safety.warnings = safety.warnings.concat([CoachingRulesDomain.formatReadinessWarning(readiness, raceGoal.event)]);
+    }
+    var unsafe = safety.unsafe || !readiness.ready;
     // docs/COACHING_SPEC.md "Runner classification" -- evaluateSafety/EVENT_TABLE
     // have no injury-aware lever of their own, so this is added here rather
-    // than changing that function's signature.
+    // than changing that function's signature. Deliberately advisory, not a
+    // gate -- runners know their own situation better than this app does; a
+    // clear warning respects that instead of blocking or requiring an
+    // acknowledgment step.
     if (profile.injuryStatus === 'medically_restricted') {
       safety.warnings = safety.warnings.concat(['This plan is scaled down for a cautious return, but a medically-restricted status is worth clearing with a doctor or physical therapist before you start training toward it.']);
+    }
+    if (profile.injuryStatus === 'unable_to_run') {
+      safety.warnings = safety.warnings.concat(["You've said you can't currently run normally, but this is still a running plan, scaled to a cautious beginner starting point. If you're not able to run comfortably yet, it's worth waiting until you can, or checking with a doctor or physical therapist if you're unsure when that'll be."]);
+    }
+    if ((raceGoal.goal === 'pr' || raceGoal.goal === 'aggressive') && !CoachingRulesDomain.hasRecentRaceEvidence(profile)) {
+      safety.warnings = safety.warnings.concat(["A PR or aggressive PR goal works best calibrated against a recent race result. Without one, this plan uses a more conservative pace target similar to an ‘improve’ goal instead of the bigger push you selected."]);
     }
     // docs/COACHING_SPEC.md "Recurring workouts" -- warn rather than
     // silently overload when the runner's fixed commitments plus required
@@ -2004,10 +2031,10 @@
     // wizard must never overwrite workouts added later in Settings.
     if (!isEdit) state.recurringWorkouts = draft.recurringWorkouts || [];
     if (raceUnchanged) {
-      state.planMeta = { level: level, weeksAvailable: state.planMeta.weeksAvailable, planLengthWeeks: state.planMeta.planLengthWeeks, unsafe: safety.unsafe, warnings: safety.warnings };
+      state.planMeta = { level: level, weeksAvailable: state.planMeta.weeksAvailable, planLengthWeeks: state.planMeta.planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings };
     } else {
       var planLengthWeeks = choosePlanLength(weeksAvailable, raceGoal.event, level);
-      state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: safety.unsafe, warnings: safety.warnings };
+      state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings };
       state.logs = {}; state.overrides = {}; state.crossType = {};
     }
     saveState(state);
@@ -2039,6 +2066,7 @@
         event: state.raceGoal.event, raceName: state.raceGoal.raceName || '', raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
         weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
         experienceLevel: state.profile.experienceLevel, injuryStatus: state.profile.injuryStatus, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
+        preferRunWalkThroughRace: !!state.profile.preferRunWalkThroughRace,
         terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
         recentRaceDistance: state.profile.recentRaceDistance || 'none', recentRaceTime: state.profile.recentRaceTime || '',
         userName: state.userName
@@ -3388,6 +3416,21 @@
           '<div class="chip-grid" id="pain_worsens">' + chipsHtml('painWorsens', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain ? (entry.pain.worsens ? 'yes' : 'no') : null, false) + '</div>' +
           '<div class="ob-label">Can you walk normally?</div>' +
           '<div class="chip-grid" id="pain_walk">' + chipsHtml('painWalk', ['yes', 'no'], { yes: 'Yes', no: 'No' }, entry.pain ? (entry.pain.canWalk ? 'yes' : 'no') : null, false) + '</div>' +
+          '<p class="ob-hint">The rest are optional, but answering them gives more accurate guidance.</p>' +
+          '<div class="ob-label">Did it start during your run, or after?</div>' +
+          '<div class="chip-grid" id="pain_onset">' + chipsHtml('painOnset', ['during', 'after'], { during: 'During', after: 'After' }, entry.pain && entry.pain.onsetDuringRun != null ? (entry.pain.onsetDuringRun ? 'during' : 'after') : null, false) + '</div>' +
+          '<div class="ob-label">Sudden or gradual onset?</div>' +
+          '<div class="chip-grid" id="pain_sudden">' + chipsHtml('painSudden', ['sudden', 'gradual'], { sudden: 'Sudden', gradual: 'Gradual' }, entry.pain && entry.pain.suddenOnset != null ? (entry.pain.suddenOnset ? 'sudden' : 'gradual') : null, false) + '</div>' +
+          '<div class="ob-label">Does it change your running form or cause limping?</div>' +
+          '<div class="chip-grid" id="pain_formchange">' + chipsHtml('painFormChange', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain && entry.pain.formChange != null ? (entry.pain.formChange ? 'yes' : 'no') : null, false) + '</div>' +
+          '<div class="ob-label">Present even at rest, not just while running?</div>' +
+          '<div class="chip-grid" id="pain_restpain">' + chipsHtml('painRestPain', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain && entry.pain.restPain != null ? (entry.pain.restPain ? 'yes' : 'no') : null, false) + '</div>' +
+          '<div class="ob-label">Any specific tender spot on a bone?</div>' +
+          '<div class="chip-grid" id="pain_bone">' + chipsHtml('painBone', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain && entry.pain.boneTenderness != null ? (entry.pain.boneTenderness ? 'yes' : 'no') : null, false) + '</div>' +
+          '<div class="ob-label">Any swelling?</div>' +
+          '<div class="chip-grid" id="pain_swelling">' + chipsHtml('painSwelling', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain && entry.pain.swelling != null ? (entry.pain.swelling ? 'yes' : 'no') : null, false) + '</div>' +
+          '<div class="ob-label">Happened on several runs, not just today?</div>' +
+          '<div class="chip-grid" id="pain_recurrent">' + chipsHtml('painRecurrent', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.pain && entry.pain.recurrent != null ? (entry.pain.recurrent ? 'yes' : 'no') : null, false) + '</div>' +
           '<div class="pain-guidance" id="painGuidance" style="display:none"></div>' +
         '</div>' +
       '</div>'
@@ -3609,6 +3652,13 @@
       var painSeverity = entry.pain ? entry.pain.severity : null;
       var painWorsens = entry.pain ? entry.pain.worsens : null;
       var painCanWalk = entry.pain ? entry.pain.canWalk : null;
+      var painOnsetDuringRun = entry.pain && entry.pain.onsetDuringRun != null ? entry.pain.onsetDuringRun : null;
+      var painSuddenOnset = entry.pain && entry.pain.suddenOnset != null ? entry.pain.suddenOnset : null;
+      var painFormChange = entry.pain && entry.pain.formChange != null ? entry.pain.formChange : null;
+      var painRestPain = entry.pain && entry.pain.restPain != null ? entry.pain.restPain : null;
+      var painBoneTenderness = entry.pain && entry.pain.boneTenderness != null ? entry.pain.boneTenderness : null;
+      var painSwelling = entry.pain && entry.pain.swelling != null ? entry.pain.swelling : null;
+      var painRecurrent = entry.pain && entry.pain.recurrent != null ? entry.pain.recurrent : null;
       var painGuidanceEl = document.getElementById('painGuidance');
 
       function updatePainGuidance() {
@@ -3616,7 +3666,11 @@
           painGuidanceEl.style.display = 'none';
           return;
         }
-        var g = painGuidance(painSeverity, painWorsens, painCanWalk);
+        var g = painGuidance({
+          severity: painSeverity, worsens: painWorsens, canWalk: painCanWalk,
+          onsetDuringRun: painOnsetDuringRun, suddenOnset: painSuddenOnset, formChange: painFormChange,
+          restPain: painRestPain, boneTenderness: painBoneTenderness, swelling: painSwelling, recurrent: painRecurrent
+        });
         painGuidanceEl.className = 'pain-guidance pain-guidance--' + g.level;
         painGuidanceEl.textContent = g.text;
         painGuidanceEl.style.display = 'block';
@@ -3645,20 +3699,44 @@
           updatePainGuidance();
         });
       });
-      document.querySelectorAll('#pain_worsens .chip').forEach(function (chip) {
+
+      // Generalized yes/no pain-field wiring -- worsens/canWalk and every new
+      // optional field all share the same "yes"/"no" data-value chip shape.
+      function wirePainBoolChip(containerId, getVal, setVal) {
+        document.querySelectorAll('#' + containerId + ' .chip').forEach(function (chip) {
+          chip.addEventListener('click', function () {
+            setVal(chip.getAttribute('data-value') === 'yes');
+            document.querySelectorAll('#' + containerId + ' .chip').forEach(function (c) {
+              c.classList.toggle('selected', c.getAttribute('data-value') === (getVal() ? 'yes' : 'no'));
+            });
+            updatePainGuidance();
+          });
+        });
+      }
+      wirePainBoolChip('pain_worsens', function () { return painWorsens; }, function (v) { painWorsens = v; });
+      wirePainBoolChip('pain_walk', function () { return painCanWalk; }, function (v) { painCanWalk = v; });
+      wirePainBoolChip('pain_formchange', function () { return painFormChange; }, function (v) { painFormChange = v; });
+      wirePainBoolChip('pain_restpain', function () { return painRestPain; }, function (v) { painRestPain = v; });
+      wirePainBoolChip('pain_bone', function () { return painBoneTenderness; }, function (v) { painBoneTenderness = v; });
+      wirePainBoolChip('pain_swelling', function () { return painSwelling; }, function (v) { painSwelling = v; });
+      wirePainBoolChip('pain_recurrent', function () { return painRecurrent; }, function (v) { painRecurrent = v; });
+
+      // pain_onset/pain_sudden use non-yes/no value pairs (during/after,
+      // sudden/gradual) but map to the same boolean storage shape.
+      document.querySelectorAll('#pain_onset .chip').forEach(function (chip) {
         chip.addEventListener('click', function () {
-          painWorsens = chip.getAttribute('data-value') === 'yes';
-          document.querySelectorAll('#pain_worsens .chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === (painWorsens ? 'yes' : 'no'));
+          painOnsetDuringRun = chip.getAttribute('data-value') === 'during';
+          document.querySelectorAll('#pain_onset .chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === (painOnsetDuringRun ? 'during' : 'after'));
           });
           updatePainGuidance();
         });
       });
-      document.querySelectorAll('#pain_walk .chip').forEach(function (chip) {
+      document.querySelectorAll('#pain_sudden .chip').forEach(function (chip) {
         chip.addEventListener('click', function () {
-          painCanWalk = chip.getAttribute('data-value') === 'yes';
-          document.querySelectorAll('#pain_walk .chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === (painCanWalk ? 'yes' : 'no'));
+          painSuddenOnset = chip.getAttribute('data-value') === 'sudden';
+          document.querySelectorAll('#pain_sudden .chip').forEach(function (c) {
+            c.classList.toggle('selected', c.getAttribute('data-value') === (painSuddenOnset ? 'sudden' : 'gradual'));
           });
           updatePainGuidance();
         });
@@ -3669,9 +3747,14 @@
         var distanceRaw = document.getElementById('wd_distance').value;
         var notes = document.getElementById('wd_notes').value.trim();
         // only persist a pain report once the three fields the guidance depends on
-        // are all answered -- a partial report can't be shown back unambiguously
+        // are all answered -- a partial report can't be shown back unambiguously.
+        // The rest are optional context that only sharpen the guidance when answered.
         var pain = (painSeverity != null && painWorsens != null && painCanWalk != null) ?
-          { location: painLocation, severity: painSeverity, worsens: painWorsens, canWalk: painCanWalk } : null;
+          {
+            location: painLocation, severity: painSeverity, worsens: painWorsens, canWalk: painCanWalk,
+            onsetDuringRun: painOnsetDuringRun, suddenOnset: painSuddenOnset, formChange: painFormChange,
+            restPain: painRestPain, boneTenderness: painBoneTenderness, swelling: painSwelling, recurrent: painRecurrent
+          } : null;
         logAndCelebrate(key, {
           time: time || null,
           distance: distanceRaw !== '' ? fromUnit(parseFloat(distanceRaw)) : null,

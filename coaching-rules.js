@@ -90,6 +90,23 @@
   // constants, moved here alongside it so the whole plan generator is
   // testable in one place (tests/plan-scenarios.test.js).
   var GOAL_FACTOR = { finish: 0.85, improve: 1.0, pr: 1.05, aggressive: 1.12 };
+
+  // docs/COACHING_SPEC.md "PR/aggressive evidence" -- a PR or aggressive-PR
+  // goal without any recent race result to calibrate against is really just
+  // an ambitious "finish" goal wearing a bigger multiplier. Capped at the
+  // 'improve' factor instead when there's no real evidence behind it --
+  // advisory (a warning, not a block), so the goal choice itself is never
+  // refused, matching this pass's "warn, don't gate" decisions elsewhere.
+  function hasRecentRaceEvidence(profile) {
+    return !!(profile.recentRaceDistance && profile.recentRaceDistance !== 'none' && profile.recentRaceTime);
+  }
+  function effectiveGoalFactor(raceGoal, profile) {
+    var factor = GOAL_FACTOR[raceGoal.goal] || 1.0;
+    if ((raceGoal.goal === 'pr' || raceGoal.goal === 'aggressive') && !hasRecentRaceEvidence(profile)) {
+      return Math.min(factor, GOAL_FACTOR.improve);
+    }
+    return factor;
+  }
   var RUN_DAYS_DEFAULT = { beginner: 3, novice: 3, intermediate: 5, advanced: 6 };
   var LONG_RUN_SHARE = { '5k': 0.32, '10k': 0.30, half: 0.30, marathon: 0.28, '50k': 0.35, '50mi': 0.38, '100k': 0.38, '100mi': 0.40 };
   var STRENGTH_SESSIONS = { base: 2, build: 2, peak: 1, taper: 0, race: 0 };
@@ -100,16 +117,88 @@
   var RACE_LABEL = { '5k': '5K Race', '10k': '10K Race', half: 'Half Marathon', marathon: 'Marathon', '50k': '50K', '50mi': '50 Mile', '100k': '100K', '100mi': '100 Mile' };
   var RUN_SLOT_PRIORITY = [1, 3, 5, 0, 2, 4]; // Tue, Thu, Sat, Mon, Wed, Fri (slot 6 = long, fixed)
 
+  // docs/COACHING_SPEC.md "Quality workout consistency" -- each entry is now
+  // { label, estimatedMinutes } instead of a bare string. estimatedMinutes
+  // is a real (if approximate) session-time total mechanically built from
+  // the entry's OWN stated structure (10 min warmup + reps x (work + jog
+  // recovery) + 10 min cooldown for interval/tempo sessions; the ultra
+  // events' entries are continuous long efforts/rehearsals, not interval
+  // sessions, so they get a flat representative time instead of a
+  // warmup/work/recovery/cooldown breakdown). This closes the gap where the
+  // displayed distance used to be computed completely independently of what
+  // the label actually described -- see formatQualityLabel below, which now
+  // derives distance FROM this same number rather than a second, unrelated
+  // guess. Own synthesis (same standing as RUN_WALK_STAGES elsewhere in this
+  // file), not a lab-measured figure -- a reasonable, documented estimate.
   var QUALITY_POOL = {
-    '5k': { entry: ['Easy + 4-6 x 20 sec strides'], trained: ['6 x 400m @ 5K pace', '5 x 3 min @ 5K effort', '4 x 5 min @ 10K effort', 'Fartlek: 8 x 1 min hard / 1 min easy'] },
-    '10k': { entry: ['Easy + strides', '20 min tempo, comfortably hard'], trained: ['Tempo: 25-30 min @ threshold', '5 x 1000m @ 10K pace', '6 x 800m @ 10K pace', 'Hills: 6 x 2 min uphill'] },
-    half: { entry: ['Easy + strides', '15-20 min tempo'], trained: ['Tempo: 3 x 10 min @ threshold', '4-6 mi @ half-marathon pace', '5 x 1 mi @ 10K pace'] },
-    marathon: { entry: ['Medium-long run', 'Easy + strides'], trained: ['8 mi w/ 4 mi @ marathon pace', '2 x 4 mi @ marathon pace', 'Medium-long run'] },
-    '50k': { entry: ['Hill repeats: 5 x 3 min uphill', 'Trail long run w/ climbing'], trained: ['Back-to-back long runs', 'Long climb + descent conditioning'] },
-    '50mi': { entry: ['Back-to-back long runs', 'Time-on-feet long run'], trained: ['Back-to-back long runs', 'Long climb + descent conditioning', 'Night run rehearsal'] },
-    '100k': { entry: ['Back-to-back long runs', 'Time-on-feet long run'], trained: ['Back-to-back long runs', 'Long climb + descent conditioning', 'Night run rehearsal'] },
-    '100mi': { entry: ['Back-to-back long runs', 'Time-on-feet long run', 'Gear + fueling rehearsal'], trained: ['Back-to-back long runs', 'Night run rehearsal', 'Downhill conditioning', 'Gear + fueling rehearsal'] }
+    '5k': {
+      entry: [{ label: 'Easy + 4-6 x 20 sec strides', estimatedMinutes: 30 }],
+      trained: [
+        { label: '6 x 400m @ 5K pace', estimatedMinutes: 10 + 6 * (2 + 2) + 10 },
+        { label: '5 x 3 min @ 5K effort', estimatedMinutes: 10 + 5 * (3 + 3) + 10 },
+        { label: '4 x 5 min @ 10K effort', estimatedMinutes: 10 + 4 * (5 + 3) + 10 },
+        { label: 'Fartlek: 8 x 1 min hard / 1 min easy', estimatedMinutes: 10 + 8 * (1 + 1) + 10 }
+      ]
+    },
+    '10k': {
+      entry: [
+        { label: 'Easy + strides', estimatedMinutes: 30 },
+        { label: '20 min tempo, comfortably hard', estimatedMinutes: 10 + 20 + 10 }
+      ],
+      trained: [
+        { label: 'Tempo: 25-30 min @ threshold', estimatedMinutes: 10 + 28 + 10 },
+        { label: '5 x 1000m @ 10K pace', estimatedMinutes: 10 + 5 * (4 + 2) + 10 },
+        { label: '6 x 800m @ 10K pace', estimatedMinutes: 10 + 6 * (3 + 2) + 10 },
+        { label: 'Hills: 6 x 2 min uphill', estimatedMinutes: 10 + 6 * (2 + 2) + 10 }
+      ]
+    },
+    half: {
+      entry: [
+        { label: 'Easy + strides', estimatedMinutes: 30 },
+        { label: '15-20 min tempo', estimatedMinutes: 10 + 18 + 10 }
+      ],
+      trained: [
+        { label: 'Tempo: 3 x 10 min @ threshold', estimatedMinutes: 10 + 3 * 10 + 2 * 3 + 10 },
+        { label: '4-6 mi @ half-marathon pace', estimatedMinutes: 10 + 5 * 8 + 10 },
+        { label: '5 x 1 mi @ 10K pace', estimatedMinutes: 10 + 5 * (7 + 2) + 10 }
+      ]
+    },
+    marathon: {
+      entry: [
+        { label: 'Medium-long run', estimatedMinutes: 60 },
+        { label: 'Easy + strides', estimatedMinutes: 30 }
+      ],
+      trained: [
+        { label: '8 mi w/ 4 mi @ marathon pace', estimatedMinutes: 70 },
+        { label: '2 x 4 mi @ marathon pace', estimatedMinutes: 10 + 2 * 34 + 3 + 10 },
+        { label: 'Medium-long run', estimatedMinutes: 60 }
+      ]
+    },
+    // Ultra events' pool entries are continuous long efforts or logistics
+    // rehearsals, not interval/tempo sessions -- a flat representative
+    // session time, not a warmup/work/recovery/cooldown breakdown.
+    '50k': {
+      entry: [{ label: 'Hill repeats: 5 x 3 min uphill', estimatedMinutes: 10 + 5 * (3 + 3) + 10 }, { label: 'Trail long run w/ climbing', estimatedMinutes: 120 }],
+      trained: [{ label: 'Back-to-back long runs', estimatedMinutes: 100 }, { label: 'Long climb + descent conditioning', estimatedMinutes: 100 }]
+    },
+    '50mi': {
+      entry: [{ label: 'Back-to-back long runs', estimatedMinutes: 110 }, { label: 'Time-on-feet long run', estimatedMinutes: 130 }],
+      trained: [{ label: 'Back-to-back long runs', estimatedMinutes: 120 }, { label: 'Long climb + descent conditioning', estimatedMinutes: 110 }, { label: 'Night run rehearsal', estimatedMinutes: 90 }]
+    },
+    '100k': {
+      entry: [{ label: 'Back-to-back long runs', estimatedMinutes: 110 }, { label: 'Time-on-feet long run', estimatedMinutes: 130 }],
+      trained: [{ label: 'Back-to-back long runs', estimatedMinutes: 120 }, { label: 'Long climb + descent conditioning', estimatedMinutes: 110 }, { label: 'Night run rehearsal', estimatedMinutes: 90 }]
+    },
+    '100mi': {
+      entry: [{ label: 'Back-to-back long runs', estimatedMinutes: 120 }, { label: 'Time-on-feet long run', estimatedMinutes: 150 }, { label: 'Gear + fueling rehearsal', estimatedMinutes: 90 }],
+      trained: [{ label: 'Back-to-back long runs', estimatedMinutes: 130 }, { label: 'Night run rehearsal', estimatedMinutes: 100 }, { label: 'Downhill conditioning', estimatedMinutes: 90 }, { label: 'Gear + fueling rehearsal', estimatedMinutes: 90 }]
+    }
   };
+  // Deliberately generic -- not the runner's own actual pace, which isn't
+  // reliably known without a recent race result to calibrate against (see
+  // hasRecentRaceEvidence above). A consistent, documented basis for turning
+  // a session's estimated time into an approximate distance, nothing more.
+  var QUALITY_DEFAULT_PACE_MIN_PER_MI = 10;
 
   function round5(n) { return Math.round(n * 2) / 2; }
 
@@ -161,6 +250,36 @@
   // (true -> same cap as 'mild_discomfort', matching the old behavior exactly).
   var INJURY_CAP = { resolved: null, mild_discomfort: 'novice', unable_to_run: 'beginner', medically_restricted: 'beginner' };
 
+  // docs/SAFETY_POLICY.md "Pain reporting" -- per-workout, transient symptom
+  // triage. Never diagnoses -- only routes toward "keep going / back off /
+  // get it checked," same three-level shape as before. Extracted here (was
+  // previously app.js-only, untestable) specifically because a coaching
+  // review found a real bug in the old positional-argument version: it only
+  // went urgent when `worsens && !canWalk` together, so "can't walk
+  // normally" alone (worsens:false) fell through to "mild, okay to
+  // continue." Fixed below -- inability to walk normally, a form/gait
+  // change, or suspected bone tenderness are now each independently
+  // sufficient for urgent, matching how the AI coach's own (richer) chat
+  // triage in netlify/functions/coach.js already treats them.
+  //
+  // `details`: { severity (1-10, required), worsens (bool, required),
+  // canWalk (bool, required), onsetDuringRun, suddenOnset, formChange,
+  // restPain, boneTenderness, swelling, recurrent -- all optional bools,
+  // undefined/null is treated as "not reported" (never elevates guidance on
+  // its own), so legacy pain reports saved before these fields existed still
+  // evaluate correctly using just severity/worsens/canWalk.
+  function painGuidance(details) {
+    var d = details || {};
+    var suddenDuringRun = !!(d.onsetDuringRun && d.suddenOnset);
+    if (d.severity >= 7 || !d.canWalk || d.formChange || d.boneTenderness) {
+      return { level: 'urgent', text: "This sounds like it needs a professional evaluation before you keep training. Consider resting from running until you've been checked out." };
+    }
+    if ((d.severity >= 4 && d.worsens) || d.swelling || d.recurrent || d.restPain || suddenDuringRun) {
+      return { level: 'caution', text: "Consider replacing today's run with cross-training or rest, and keep an eye on it. If it's still there in a few days or gets worse, get it checked out." };
+    }
+    return { level: 'mild', text: 'Mild and not worsening — okay to continue cautiously, but back off if anything changes.' };
+  }
+
   function classifyUser(profile) {
     var freq = profile.runDaysPerWeek, mileage = profile.weeklyMileage;
     var computed;
@@ -207,6 +326,80 @@
       warnings.push('You have ' + weeksAvailable + ' week' + (weeksAvailable === 1 ? '' : 's') + ' until race day, but a safe ' + EVENT_LABEL[event] + ' build at your current level needs at least ' + cfg.minWeeks + '. This plan scales volume and long runs down to reduce injury risk given the shorter runway — consider a later race date or a shorter distance for a safer build.');
     }
     return { unsafe: unsafe, warnings: warnings };
+  }
+
+  // Shortest-to-longest, used only to search for a shorter alternative event
+  // when the current one doesn't fit the runner's timeline/fitness.
+  var EVENT_ORDER = ['5k', '10k', 'half', 'marathon', '50k', '50mi', '100k', '100mi'];
+
+  // docs/COACHING_SPEC.md "Race readiness" -- mirrors computeWeeklyVolumes's
+  // exact per-level growth rate/cutback pattern (INCREASE_PCT/CUTBACK_PCT/
+  // CUTBACK_INTERVAL, same constants, not separately invented) to estimate
+  // how many weeks it actually takes to ramp from a starting weekly mileage
+  // to a target peak. Deliberately simplified versus the real plan generator
+  // -- no phase/taper modeling -- since this is only a feasibility screen,
+  // not a plan.
+  // docs/COACHING_SPEC.md "Race readiness" -- how many weeks it takes to
+  // safely grow a starting distance to a target distance using the
+  // standard, well-established "10% rule" (a widely-used real-world
+  // long-run progression heuristic, not a number invented for this app).
+  // Deliberately NOT based on computeWeeklyVolumes's own weekly-volume ramp
+  // (INCREASE_PCT/CUTBACK_PCT) -- hand-testing this while building it
+  // surfaced that that ramp's cutback weeks don't reset the growth
+  // baseline but the net rate is still slow enough that a realistic
+  // beginner profile essentially never reaches EVENT_TABLE's nominal
+  // peakVolume even across a full idealWeeks-length plan (a separate,
+  // deeper finding, flagged to the user rather than silently patched here
+  // since it's a much bigger change to the core ramp formula). The long
+  // run specifically, using the 10% rule, is both the more standard
+  // real-world readiness signal and avoids that dependency entirely.
+  function weeksToGrowDistance(startDistance, targetDistance, weeklyGrowthRate) {
+    var start = Math.max(startDistance || 0, 0.5); // avoid log(0)/divide-by-zero for a true zero starting point
+    if (start >= targetDistance) return 0;
+    return Math.ceil(Math.log(targetDistance / start) / Math.log(1 + weeklyGrowthRate));
+  }
+
+  var LONG_RUN_GROWTH_RATE = 0.10; // the standard "10% rule"
+
+  // docs/COACHING_SPEC.md "Race readiness" -- a genuine minimum-readiness
+  // check, not just evaluateSafety's calendar-length check (which never
+  // reads the runner's own current longest run at all -- a true beginner
+  // starting from 1 mile and one already running 8 miles pass the
+  // identical weeksAvailable<minWeeks test today). Checks whether the
+  // runner's OWN current long run can safely reach the event's expected
+  // long-run peak in the time available. When infeasible, computes concrete
+  // alternatives instead of a vague "consider a later date or shorter
+  // distance" sentence. Deliberately advisory only, never a block -- the
+  // runner decides what to do with the information, matching this pass's
+  // "warn, don't gate" decision for injury status too.
+  function evaluateReadiness(profile, raceGoal, level, weeksAvailable) {
+    var event = raceGoal.event;
+    var cfg = EVENT_TABLE[event][level];
+    var startLongRun = profile.longestRun || 0;
+    var neededWeeks = Math.max(cfg.minWeeks, weeksToGrowDistance(startLongRun, cfg.longRunPeak, LONG_RUN_GROWTH_RATE) + cfg.taperWeeks);
+    if (weeksAvailable >= neededWeeks) return { ready: true, neededWeeks: neededWeeks, alternatives: null };
+
+    var extraWeeksNeeded = neededWeeks - weeksAvailable;
+    var shorterEvent = null;
+    var idx = EVENT_ORDER.indexOf(event);
+    for (var i = idx - 1; i >= 0; i--) {
+      var candCfg = EVENT_TABLE[EVENT_ORDER[i]][level];
+      var candNeeded = Math.max(candCfg.minWeeks, weeksToGrowDistance(startLongRun, candCfg.longRunPeak, LONG_RUN_GROWTH_RATE) + candCfg.taperWeeks);
+      if (weeksAvailable >= candNeeded) { shorterEvent = EVENT_ORDER[i]; break; }
+    }
+    return { ready: false, neededWeeks: neededWeeks, alternatives: { extraWeeksNeeded: extraWeeksNeeded, shorterEvent: shorterEvent } };
+  }
+
+  function formatReadinessWarning(readiness, event) {
+    if (!readiness || readiness.ready) return null;
+    var parts = ['Based on your current weekly mileage, a fully safe ' + EVENT_LABEL[event] + ' build at your level would take about ' + readiness.neededWeeks + ' week' + (readiness.neededWeeks === 1 ? '' : 's') + ' -- this timeline is shorter than that, so the plan is more compressed than ideal.'];
+    var extraWeeks = Math.ceil(readiness.alternatives.extraWeeksNeeded);
+    parts.push('A race about ' + extraWeeks + ' more week' + (extraWeeks === 1 ? '' : 's') + ' out would give you a safer runway at this same distance.');
+    if (readiness.alternatives.shorterEvent) {
+      parts.push(EVENT_LABEL[readiness.alternatives.shorterEvent] + ' would comfortably fit your current timeline instead.');
+    }
+    parts.push("This plan still generates as requested -- these are just options worth considering, not a requirement.");
+    return parts.join(' ');
   }
 
   function choosePlanLength(weeksAvailable, event, level) {
@@ -293,6 +486,31 @@
     }) : [];
     if (nonHardFixedOnSpeedDaySlot.length && targetRunDays <= 2) {
       warnings.push('A fixed workout falls on your plan\'s usual speed-work day, and your running frequency is low enough that there\'s no other day to move it to. Some weeks may not include a separate structured speed session.');
+    }
+    // Hard-day adjacency (docs/COACHING_SPEC.md "Hard-day spacing") -- a
+    // fixed hard workout landing the day immediately before/after the long
+    // run (slot 6) or the plan's own quality slot (always slot 1, same fact
+    // slotForFixedDay's other checks rely on) risks stacking a demanding
+    // effort right next to another one with no recovery buffer. Detected
+    // and warned, not rescheduled -- a fixed workout's day can't be moved
+    // by this app (it's fixed by definition), same reasoning as the
+    // long-run-day conflict warning above.
+    var adjacentHardFixed = raceDate ? list.filter(function (w) {
+      if (!w.fixed || w.day == null || !classifyRecurringWorkout(w).isHardDay) return false;
+      var slot = slotForFixedDay(raceDate, w.day);
+      return slot === 5 || slot === 0 || slot === 2; // day before the long run, or either side of the quality slot
+    }) : [];
+    if (adjacentHardFixed.length) {
+      warnings.push('A fixed hard workout falls right before or after your long run or speed-work day, with no rest day between them. Consider spacing it out if you can.');
+    }
+    // Weekly hard-day load (docs/COACHING_SPEC.md "Hard-day spacing") --
+    // total hard days (recurring hard workouts + the plan's own quality
+    // session) capped at 2/week. A static, plan-wide check rather than a
+    // per-week simulation, since the inputs here don't vary week to week.
+    var hardRecurringCount = list.filter(function (w) { return classifyRecurringWorkout(w).isHardDay; }).length;
+    var likelyHasQuality = targetRunDays >= 2;
+    if (hardRecurringCount + (likelyHasQuality ? 1 : 0) > 2) {
+      warnings.push('Between your fixed hard workouts and the plan\'s own speed session, some weeks may have more than 2 genuinely hard days. Consider making one of your hard workouts easier or movable.');
     }
     return { warnings: warnings };
   }
@@ -433,10 +651,37 @@
     return extra.length ? extra.join('/') : null;
   }
 
+  // docs/COACHING_SPEC.md "Adjustment re-capping" -- neither applyMissedAdjustment's
+  // dampening nor applyDifficultyAdjustment's RPE nudge previously re-checked
+  // the result against ANY safety ceiling -- repeated +5% nudges across many
+  // renders could compound indefinitely with no cap at all. Re-derives the
+  // same event-level longRunPeak/safetyScale buildStructuredWeeks itself
+  // uses. Known, disclosed simplification: doesn't replicate the tighter
+  // base-phase longRunSafetyCap (profile.longestRun*1.15), since these
+  // adjustment functions don't receive `profile` -- the event-level peak is
+  // still a real, meaningful ceiling, just not the tightest one possible.
+  function adjustmentCaps(raceGoal, planMeta) {
+    var cfg = EVENT_TABLE[raceGoal.event] && EVENT_TABLE[raceGoal.event][planMeta.level];
+    // Degrade gracefully (no cap, i.e. a no-op clamp) rather than throw when
+    // called with a minimal/partial raceGoal-planMeta shape that doesn't
+    // carry a real event/level -- callers that only care about the week-math
+    // (not full plan-generation context) shouldn't be forced to fabricate one.
+    if (!cfg) return { long: Infinity, easy: Infinity };
+    var effectiveMinWeeks = Math.max(cfg.minWeeks, planMeta.neededWeeks || 0);
+    var safetyScale = planMeta.unsafe ? Math.max(0.55, (planMeta.weeksAvailable || 0) / effectiveMinWeeks) : 1.0;
+    var longRunPeakCap = cfg.longRunPeak * safetyScale;
+    return { long: longRunPeakCap, easy: round5(longRunPeakCap * 0.85) };
+  }
+  function clampAdjustedMiles(day, caps) {
+    if (day.type === 'long') day.miles = Math.min(day.miles, caps.long);
+    else if (day.type === 'easy') day.miles = Math.min(day.miles, caps.easy);
+  }
+
   // ── Adaptive layer: dampen future weeks if recent training was mostly missed ──
   function applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, units) {
     var raceDate = parseDate(raceGoal.raceDate);
     var planLengthWeeks = planMeta.planLengthWeeks;
+    var caps = adjustmentCaps(raceGoal, planMeta);
     var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
     if (currentWeekIdx <= 1) return { weeks: weeks, note: null };
 
@@ -452,8 +697,20 @@
       if (day.type === 'rest' || day.type === 'race' || day.type === 'cross') return;
       loggableCount++;
       var key = lastWeek.weekNum + '-' + di;
-      if (logs[key]) loggedCount++;
-      else if (day.type === 'long') longRunMissed = true;
+      var entry = logs[key];
+      if (entry) {
+        // docs/COACHING_SPEC.md "Partial-session credit" -- a stopped-early
+        // or partially-completed session is real evidence of SOME training
+        // stimulus, but treating it identically to a fully completed one
+        // would let a week of half-finished runs pass the 60% missed-ratio
+        // threshold as if nothing were wrong. Half credit reflects that
+        // without also treating it as a full miss.
+        var credit = (entry.completionType === 'stopped_early' || entry.completionType === 'partial') ? 0.5 : 1;
+        loggedCount += credit;
+        if (day.type === 'long' && credit < 1) longRunMissed = true; // a stopped-early/partial long run still deserves next week's shortening, not silent full credit
+      } else if (day.type === 'long') {
+        longRunMissed = true;
+      }
     });
     var missedRatio = loggableCount ? 1 - loggedCount / loggableCount : 0;
     var note = null;
@@ -465,6 +722,7 @@
         wk.days.forEach(function (day) {
           if (day.miles) {
             day.miles = round5(day.miles * dampen);
+            clampAdjustedMiles(day, caps);
             if (day.type === 'long') day.label = formatLongRunLabel(day.miles, terrainNote, units);
             else if (day.type === 'easy') day.label = formatEasyRunLabel(day.miles, units);
           }
@@ -477,6 +735,7 @@
         wkNext.days.forEach(function (day) {
           if (day.type === 'long' && day.miles) {
             day.miles = round5(day.miles * 0.8);
+            clampAdjustedMiles(day, caps);
             day.label = formatLongRunLabel(day.miles, terrainNote, units);
           }
         });
@@ -492,6 +751,7 @@
   function applyDifficultyAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, units) {
     var raceDate = parseDate(raceGoal.raceDate);
     var planLengthWeeks = planMeta.planLengthWeeks;
+    var caps = adjustmentCaps(raceGoal, planMeta);
     var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
     if (currentWeekIdx <= 1) return null;
 
@@ -525,6 +785,7 @@
       wk2.days.forEach(function (day) {
         if (day.miles && (day.type === 'easy' || day.type === 'long')) {
           day.miles = round5(day.miles * factor);
+          clampAdjustedMiles(day, caps);
           day.label = day.type === 'long' ? formatLongRunLabel(day.miles, terrainNote, units) : formatEasyRunLabel(day.miles, units);
         }
       });
@@ -549,8 +810,16 @@
     var level = planMeta.level;
     var cfg = EVENT_TABLE[event][level];
     var planLengthWeeks = planMeta.planLengthWeeks;
-    var safetyScale = planMeta.unsafe ? Math.max(0.55, planMeta.weeksAvailable / cfg.minWeeks) : 1.0;
-    var goalFactor = GOAL_FACTOR[raceGoal.goal] || 1.0;
+    // docs/COACHING_SPEC.md "Race readiness" -- planMeta.unsafe can now be
+    // true for two different reasons (calendar too short, OR genuine
+    // fitness-based readiness too short even with a technically-adequate
+    // calendar -- see evaluateReadiness). The scale-down denominator has to
+    // use whichever bar is actually stricter for THIS runner, or a
+    // readiness-only "unsafe" would compute a ratio >=1 and silently apply
+    // no scaling at all.
+    var effectiveMinWeeks = Math.max(cfg.minWeeks, planMeta.neededWeeks || 0);
+    var safetyScale = planMeta.unsafe ? Math.max(0.55, planMeta.weeksAvailable / effectiveMinWeeks) : 1.0;
+    var goalFactor = effectiveGoalFactor(raceGoal, profile);
 
     var peakVolume = cfg.peakVolume * goalFactor * safetyScale;
     var longRunPeak = cfg.longRunPeak * safetyScale;
@@ -576,9 +845,13 @@
     // explicitly said they can't yet run continuously. Spends roughly the
     // first 60% of the plan on a time-based run/walk progression, then falls
     // through to the normal continuous-mileage generation below unchanged,
-    // so the runner arrives at race day already running continuously.
+    // so the runner arrives at race day already running continuously --
+    // UNLESS they've explicitly opted to keep using run/walk intervals
+    // through race day (profile.preferRunWalkThroughRace), in which case
+    // the window spans the whole plan instead of just the first ~60%.
+    // Continuous running is a default graduation, never a requirement.
     var useRunWalk = profile.canRunContinuously === false;
-    var runWalkWeeks = useRunWalk ? runWalkWeeksFor(planLengthWeeks) : 0;
+    var runWalkWeeks = useRunWalk ? (profile.preferRunWalkThroughRace ? planLengthWeeks : runWalkWeeksFor(planLengthWeeks)) : 0;
 
     // docs/COACHING_SPEC.md "Recurring workouts" -- existing commitments the
     // runner already does. `w.day` is a calendar weekday (Mon=0...Sun=6), not
@@ -600,7 +873,14 @@
       var phase = phases[w - 1];
       var targetVolume = volumes[w - 1];
       var weekRunDays = runDaysForWeek(w, startRunDays, targetRunDays, 2);
-      var longShare = LONG_RUN_SHARE[event] + (weekRunDays <= 3 ? 0.15 : weekRunDays === 4 ? 0.05 : 0);
+      // docs/COACHING_SPEC.md "Long-run share cap" -- uncapped, this reaches
+      // 45% of weekly volume for a 3-day/week 10K runner (0.30 base + 0.15
+      // low-frequency bump), and could exceed 50% for ultra events whose own
+      // baseline share is already high (e.g. 100mi's 0.40 + 0.15 = 0.55).
+      // Capped at 50% regardless of event/frequency -- high, but still a
+      // real ceiling, and ultra events legitimately run a higher baseline
+      // share than road races.
+      var longShare = Math.min(0.5, LONG_RUN_SHARE[event] + (weekRunDays <= 3 ? 0.15 : weekRunDays === 4 ? 0.05 : 0));
       var template = assignWeekTemplate(weekRunDays, wantCross);
 
       // Existing-commitments quality-slot conflict, "make it smart" per the
@@ -668,13 +948,20 @@
       var runWalkStage = inRunWalkWindow ? runWalkStageForWeek(w, runWalkWeeks) : null;
       var isEntry = (level === 'beginner') || (level === 'novice' && phase === 'base');
       var pool = isEntry ? qualityPool.entry : qualityPool.trained;
-      var qualityText = pool[(w - 1) % pool.length];
+      var qualityEntry = pool[(w - 1) % pool.length];
       var strengthBudget = Math.max(0, (STRENGTH_SESSIONS[phase] != null ? STRENGTH_SESSIONS[phase] : 1) - recurringStrengthCount);
 
       var days = [];
       var longRunCap = phase === 'base' ? Math.min(longRunPeak, longRunSafetyCap) : longRunPeak;
       var longRunMiles = phase === 'race' ? 0 : round5(Math.min(longRunCap, targetVolume * longShare));
-      var qualityMiles = (phase === 'base' || phase === 'race') ? 0 : round5(Math.min(targetVolume * 0.18, 8));
+      // docs/COACHING_SPEC.md "Quality workout consistency" -- derived from
+      // this specific entry's own estimatedMinutes (via a documented,
+      // generic pace assumption) instead of an unrelated volume-budget
+      // guess, then still capped against the week's own volume budget so a
+      // long structured session never exceeds what the week can safely
+      // hold ("reject or adjust workouts whose components cannot fit within
+      // the assigned session budget").
+      var qualityMiles = (phase === 'base' || phase === 'race') ? 0 : round5(Math.min(qualityEntry.estimatedMinutes / QUALITY_DEFAULT_PACE_MIN_PER_MI, targetVolume * 0.18, 8));
       var remaining = Math.max(0, targetVolume - longRunMiles - qualityMiles);
       var easySlotCount = template.filter(function (t) { return t === 'easy'; }).length;
       var easyCap = longRunMiles > 0 ? longRunMiles * 0.85 : remaining;
@@ -688,6 +975,16 @@
         var day = { type: tok, miles: 0, label: '' };
         if (phase === 'race' && slot === 6) {
           day.type = 'race'; day.label = RACE_LABEL[event];
+        } else if (phase === 'race' && slot === 4 && level !== 'beginner') {
+          // docs/COACHING_SPEC.md "Race-week shakeout" -- a short, easy
+          // shakeout run 2 days before race day is standard practice for
+          // most runners, instead of automatically prescribing only rest
+          // and the race. Reserved for novice+ -- a true beginner's race
+          // week stays simple rest, matching this project's existing
+          // conservative bias for that level elsewhere (e.g. INJURY_CAP).
+          day.type = 'easy';
+          day.miles = round5(Math.min(2, targetVolume * 0.5));
+          day.label = formatEasyRunLabel(day.miles, units) + ' (shakeout)';
         } else if (phase === 'race') {
           day.type = 'rest'; day.label = 'Rest';
         } else if (tok === 'long') {
@@ -709,13 +1006,13 @@
             day.runWalk = buildRunWalkSession(runWalkStage, false);
             day.label = formatRunWalkLabel(day.runWalk);
           } else {
-            // docs/COACHING_SPEC.md "Quality-day volume math" -- qualityMiles
-            // is already a holistic session-distance budget (see where it's
-            // computed above), not a parse of the label's interval structure,
-            // so it's framed here as an approximate total including
-            // warm-up/cool-down rather than a precise breakdown.
+            // docs/COACHING_SPEC.md "Quality workout consistency" --
+            // qualityMiles is now derived from this same entry's own
+            // estimatedMinutes (see where it's computed above), so the
+            // label and the distance describe the same session instead of
+            // two independently-computed guesses.
             day.miles = qualityMiles;
-            day.label = qualityMiles > 0 ? qualityText + ' (~' + toUnit(qualityMiles, units) + ' ' + unitLabel(units) + ' total, incl. warm-up/cool-down)' : qualityText;
+            day.label = qualityMiles > 0 ? qualityEntry.label + ' (~' + toUnit(qualityMiles, units) + ' ' + unitLabel(units) + ' total, incl. warm-up/cool-down)' : qualityEntry.label;
           }
         } else if (tok === 'easy') {
           day.type = 'easy';
@@ -758,19 +1055,48 @@
   // ── Adaptive layer: pause days the user marked unavailable (illness/travel) ──
   // Already fully pure -- ranges is an explicit parameter, never reads any
   // external state (docs/SAFETY_POLICY.md "Illness & interruption handling").
-  function applyUnavailableRanges(weeks, raceGoal, planMeta, ranges) {
+  function applyUnavailableRanges(weeks, raceGoal, planMeta, ranges, units, terrainNote) {
     if (!ranges || !ranges.length) return weeks;
     var raceDate = parseDate(raceGoal.raceDate);
     var planLengthWeeks = planMeta.planLengthWeeks;
+    var allDays = [];
     weeks.forEach(function (wk) {
       wk.days.forEach(function (day, di) {
-        if (day.type === 'race') return;
         var iso = dateToISO(dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di));
-        var hit = ranges.filter(function (r) { return iso >= r.start && iso <= r.end; })[0];
-        if (hit) {
-          day.type = 'rest';
-          day.miles = 0;
-          day.label = 'Rest — ' + (hit.reason === 'vacation' ? 'away' : 'illness');
+        if (day.type !== 'race') {
+          var hit = ranges.filter(function (r) { return iso >= r.start && iso <= r.end; })[0];
+          if (hit) {
+            day.type = 'rest';
+            day.miles = 0;
+            day.label = 'Rest — ' + (hit.reason === 'vacation' ? 'away' : 'illness');
+          }
+        }
+        allDays.push({ day: day, iso: iso });
+      });
+    });
+
+    // docs/COACHING_SPEC.md "Return-to-training ramp-back" -- a break of a
+    // week or more gets a bounded, proportional easing-back period right
+    // after it ends (only easy/long days, same scope applyDifficultyAdjustment
+    // already uses -- never quality/cross/rest/race). Shorter gaps are left
+    // alone: the existing missed-workout/RPE adjustments already handle
+    // ordinary disruption, and not every missed day needs a special ramp.
+    // `units`/`terrainNote` are optional (this function predates them) --
+    // without them the miles still adjust correctly, just the label text
+    // stays stale; every real call site (generatePlan) always supplies both.
+    ranges.forEach(function (r) {
+      var startD = parseDate(r.start), endD = parseDate(r.end);
+      var breakDays = Math.round((endD - startD) / 86400000) + 1;
+      if (breakDays < 7) return;
+      var rampFactor = Math.max(0.6, 1 - breakDays / 60);
+      var rampEndIso = dateToISO(new Date(endD.getTime() + 7 * 86400000));
+      allDays.forEach(function (rec) {
+        if (rec.iso <= r.end || rec.iso > rampEndIso) return;
+        if (rec.day.type === 'easy' || rec.day.type === 'long') {
+          rec.day.miles = round5(rec.day.miles * rampFactor);
+          if (units) {
+            rec.day.label = rec.day.type === 'long' ? formatLongRunLabel(rec.day.miles, terrainNote, units) : formatEasyRunLabel(rec.day.miles, units);
+          }
         }
       });
     });
@@ -784,8 +1110,8 @@
   // instead of a hand-reconstructed approximation of it.
   function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units, recurringWorkouts) {
     var weeks = buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts);
-    weeks = applyUnavailableRanges(weeks, raceGoal, planMeta, unavailable);
     var terrainNote = terrainNoteFrom(profile.terrains);
+    weeks = applyUnavailableRanges(weeks, raceGoal, planMeta, unavailable, units, terrainNote);
     var adjusted = applyMissedAdjustment(weeks, raceGoal, planMeta, logs, today, terrainNote, units);
     if (!adjusted.note) {
       var diffNote = applyDifficultyAdjustment(adjusted.weeks, raceGoal, planMeta, logs, today, terrainNote, units);
@@ -857,8 +1183,14 @@
     dateForSlot: dateForSlot,
     slotForFixedDay: slotForFixedDay,
     findCurrentWeekIdx: findCurrentWeekIdx,
+    painGuidance: painGuidance,
     classifyUser: classifyUser,
     evaluateSafety: evaluateSafety,
+    evaluateReadiness: evaluateReadiness,
+    hasRecentRaceEvidence: hasRecentRaceEvidence,
+    effectiveGoalFactor: effectiveGoalFactor,
+    weeksToGrowDistance: weeksToGrowDistance,
+    formatReadinessWarning: formatReadinessWarning,
     choosePlanLength: choosePlanLength,
     RECURRING_ACTIVITY_TYPES: RECURRING_ACTIVITY_TYPES,
     RECURRING_ACTIVITY_LABEL: RECURRING_ACTIVITY_LABEL,

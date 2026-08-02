@@ -98,6 +98,55 @@ test('does not warn about the long-run day when raceDateIso is omitted (can\'t d
   assert.deepEqual(result.warnings, []);
 });
 
+// ── Hard-day adjacency + weekly cap (docs/COACHING_SPEC.md "Hard-day spacing") ──
+
+test('warns when a fixed hard workout falls the day before the long run', function () {
+  // day:4 (Friday) -> slot 5 for BASE_RACE_GOAL's Saturday race -- the day
+  // immediately before slot 6 (the long run).
+  var workouts = [{ fixed: true, day: 4, activityType: 'hiit', intensity: 'high' }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, 3, BASE_RACE_GOAL.raceDate);
+  assert.ok(result.warnings.some(function (w) { return /right before or after your long run/.test(w); }));
+});
+
+test('warns when a fixed hard workout falls the day after the quality slot', function () {
+  // day:1 (Tuesday) -> slot 2 for BASE_RACE_GOAL's Saturday race -- the day
+  // immediately after slot 1 (the quality slot).
+  var workouts = [{ fixed: true, day: 1, activityType: 'hiit', intensity: 'high' }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, 3, BASE_RACE_GOAL.raceDate);
+  assert.ok(result.warnings.some(function (w) { return /right before or after your long run/.test(w); }));
+});
+
+test('no adjacency warning for a fixed hard workout on a day that is not next to the long run or quality slot', function () {
+  // day:2 (Wednesday) -> slot 3 for BASE_RACE_GOAL's Saturday race -- not
+  // adjacent to slot 1 (quality) or slot 6 (long run).
+  var workouts = [{ fixed: true, day: 2, activityType: 'hiit', intensity: 'high' }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, 3, BASE_RACE_GOAL.raceDate);
+  assert.ok(!result.warnings.some(function (w) { return /right before or after your long run/.test(w); }));
+});
+
+test('no adjacency warning for a fixed workout that is not hard, even on an adjacent day', function () {
+  var workouts = [{ fixed: true, day: 4, activityType: 'cycling', intensity: 'low' }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, 3, BASE_RACE_GOAL.raceDate);
+  assert.ok(!result.warnings.some(function (w) { return /right before or after your long run/.test(w); }));
+});
+
+test('warns when total weekly hard-day load (recurring hard workouts + the plan\'s own quality session) exceeds 2', function () {
+  var workouts = [
+    { fixed: true, day: 4, activityType: 'hiit', intensity: 'high' },
+    { fixed: false, day: null, activityType: 'cycling', intensity: 'high' }
+  ];
+  // targetRunDays >= 2 means the plan's own quality session almost
+  // certainly exists too -- 2 hard recurring workouts + 1 quality = 3.
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, 4, BASE_RACE_GOAL.raceDate);
+  assert.ok(result.warnings.some(function (w) { return /more than 2 genuinely hard days/.test(w); }));
+});
+
+test('no weekly-load warning when hard-day count stays at or under 2', function () {
+  var workouts = [{ fixed: true, day: 2, activityType: 'hiit', intensity: 'high' }];
+  var result = rules.evaluateRecurringWorkoutSchedule(workouts, 4, BASE_RACE_GOAL.raceDate);
+  assert.ok(!result.warnings.some(function (w) { return /more than 2 genuinely hard days/.test(w); }));
+});
+
 test('movable workouts (fixed: false) never trigger the rest-day warning, regardless of count', function () {
   var workouts = [{ fixed: false, day: null }, { fixed: false, day: null }, { fixed: false, day: null }];
   var result = rules.evaluateRecurringWorkoutSchedule(workouts, 5);
