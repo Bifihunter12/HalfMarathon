@@ -567,6 +567,7 @@ body {
   justify-content: space-between;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
+  cursor: pointer;
 }
 .week-num {
   font-size: 13px;
@@ -583,6 +584,17 @@ body {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
+.week-head-right { display: flex; align-items: center; gap: 8px; }
+.week-count {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.week-chevron { font-size: 16px; color: var(--text-faint); transition: transform 0.15s ease; }
+.week-block:not(.is-collapsed) .week-chevron { transform: rotate(180deg); }
+.week-block.is-collapsed .day-list { display: none; }
 
 .day-row {
   display: flex;

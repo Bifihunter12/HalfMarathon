@@ -2952,16 +2952,40 @@
       var weekNum = wk.weekNum;
       var firstDate = dateForSlot(raceDate, planLengthWeeks, weekNum, 0);
       var lastDate = dateForSlot(raceDate, planLengthWeeks, weekNum, 6);
+      // docs/COACHING_SPEC.md "Compact week list" -- rendering every week of
+      // a long plan (e.g. 19 weeks for a beginner half) fully expanded at
+      // once meant a lot of scrolling just to get past weeks you're not
+      // looking at right now. Only the current week starts expanded; every
+      // other week (past or future) starts collapsed to its header line,
+      // expandable with a tap -- a pure CSS/class toggle below, not a
+      // re-render, so toggling never loses scroll position or in-progress
+      // state elsewhere on the page.
+      var isCurrentWeek = weekNum === currentWeek;
+      var weekLoggable = 0, weekLogged = 0;
+      wk.days.forEach(function (dayData, di) {
+        var key = weekNum + '-' + di;
+        var lbl = state.overrides[key] || dayData.label;
+        if (isLoggable(lbl)) { weekLoggable++; if (state.logs[key]) weekLogged++; }
+      });
 
       var block = el(
-        '<div class="week-block">' +
+        '<div class="week-block' + (isCurrentWeek ? '' : ' is-collapsed') + '">' +
           '<div class="week-head">' +
-            '<div class="week-num">WEEK ' + (weekNum < 10 ? '0' + weekNum : weekNum) + ' <span class="phase-tag">' + wk.phase.toUpperCase() + '</span></div>' +
-            '<div class="week-range">' + fmtRange(firstDate, lastDate) + '</div>' +
+            '<div>' +
+              '<div class="week-num">WEEK ' + (weekNum < 10 ? '0' + weekNum : weekNum) + ' <span class="phase-tag">' + wk.phase.toUpperCase() + '</span></div>' +
+              '<div class="week-range">' + fmtRange(firstDate, lastDate) + '</div>' +
+            '</div>' +
+            '<div class="week-head-right">' +
+              '<span class="week-count">' + weekLogged + '/' + weekLoggable + '</span>' +
+              '<i class="ti ti-chevron-down week-chevron"></i>' +
+            '</div>' +
           '</div>' +
           '<div class="day-list"></div>' +
         '</div>'
       );
+      block.querySelector('.week-head').addEventListener('click', function () {
+        block.classList.toggle('is-collapsed');
+      });
       var dayList = block.querySelector('.day-list');
 
       wk.days.forEach(function (dayData, di) {
