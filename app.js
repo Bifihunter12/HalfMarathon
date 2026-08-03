@@ -4946,6 +4946,9 @@
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
         '<p class="recap-empty">5K, 10K, and half marathon are always available. Marathon and ultra distances are still being reviewed &mdash; turn this on to unlock them for new plans.</p>' +
         '<div class="chip-grid" id="set_longerDistances">' + chipsHtml('longerDistances', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.enableLongerDistances ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:18px">Simulate premium (testing only)</div>' +
+        '<p class="recap-empty">Turns on Premium locally on this device for testing &mdash; no charge, no real store involved. Turn off to go back to the free plan. Remove this toggle before a real launch.</p>' +
+        '<div class="chip-grid" id="set_simulatePremium">' + chipsHtml('simulatePremium', ['off', 'on'], { off: 'Off', on: 'On' }, (SubscriptionDomain.hasActiveEntitlement && SubscriptionDomain.hasActiveEntitlement(state.subscription)) ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -4996,6 +4999,24 @@
         wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (c) {
           c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off'))));
         });
+      });
+    });
+
+    // docs/COACHING_SPEC.md "Subscription / premium features" -- lets the
+    // runner unlock premium locally for testing without a real store (none
+    // exists yet). Full re-render, not just chip repaint, since the
+    // Subscription section near the top of this same screen also needs to
+    // reflect the change. Ships with a beta flag treatment (off by default,
+    // clearly labeled) since a toggle like this must be removed once real
+    // in-app purchase exists -- otherwise it would be a permanent free bypass.
+    wrap.querySelectorAll('#set_simulatePremium .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var on = chip.getAttribute('data-value') === 'on';
+        state.subscription = on
+          ? { tier: 'premium', productId: 'test_simulated', source: null, expiresAtIso: '2099-01-01T00:00:00.000Z', willRenew: false, lastVerifiedIso: new Date().toISOString() }
+          : { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: null };
+        saveState(state);
+        renderSettings();
       });
     });
 
