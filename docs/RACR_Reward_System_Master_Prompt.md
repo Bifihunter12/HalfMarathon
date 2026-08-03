@@ -1,5 +1,7 @@
 # MASTER PROMPT — RACR Reward System, XP Economy, Achievements, Badges and Levels
 
+> **Superseded (2026-08-03):** the XP economy and generic player-level system this document specifies was removed from V1 — see `docs/COACHING_SPEC.md` "Achievements." Product decision: XP/generic levels never influenced training, readiness, adaptation, or safety, so they didn't belong in the shipped experience; replaced with real, verifiable running achievements (first run, first 5K/10K, longest run, highest weekly mileage, four consistent weeks, training-plan/race-day completion) plus the badges this document already specified (Side Mission/challenge/quest-track completions), which were always independent of XP and are unaffected. Kept here for historical context only — do not build from the XP/leveling sections below.
+
 **Brand:** RACR — "Your race. Your plan."
 
 Saved verbatim/reformatted (2026-07-22). **This is the authoritative, engineering-grade version of the reward system** — it supersedes `docs/RACR_Leveling_System.md` (2026-07-22's earlier narrative addendum, kept for history/context but no longer the reference to build from) and completes the reward-system gaps flagged in `docs/RACR_Master_Prompt.md`. Must integrate with Main Quest, Side Missions, the race-training Path, workout logging, running-performance tracking, badges, XP, RACR Levels, Race Readiness, and completed race seasons — never implement isolated points/badges/levels disconnected from meaningful training behavior.

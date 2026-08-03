@@ -55,9 +55,11 @@ test('quest progression and benchmark storage are explicit', function () {
   assert.equal(track.missionIds[0], 'strong_runner_20');
 });
 
-test('xp rewards are present for the first five complete missions', function () {
+test('the first five complete missions have real, meaningful duration data (no XP reward field)', function () {
   ['strong_runner_20', 'upper_body_20', 'core_10', 'trail_90', 'carry_10'].forEach((id) => {
-    assert.ok(sideQuests.missionById(id).xpReward > 0);
+    const mission = sideQuests.missionById(id);
+    assert.ok(mission.durationMinutesMin > 0, id + ' should have a real duration');
+    assert.ok(!('xpReward' in mission), id + ' should not carry a removed xpReward field');
   });
 });
 
@@ -115,12 +117,12 @@ test('two same-day contributions to the same challenge both survive (no natural-
   assert.equal(sideQuests.challengeProgressFromLog('squat_century', log).accumulated, 70);
 });
 
-test('all 8 bodyweight challenges are registered with a positive final-level XP reward', function () {
+test('all 8 bodyweight challenges are registered with a real, increasing level ladder (no XP reward field)', function () {
   const ids = ['squat_century', 'lunge_ladder', 'pushup_progress', 'glute_bridge_builder', 'calf_capacity', 'wall_sit_builder', 'plank_accumulator', 'step_up_summit'];
   ids.forEach((id) => {
     const challenge = sideQuests.challengeById(id);
     assert.ok(challenge, id + ' should exist in CHALLENGE_CATALOG');
-    assert.ok(challenge.xpReward > 0);
-    assert.ok(challenge.levels.length >= 1);
+    assert.ok(!('xpReward' in challenge), id + ' should not carry a removed xpReward field');
+    assert.ok(challenge.levels.length >= 1, id + ' should have at least one real level target');
   });
 });

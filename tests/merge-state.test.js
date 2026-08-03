@@ -10,7 +10,7 @@ function baseState(overrides) {
     userName: '', units: 'mi', notifications: { enabled: false },
     activeQuestTrack: null, activeWeeklyChallenge: null, sideQuestOnboarding: null,
     sideQuestCalendar: {}, completedQuestTracks: [], path: null, pathNodes: [],
-    badges: [], xp: 0, xpEvents: [], xpProfile: null,
+    badges: [],
     raceGoal: null, profile: null, planMeta: null,
     logs: {}, overrides: {}, crossType: {},
     unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: [],
@@ -20,41 +20,25 @@ function baseState(overrides) {
   }, overrides || {});
 }
 
-test('regression: an offline-only xpEvents entry on one device survives the merge', function () {
-  // This is the exact historical bug shape this project hit and fixed --
-  // state.xp used to be a bare prefer-newer scalar, so whichever device's
-  // lastModified lost would have its entire XP gain silently discarded.
+// docs/COACHING_SPEC.md "Achievements" -- XP/generic player levels were
+// removed from V1. merge-state.js no longer reads, merges, or emits
+// xp/xpEvents/xpProfile at all -- these regression tests prove a legacy
+// device carrying that old data can't make the removed XP UI reappear via
+// a cross-device sync (a device that upgraded first syncing with one that
+// hasn't yet must never resurrect XP for either side).
+test('regression: legacy xp/xpEvents/xpProfile fields on either device never appear in the merged output', function () {
   const local = baseState({
     lastModified: 2000,
-    xpEvents: [{ idempotencyKey: 'mainquest|1-1', source: 'main_quest', totalXp: 100, date: '2026-07-20' }],
-    xp: 100
+    xp: 999, xpEvents: [{ idempotencyKey: 'mainquest|1-1', totalXp: 100 }], xpProfile: { lastLevelUpAt: 123 }
   });
   const remote = baseState({
-    lastModified: 1000, // older -- simulates a device that synced less recently but earned XP while offline
-    xpEvents: [{ idempotencyKey: 'mainquest|2-2', source: 'main_quest', totalXp: 200, date: '2026-07-21' }],
-    xp: 200
+    lastModified: 1000,
+    xp: 20, xpEvents: [{ idempotencyKey: 'mainquest|2-2', totalXp: 200 }], xpProfile: { lastLevelUpAt: 456 }
   });
   const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.xpEvents.length, 2, 'both devices\' events must survive the union, not just the newer device\'s');
-  assert.ok(merged.xpEvents.some((e) => e.idempotencyKey === 'mainquest|2-2'), 'the older/remote-only event must not be dropped');
-});
-
-test('regression: state.xp always equals the sum of the merged ledger, never an independently-carried value', function () {
-  const local = baseState({
-    lastModified: 2000,
-    xpEvents: [{ idempotencyKey: 'a', totalXp: 50 }, { idempotencyKey: 'b', totalXp: 30 }],
-    xp: 999 // deliberately wrong/stale -- must be ignored and recomputed from the ledger
-  });
-  const remote = baseState({ lastModified: 1000, xpEvents: [{ idempotencyKey: 'c', totalXp: 20 }], xp: 20 });
-  const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.xp, 100, 'xp must be recomputed as the sum of the merged xpEvents (50+30+20), not carried from either side\'s stale scalar');
-});
-
-test('a conflicting edit to the same xpEvents idempotencyKey resolves to one entry, not two', function () {
-  const local = baseState({ lastModified: 2000, xpEvents: [{ idempotencyKey: 'x', totalXp: 100 }], xp: 100 });
-  const remote = baseState({ lastModified: 1000, xpEvents: [{ idempotencyKey: 'x', totalXp: 90 }], xp: 90 });
-  const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.xpEvents.length, 1);
+  assert.equal(merged.xp, undefined, 'xp must not be carried into the merged state');
+  assert.equal(merged.xpEvents, undefined, 'xpEvents must not be carried into the merged state');
+  assert.equal(merged.xpProfile, undefined, 'xpProfile must not be carried into the merged state');
 });
 
 test('sideQuestLog, completedQuestTracks, unavailable, and pathNodes union by natural key without duplication', function () {
@@ -105,27 +89,25 @@ test('a week\'s runningFeelingLog entry can be overwritten, not just unioned, by
   assert.equal(merged.runningFeelingLog[0].feeling, 'bored', 'newer device\'s answer for the same week replaces the older one');
 });
 
-test('scalar fields (raceGoal/profile/planMeta/xpProfile) prefer the newer device wholesale', function () {
-  const local = baseState({ lastModified: 2000, raceGoal: { event: '10k' }, profile: { p: 1 }, planMeta: { m: 1 }, xpProfile: { lastLevelUpAt: 5 } });
-  const remote = baseState({ lastModified: 1000, raceGoal: { event: 'half' }, profile: { p: 2 }, planMeta: { m: 2 }, xpProfile: { lastLevelUpAt: 9 } });
+test('scalar fields (raceGoal/profile/planMeta) prefer the newer device wholesale', function () {
+  const local = baseState({ lastModified: 2000, raceGoal: { event: '10k' }, profile: { p: 1 }, planMeta: { m: 1 } });
+  const remote = baseState({ lastModified: 1000, raceGoal: { event: 'half' }, profile: { p: 2 }, planMeta: { m: 2 } });
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.raceGoal.event, '10k');
   assert.equal(merged.profile.p, 1);
   assert.equal(merged.planMeta.m, 1);
-  assert.equal(merged.xpProfile.lastLevelUpAt, 5);
 });
 
 test('flags (beta feature toggles) prefer the newer device wholesale, defaulting safely when absent', function () {
-  const local = baseState({ lastModified: 2000, flags: { enableLongerDistances: true, quietGamification: false } });
-  const remote = baseState({ lastModified: 1000, flags: { enableLongerDistances: false, quietGamification: true } });
+  const local = baseState({ lastModified: 2000, flags: { enableLongerDistances: true } });
+  const remote = baseState({ lastModified: 1000, flags: { enableLongerDistances: false } });
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.flags.enableLongerDistances, true, 'newer (local) device wins for flags, same prefer-newer pattern as notifications');
-  assert.equal(merged.flags.quietGamification, false);
 
   const localNoFlags = baseState({ lastModified: 2000 });
   const remoteNoFlags = baseState({ lastModified: 1000 });
   const mergedDefaults = mergeState.mergeRunnerState(localNoFlags, remoteNoFlags);
-  assert.deepEqual(mergedDefaults.flags, { enableLongerDistances: false, quietGamification: false }, 'missing flags on both sides falls back to the safe default, not undefined');
+  assert.deepEqual(mergedDefaults.flags, { enableLongerDistances: false }, 'missing flags on both sides falls back to the safe default, not undefined');
 });
 
 test('recurringWorkouts added on different devices both survive the merge (union by id)', function () {

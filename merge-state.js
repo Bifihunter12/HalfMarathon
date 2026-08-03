@@ -12,7 +12,7 @@
   // because none could exist for code living inside the browser-only
   // app.js IIFE. Pure function: no localStorage/DOM access, just local/remote
   // state objects in, one merged object out. Mirrors the exact UMD pattern
-  // already used by side-quests.js/path-system.js/xp-system.js.
+  // already used by side-quests.js/path-system.js.
   function mergeRunnerState(local, remote) {
     var localNewer = (local.lastModified || 0) >= (remote.lastModified || 0);
     var prefer = localNewer ? local : remote;
@@ -99,13 +99,6 @@
       if (!pathNodeMap[n.id] || n.status === 'completed') pathNodeMap[n.id] = n;
     });
 
-    // XP events are append-only and idempotency-keyed (docs/RACR_Reward_System_Master_Prompt.md
-    // Phase 1) -- union by key like sideQuestLog/completedQuestTracks above,
-    // not a scalar merge. `xp` itself is then recomputed as the ledger's sum
-    // rather than merged independently, which is what actually fixes the
-    // fragility the old scalar-xp merge (still shown further down) had to
-    // work around: two devices earning XP offline can no longer silently
-    // lose one side's events, since both sides' events survive the union.
     // docs/COACHING_SPEC.md "Subscription / premium features" -- unlike
     // every other scalar field above (plain prefer-newer), a subscription
     // record protects something the runner actually paid for, so it must
@@ -129,19 +122,11 @@
       return (r.lastVerifiedIso || '') > (l.lastVerifiedIso || '') ? r : l;
     }
 
-    var xpEventMap = {};
-    (remote.xpEvents || []).concat(local.xpEvents || []).forEach(function (e) {
-      if (!e || !e.idempotencyKey) return;
-      xpEventMap[e.idempotencyKey] = e;
-    });
-    var xpEventsMerged = Object.keys(xpEventMap).map(function (k) { return xpEventMap[k]; });
-    var xpTotalFromLedger = xpEventsMerged.reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
-
     return {
       userName: prefer.userName,
       units: prefer.units,
       notifications: prefer.notifications || { enabled: false },
-      flags: prefer.flags || { enableLongerDistances: false, quietGamification: false },
+      flags: prefer.flags || { enableLongerDistances: false },
       weightTrackingEnabled: prefer.weightTrackingEnabled || false,
       weightUnits: prefer.weightUnits || (prefer.units === 'km' ? 'kg' : 'lb'),
       activeQuestTrack: prefer.activeQuestTrack !== undefined ? prefer.activeQuestTrack : null,
@@ -152,13 +137,6 @@
       path: prefer.path || local.path || remote.path || null,
       pathNodes: Object.keys(pathNodeMap).map(function (k) { return pathNodeMap[k]; }),
       badges: badgesUnion,
-      // Derived from xpEventsMerged above, not merged as its own scalar --
-      // see the xpEventMap comment above for why this replaced the old
-      // prefer-newer-scalar approach (kept working, but was a documented
-      // known-fragile pattern, not one to extend further).
-      xp: xpTotalFromLedger,
-      xpEvents: xpEventsMerged,
-      xpProfile: prefer.xpProfile || { lastLevelUpAt: null, selectedProfileTitle: null, selectedPathTheme: null, selectedBadgeFrame: null },
       raceGoal: prefer.raceGoal,
       profile: prefer.profile,
       planMeta: prefer.planMeta,

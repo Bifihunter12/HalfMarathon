@@ -22,7 +22,7 @@
       impactLevel: 'low', trainingLoad: 3, lowerBodyFatigue: 3, upperBodyFatigue: 2, coreFatigue: 2, runningInterference: 'moderate',
       relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: ['quality', 'long'],
-      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 120,
+      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: null, progression: 'Add reps first, then resistance or one extra set.', logicalNextStep: 'Strong Runner track',
       warmup: ['Easy walk or march 2 minutes', 'Hip hinges x 8', 'Bodyweight squats x 8'],
       exercises: [
@@ -42,7 +42,7 @@
       impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 1, upperBodyFatigue: 3, coreFatigue: 2, runningInterference: 'low',
       relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
-      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 100,
+      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: null, progression: 'Improve reps or resistance on one push and one pull movement.', logicalNextStep: 'Upper Body Builder',
       warmup: ['Shoulder circles x 10 each way', 'Band pull-aparts or scap squeezes x 12'],
       exercises: [
@@ -63,7 +63,7 @@
       impactLevel: 'low', trainingLoad: 1, lowerBodyFatigue: 1, upperBodyFatigue: 1, coreFatigue: 2, runningInterference: 'low',
       relationshipLabel: 'Complements today\'s Main Mission', completionMetric: 'minutes', targetValue: 10,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'quality', 'long', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
-      avoidWhen: ['sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 60,
+      avoidWhen: ['sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: null, progression: 'Add control or one extra round before adding harder variations.', logicalNextStep: 'Core Armor',
       warmup: ['Easy breathing x 5 breaths', 'Cat-cow x 6'],
       exercises: [
@@ -82,7 +82,7 @@
       impactLevel: 'moderate', trainingLoad: 3, lowerBodyFatigue: 2, upperBodyFatigue: 0, coreFatigue: 1, runningInterference: 'moderate',
       relationshipLabel: 'Can replace an easy Main Mission', completionMetric: 'minutes', targetValue: 90,
       canReplaceWorkoutTypes: ['easy', 'cross'], canComplementWorkoutTypes: ['rest'], avoidBeforeWorkoutTypes: ['long', 'quality'],
-      avoidWhen: ['severe_fatigue', 'sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 150,
+      avoidWhen: ['severe_fatigue', 'sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: 'trailbreaker', progression: 'Add elevation or new terrain later, not speed today.', logicalNextStep: 'Trail Explorer',
       warmup: ['Start with 10 easy minutes before climbing.'],
       exercises: [{ fixed: 'Hike or outdoor walk', sets: 1, reps: '90 minutes', restSeconds: 0, rpe: '3-5', cues: 'Conversational effort.' }]
@@ -95,7 +95,7 @@
       impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 1, upperBodyFatigue: 2, coreFatigue: 3, runningInterference: 'low',
       relationshipLabel: 'Best completed on a rest or easy day', completionMetric: 'carry_minutes', targetValue: 10,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
-      avoidWhen: ['severe_fatigue', 'back_pain', 'shoulder_pain', 'wrist_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 90,
+      avoidWhen: ['severe_fatigue', 'back_pain', 'shoulder_pain', 'wrist_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: 'carry_strong', progression: 'Add total carry time before adding load.', logicalNextStep: 'Upper Body 20',
       warmup: ['Unloaded walk 2 minutes', 'Light carry 30 seconds each side'],
       exercises: [{ fixed: 'Farmer, suitcase, front-rack, or backpack carry', sets: 'as needed', reps: '10 total carry minutes', restSeconds: 30, rpe: '6-7', cues: 'Tall posture, controlled steps.' }]
@@ -108,7 +108,7 @@
       impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 2, upperBodyFatigue: 0, coreFatigue: 1, runningInterference: 'low',
       relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
-      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 70,
+      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: 'single_leg_strong', progression: 'Advance one level at a time: stand, then head turns, then reach, then a supported single-leg deadlift, then loaded.', logicalNextStep: 'Single-Leg Strength',
       warmup: ['Ankle circles x 10 each way', 'Easy marching in place 30 seconds'],
       exercises: [
@@ -126,7 +126,7 @@
       impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 1, upperBodyFatigue: 1, coreFatigue: 3, runningInterference: 'low',
       relationshipLabel: 'Complements today\'s Main Mission', completionMetric: 'workout_complete', targetValue: 1,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'quality', 'long', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
-      avoidWhen: ['sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 65,
+      avoidWhen: ['sharp_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: null, progression: 'Add a round or hold each position slightly longer before adding harder variations.', logicalNextStep: 'Core 10',
       warmup: ['Easy breathing x 5 breaths', 'Cat-cow x 6'],
       exercises: [
@@ -144,7 +144,7 @@
       impactLevel: 'low', trainingLoad: 2, lowerBodyFatigue: 0, upperBodyFatigue: 3, coreFatigue: 2, runningInterference: 'low',
       relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: [],
-      avoidWhen: ['severe_fatigue', 'shoulder_pain', 'wrist_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 70,
+      avoidWhen: ['severe_fatigue', 'shoulder_pain', 'wrist_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: null, progression: 'Add reps first, then an equipment version of the same movement.', logicalNextStep: 'Upper Body 20',
       warmup: ['Shoulder circles x 10 each way', 'Band pull-aparts or scap squeezes x 12'],
       exercises: [
@@ -162,7 +162,7 @@
       impactLevel: 'low', trainingLoad: 3, lowerBodyFatigue: 3, upperBodyFatigue: 0, coreFatigue: 1, runningInterference: 'moderate',
       relationshipLabel: 'Supports your Main Quest', completionMetric: 'workout_complete', targetValue: 1,
       canReplaceWorkoutTypes: [], canComplementWorkoutTypes: ['easy', 'recovery', 'rest'], avoidBeforeWorkoutTypes: ['quality', 'long'],
-      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false, xpReward: 70,
+      avoidWhen: ['severe_fatigue', 'relevant_pain', 'acute_illness'], requiresExperience: false, requiresCoachWarning: false,
       badgeId: null, progression: 'Add a round before adding harder variations of each movement.', logicalNextStep: 'Strong Runner 20',
       warmup: ['Easy marching in place 30 seconds', 'Leg swings x 8 each way'],
       exercises: [
@@ -191,56 +191,56 @@
       id: 'squat_century', name: 'Squat Century', category: 'strength', unit: 'reps', levels: [100],
       description: 'Complete 100 controlled squats, in any structure that works for you.',
       variants: { beginner: 'Chair squat', standard: 'Bodyweight squat', advanced: 'Goblet squat' },
-      badgeId: 'squat_century', xpReward: 40, equipmentOptions: ['bodyweight', 'dumbbells'],
+      badgeId: 'squat_century', equipmentOptions: ['bodyweight', 'dumbbells'],
       avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 3
     },
     {
       id: 'lunge_ladder', name: 'Lunge Ladder', category: 'strength', unit: 'reps', levels: [20, 40, 60, 80, 100],
       description: 'A personalized reverse-lunge progression, counted across both legs.',
       variants: { beginner: 'Supported split squat', standard: 'Reverse lunge', advanced: 'Weighted reverse lunge' },
-      badgeId: 'lunge_builder', xpReward: 40, equipmentOptions: ['bodyweight', 'dumbbells', 'kettlebells'],
+      badgeId: 'lunge_builder', equipmentOptions: ['bodyweight', 'dumbbells', 'kettlebells'],
       avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 3
     },
     {
       id: 'pushup_progress', name: 'Push-Up Progress', category: 'strength', unit: 'reps', levels: [15, 25, 40, 60, 100],
       description: 'Progress within whichever push-up variation fits you today.',
       variants: { beginner: 'Wall push-up', standard: 'Incline push-up', advanced: 'Floor push-up' },
-      badgeId: 'pushup_progress', xpReward: 35, equipmentOptions: ['bodyweight'],
+      badgeId: 'pushup_progress', equipmentOptions: ['bodyweight'],
       avoidBeforeWorkoutTypes: [], lowerBodyFatigue: 0
     },
     {
       id: 'glute_bridge_builder', name: 'Glute-Bridge Builder', category: 'strength', unit: 'reps', levels: [30, 50, 75, 100],
       description: 'Build accumulated glute-bridge volume at a controlled tempo.',
       variants: { beginner: 'Supported glute bridge', standard: 'Glute bridge', advanced: 'Single-leg glute bridge' },
-      badgeId: null, xpReward: 35, equipmentOptions: ['bodyweight'],
+      badgeId: null, equipmentOptions: ['bodyweight'],
       avoidBeforeWorkoutTypes: ['long'], lowerBodyFatigue: 2
     },
     {
       id: 'calf_capacity', name: 'Calf Capacity', category: 'strength', unit: 'reps', levels: [40, 60, 80, 100],
       description: 'Build calf and ankle durability with slow, controlled repetitions.',
       variants: { beginner: 'Supported calf raise', standard: 'Calf raise', advanced: 'Single-leg calf raise' },
-      badgeId: 'calf_capacity', xpReward: 35, equipmentOptions: ['bodyweight'],
+      badgeId: 'calf_capacity', equipmentOptions: ['bodyweight'],
       avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 2
     },
     {
       id: 'wall_sit_builder', name: 'Wall-Sit Builder', category: 'strength', unit: 'seconds', levels: [60, 120, 180, 300],
       description: 'Accumulate wall-sit time across one or more sets -- quality over one maximum hold.',
       variants: { beginner: 'Supported wall sit', standard: 'Wall sit', advanced: 'Single-leg wall sit' },
-      badgeId: null, xpReward: 30, equipmentOptions: ['bodyweight'],
+      badgeId: null, equipmentOptions: ['bodyweight'],
       avoidBeforeWorkoutTypes: ['long'], lowerBodyFatigue: 2
     },
     {
       id: 'plank_accumulator', name: 'Plank Accumulator', category: 'core', unit: 'seconds', levels: [120, 240, 360, 480, 600],
       description: 'Accumulate quality plank time across sets -- never a single continuous maximum hold.',
       variants: { beginner: 'Knee plank', standard: 'Standard plank', advanced: 'Side plank' },
-      badgeId: null, xpReward: 30, equipmentOptions: ['bodyweight'],
+      badgeId: null, equipmentOptions: ['bodyweight'],
       avoidBeforeWorkoutTypes: [], lowerBodyFatigue: 0
     },
     {
       id: 'step_up_summit', name: 'Step-Up Summit', category: 'strength', unit: 'reps', levels: [50, 100, 150, 200],
       description: 'Accumulate controlled step-ups using a safe step, stair, or box.',
       variants: { beginner: 'Low step-up', standard: 'Step-up', advanced: 'Weighted step-up' },
-      badgeId: null, xpReward: 35, equipmentOptions: ['bodyweight', 'chair_or_bench'],
+      badgeId: null, equipmentOptions: ['bodyweight', 'chair_or_bench'],
       avoidBeforeWorkoutTypes: ['quality', 'long'], lowerBodyFatigue: 3
     }
   ];

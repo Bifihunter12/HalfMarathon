@@ -9,7 +9,7 @@
   // recurring workouts/travel mode, and progress tracking stay free for
   // everyone, no matter what. Only the two features that cost real per-use
   // backend spend are gated. Pure functions only, same separation as
-  // progress-stats.js/xp-system.js -- app.js owns turning a lock check into
+  // progress-stats.js -- app.js owns turning a lock check into
   // markup and the real store purchase flow (not yet built, see that doc).
   var PREMIUM_FEATURES = {
     aiCoachChat: 'AI coach chat',

@@ -1247,7 +1247,7 @@
   // ── First-class multi-session model (docs/COACHING_SPEC.md "Multiple
   // workouts per day") -- built ADDITIVELY alongside the existing
   // day.type/miles/label fields (never replacing them, so every existing
-  // renderer/logger/XP call site keeps working unchanged). day.sessions[]
+  // renderer/logger call site keeps working unchanged). day.sessions[]
   // holds 1-2 structured session objects (a day can have a primary run/
   // hike/rest/cross session and, when a fixed workout coexists with a
   // morning run, one secondary session) -- each with its own stable id,

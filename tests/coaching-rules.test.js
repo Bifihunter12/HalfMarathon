@@ -3,7 +3,7 @@
 // behave identically to their pre-extraction app.js originals. The actual
 // decision-scenario library (approved/forbidden adaptation outcomes) lives
 // in tests/decision-scenarios.test.js -- this file is ordinary unit coverage
-// for the moved code, same shape as tests/xp-system.test.js.
+// for the moved code, same shape as tests/subscription.test.js.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

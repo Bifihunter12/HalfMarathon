@@ -4,11 +4,13 @@
   var STORAGE_KEY = 'training_plan_v1';
   var SideQuestDomain = window.RACRSideQuests || {};
   var PathDomain = window.RACRPath || {};
-  var XpDomain = window.RACRXp || {};
   var MergeStateDomain = window.RACRMergeState || {};
   var CoachingRulesDomain = window.RACRCoachingRules || {};
   var ProgressStatsDomain = window.RACRProgressStats || {};
   var SubscriptionDomain = window.RACRSubscription || {};
+  // docs/COACHING_SPEC.md "Achievements" -- XP/generic player levels were
+  // removed from V1 (RACRXp / xp-system.js no longer exist); this app
+  // never rewards points, only real, verifiable running progress.
 
   // ── Minimal self-hosted crash/event logging (docs/RELEASE_BLOCKERS.md
   // CRITICAL-2 + CRITICAL-3) -- fire-and-forget POSTs to a Netlify function
@@ -230,21 +232,21 @@
   // spec's full schema (no equipment/muscle_groups/progression yet -- that's
   // Phase 2 territory once quest tracks exist).
   var SIDE_QUESTS = [
-    { id: 'hike_60', name: '60-Minute Hike', category: 'hike', description: 'An easy-paced hike, roughly an hour.', estimatedMinutes: 60, trainingLoad: 3, rewardPoints: 120, replaces: ['easy', 'cross'] },
-    { id: 'hike_90', name: '90-Minute Hike', category: 'hike', description: 'A longer hike on easier terrain than a run.', estimatedMinutes: 90, trainingLoad: 4, rewardPoints: 160, replaces: ['easy', 'cross'] },
-    { id: 'incline_walk', name: '35-Minute Incline Walk', category: 'hike', description: 'A brisk walk on an incline or treadmill grade – low-impact aerobic work.', estimatedMinutes: 35, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
-    { id: 'upper_body_builder', name: 'Upper Body Builder', category: 'strength', description: 'A full upper-body strength session – push, pull, and core.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
-    { id: 'core_10', name: 'Core 10', category: 'core', description: '10 minutes of focused core work.', estimatedMinutes: 10, trainingLoad: 1, rewardPoints: 50, replaces: ['easy', 'cross'] },
-    { id: 'core_20', name: 'Core 20', category: 'core', description: '20 minutes of focused core work.', estimatedMinutes: 20, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
-    { id: 'kb_swing_100', name: 'Kettlebell 100', category: 'strength', description: 'Complete 100 controlled kettlebell swings.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 100, replaces: ['easy', 'cross'] },
-    { id: 'pushup_ladder', name: 'Push-Up Ladder', category: 'strength', description: 'A push-up ladder set – build to your max in rungs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
-    { id: 'squat_century', name: 'Squat Century', category: 'strength', description: '100 bodyweight squats, broken into manageable sets.', estimatedMinutes: 20, trainingLoad: 3, rewardPoints: 100, replaces: ['cross'] },
-    { id: 'row_5k', name: '5K Row', category: 'cross', description: 'Row 5,000 meters at a steady effort.', estimatedMinutes: 25, trainingLoad: 3, rewardPoints: 110, replaces: ['easy', 'cross'] },
-    { id: 'easy_cycle', name: 'Easy 30-Minute Cycle', category: 'cross', description: 'A relaxed, conversational-pace bike ride.', estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 80, replaces: ['easy', 'cross'] },
-    { id: 'mobility_reset', name: 'Mobility Reset', category: 'mobility', description: '15 minutes of hips, ankles, and thoracic mobility work.', estimatedMinutes: 15, trainingLoad: 1, rewardPoints: 60, replaces: ['easy', 'cross'] },
-    { id: 'farmer_carry', name: 'Farmer Carry Challenge', category: 'strength', description: 'Loaded carries for distance or time – grip, core, and legs.', estimatedMinutes: 15, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
-    { id: 'stair_climb', name: 'Stair Climb', category: 'cross', description: 'Repeated stair or step climbing at a steady effort.', estimatedMinutes: 20, trainingLoad: 2, rewardPoints: 90, replaces: ['easy', 'cross'] },
-    { id: 'new_route_run', name: 'New-Route Run', category: 'run', description: "Keep the run, but explore a route you haven't tried before.", estimatedMinutes: 30, trainingLoad: 2, rewardPoints: 70, replaces: ['easy'] }
+    { id: 'hike_60', name: '60-Minute Hike', category: 'hike', description: 'An easy-paced hike, roughly an hour.', estimatedMinutes: 60, trainingLoad: 3, replaces: ['easy', 'cross'] },
+    { id: 'hike_90', name: '90-Minute Hike', category: 'hike', description: 'A longer hike on easier terrain than a run.', estimatedMinutes: 90, trainingLoad: 4, replaces: ['easy', 'cross'] },
+    { id: 'incline_walk', name: '35-Minute Incline Walk', category: 'hike', description: 'A brisk walk on an incline or treadmill grade – low-impact aerobic work.', estimatedMinutes: 35, trainingLoad: 1, replaces: ['easy', 'cross'] },
+    { id: 'upper_body_builder', name: 'Upper Body Builder', category: 'strength', description: 'A full upper-body strength session – push, pull, and core.', estimatedMinutes: 30, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'core_10', name: 'Core 10', category: 'core', description: '10 minutes of focused core work.', estimatedMinutes: 10, trainingLoad: 1, replaces: ['easy', 'cross'] },
+    { id: 'core_20', name: 'Core 20', category: 'core', description: '20 minutes of focused core work.', estimatedMinutes: 20, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'kb_swing_100', name: 'Kettlebell 100', category: 'strength', description: 'Complete 100 controlled kettlebell swings.', estimatedMinutes: 15, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'pushup_ladder', name: 'Push-Up Ladder', category: 'strength', description: 'A push-up ladder set – build to your max in rungs.', estimatedMinutes: 15, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'squat_century', name: 'Squat Century', category: 'strength', description: '100 bodyweight squats, broken into manageable sets.', estimatedMinutes: 20, trainingLoad: 3, replaces: ['cross'] },
+    { id: 'row_5k', name: '5K Row', category: 'cross', description: 'Row 5,000 meters at a steady effort.', estimatedMinutes: 25, trainingLoad: 3, replaces: ['easy', 'cross'] },
+    { id: 'easy_cycle', name: 'Easy 30-Minute Cycle', category: 'cross', description: 'A relaxed, conversational-pace bike ride.', estimatedMinutes: 30, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'mobility_reset', name: 'Mobility Reset', category: 'mobility', description: '15 minutes of hips, ankles, and thoracic mobility work.', estimatedMinutes: 15, trainingLoad: 1, replaces: ['easy', 'cross'] },
+    { id: 'farmer_carry', name: 'Farmer Carry Challenge', category: 'strength', description: 'Loaded carries for distance or time – grip, core, and legs.', estimatedMinutes: 15, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'stair_climb', name: 'Stair Climb', category: 'cross', description: 'Repeated stair or step climbing at a steady effort.', estimatedMinutes: 20, trainingLoad: 2, replaces: ['easy', 'cross'] },
+    { id: 'new_route_run', name: 'New-Route Run', category: 'run', description: "Keep the run, but explore a route you haven't tried before.", estimatedMinutes: 30, trainingLoad: 2, replaces: ['easy'] }
   ];
   var SIDE_QUEST_LOAD_LABEL = { 1: 'Very light', 2: 'Light', 3: 'Moderate', 4: 'Moderate-hard', 5: 'Hard' };
 
@@ -271,12 +273,7 @@
 
   function applySideQuest(key, quest, baseLabel) {
     if (quest.name === baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
-    state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category, rewardPoints: quest.rewardPoints });
-    // Previously never awarded XP at all (a pre-existing inconsistency vs.
-    // completeMission/applySideQuestChat, found while scoping the reward
-    // system's Phase 1) -- now routed through the same shared path as every
-    // other Side Mission completion.
-    awardSideMissionXp('sidemission|' + quest.id + '|' + key + '|' + dateToISO(new Date()), quest.rewardPoints, { key: key });
+    state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category });
     refreshPathProgress();
   }
 
@@ -387,10 +384,8 @@
         key: null,
         date: dateToISO(new Date()),
         category: mission ? mission.category : domainTrack.category,
-        rewardPoints: mission ? mission.xpReward : 80,
         relationship: mission ? mission.relationshipLabel : 'Supports your Main Quest'
       });
-      awardSideMissionXp('sidemission|' + domainTrack.id + '|' + missionId + '|' + dateToISO(new Date()), mission ? mission.xpReward : 80, { key: key });
       if (key && state.sideQuestCalendar[key] === missionId) delete state.sideQuestCalendar[key];
       if (active.completedSessions >= domainTotal) {
         state.completedQuestTracks.push({ trackId: domainTrack.id, date: dateToISO(new Date()), badgeId: 'strong_runner' });
@@ -405,8 +400,7 @@
     var total = questTrackTotalSessions(track);
     if (active.completedSessions >= total) return;
     active.completedSessions++;
-    state.sideQuestLog.push({ id: track.id + '-session-' + active.completedSessions, key: null, date: dateToISO(new Date()), category: 'strength', rewardPoints: 40 });
-    awardSideMissionXp('sidemission|' + track.id + '|session' + active.completedSessions, 40, { key: key });
+    state.sideQuestLog.push({ id: track.id + '-session-' + active.completedSessions, key: null, date: dateToISO(new Date()), category: 'strength' });
     saveState(state);
     refreshPathProgress();
   }
@@ -428,18 +422,17 @@
       key: key || null,
       date: dateToISO(new Date()),
       category: completionCategory(mission),
-      rewardPoints: mission.xpReward || mission.rewardPoints || 0,
       relationship: mission.relationshipLabel || '',
       difficulty: feedback && feedback.difficulty || null,
       pain: feedback && feedback.pain || null
     });
-    var xpResult = awardSideMissionXp('sidemission|' + mission.id + '|' + (key || 'none') + '|' + dateToISO(new Date()), mission.xpReward || mission.rewardPoints || 0, { key: key });
-    if (mission.badgeId && state.badges.indexOf(mission.badgeId) === -1) state.badges.push(mission.badgeId);
+    var newBadge = mission.badgeId && state.badges.indexOf(mission.badgeId) === -1;
+    if (newBadge) state.badges.push(mission.badgeId);
     if (key && state.sideQuestCalendar[key] === mission.id) delete state.sideQuestCalendar[key];
     saveState(state);
     refreshPathProgress();
     logTelemetryEvent('side_mission_completed', mission.id);
-    showToast('Side Mission complete: ' + mission.name + '.' + xpToastSuffix(xpResult));
+    showToast('Side Mission complete: ' + mission.name + '.' + (newBadge ? ' Badge earned: ' + humanizeSlug(mission.badgeId) + '.' : ''));
     return true;
   }
 
@@ -454,13 +447,10 @@
 
   // ── Bodyweight Challenge Library (docs/RACR_SideMission_Expansion.md) ──
   // Logs one session's contribution toward a named accumulated challenge
-  // (e.g. 30 of Squat Century's 100 squats). Never awards XP per log --
-  // only once, the first time the accumulated total crosses the challenge's
-  // final level, matching "no XP per repetition, no unlimited XP for
-  // repeating the same challenge." Reusing awardXp's upsert-by-idempotencyKey
-  // behavior (via awardSideMissionXp) means a second full completion just
-  // replaces the same ledger entry rather than adding a new one -- no
-  // separate cooldown/repeat-window logic needed for that guarantee.
+  // (e.g. 30 of Squat Century's 100 squats). Awards its badge only once,
+  // the first time the accumulated total crosses the challenge's final
+  // level -- a repeat full completion just re-logs progress, no duplicate
+  // badge and nothing further to award.
   function logChallengeProgress(challengeId, amount, variant) {
     var challenge = bodyweightChallengeById(challengeId);
     if (!challenge || !amount || amount <= 0) return null;
@@ -475,17 +465,15 @@
       variant: variant || 'standard'
     });
     var after = bodyweightChallengeProgress(challengeId);
-    var xpResult = null;
     var justCompleted = after.complete && !before.complete;
     if (justCompleted) {
-      xpResult = awardSideMissionXp('challenge|' + challengeId, challenge.xpReward, { key: null });
       if (challenge.badgeId && state.badges.indexOf(challenge.badgeId) === -1) state.badges.push(challenge.badgeId);
       logTelemetryEvent('challenge_completed', challengeId);
     }
     saveState(state);
     refreshPathProgress();
     var toast = justCompleted
-      ? challenge.name + ' complete!' + xpToastSuffix(xpResult)
+      ? challenge.name + ' complete!'
       : 'Logged ' + amount + ' ' + challenge.unit + ' toward ' + challenge.name + ' (' + after.accumulated + ' of ' + after.levelTarget + ').';
     showToast(toast);
     return after;
@@ -883,7 +871,7 @@
     // of CoachingRulesDomain.generatePlan (see applyDayAdjustments).
     if (!s.dayAdjustments) s.dayAdjustments = {};
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
-    if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
+    if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
     if (s.activeWeeklyChallenge === undefined) s.activeWeeklyChallenge = null; // { challengeId, weekStartIso }
     if (!s.sideQuestOnboarding) s.sideQuestOnboarding = null; // { completed, strengthExperience, equipment, preferredDuration, interest, limitations }
@@ -892,16 +880,19 @@
     if (!s.badges) s.badges = [];
     if (!s.path) s.path = null; // { id, mainQuestId, currentNodeId, nodeIds }
     if (!s.pathNodes) s.pathNodes = [];
-    if (!s.xp) s.xp = 0; // derived -- always recomputed from xpEvents by awardXp()/mergeRunnerState, never incremented directly
-    if (!s.xpEvents) s.xpEvents = []; // [{ idempotencyKey, source, xpType, baseXp, modifier, totalXp, date, key }]
-    if (!s.xpProfile) s.xpProfile = { lastLevelUpAt: null, selectedProfileTitle: null, selectedPathTheme: null, selectedBadgeFrame: null };
+    // docs/COACHING_SPEC.md "Achievements" -- XP/generic player levels were
+    // removed from V1. Legacy installs may still carry state.xp/xpEvents/
+    // xpProfile from before this change; explicitly dropped here (not just
+    // left un-migrated) since nothing reads them anymore and their numbers
+    // were never a real running achievement worth preserving. Real progress
+    // (badges, Path, personal records, weekly/monthly stats) is untouched.
+    delete s.xp; delete s.xpEvents; delete s.xpProfile;
     if (!s.runningFeelingLog) s.runningFeelingLog = []; // [{ weekStartIso, feeling }]
-    // Beta/experimental toggles (docs/COACHING_SPEC.md "Launch scope"). Both
-    // default false -- enableLongerDistances stays hidden from public
-    // onboarding until each distance family is separately reviewed;
-    // quietGamification defaults off (unchanged current behavior) since no
-    // one has yet evaluated the quiet variant.
-    if (!s.flags) s.flags = { enableLongerDistances: false, quietGamification: false };
+    // Beta/experimental toggles (docs/COACHING_SPEC.md "Launch scope").
+    // enableLongerDistances stays hidden from public onboarding until each
+    // distance family is separately reviewed.
+    if (!s.flags) s.flags = { enableLongerDistances: false };
+    if (s.flags) delete s.flags.quietGamification; // removed alongside XP -- nothing left for it to quiet
     // docs/PROGRESS_SPEC.md "Weight tracking" -- fully optional, off by
     // default. Canonical storage is always lb (mirrors miles-as-canonical
     // for distance) -- weightUnits only affects display/entry, converted at
@@ -1106,6 +1097,21 @@
   ];
   var _celebrateMsgIdx = 0;
 
+  // P0: prevents a rapid double-tap on a completion/save button from firing
+  // its handler twice and creating a duplicate log/completion record (the
+  // button is disabled synchronously, before the handler's own work runs,
+  // rather than relying on the following re-render to remove it in time --
+  // two click events queued back-to-back can both reach the handler before
+  // any DOM mutation happens).
+  function guardOnce(btn, handler) {
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      handler();
+    });
+  }
+
   function showToast(text) {
     var existing = document.querySelector('.app-toast');
     if (existing) existing.remove();
@@ -1117,87 +1123,174 @@
     setTimeout(function () { toast.remove(); }, 3700);
   }
 
-  // ── XP awarding (docs/RACR_Reward_System_Master_Prompt.md, Phase 1) ──
-  // The one place state.xpEvents/state.xp/state.xpProfile get written.
-  // Upserts by idempotencyKey -- honest re-edits (re-saving a day after
-  // changing effort/completionType, or re-completing the same Side Mission
-  // slot) correct that one ledger entry instead of farming a duplicate.
-  // source:'side_mission' additionally clamps through the weekly cap before
-  // being recorded; state.xp is always the ledger's own sum afterward, never
-  // an independently-incremented counter (see mergeRunnerState's comment on
-  // why that matters for cross-device merges).
-  function awardXp(idempotencyKey, source, xpType, baseXp, modifier, meta) {
-    var totalXp = Math.round((baseXp || 0) * (modifier != null ? modifier : 1));
+  // ── Browser/Android back-button integration (P0 -- this app previously had
+  // zero history.pushState/popstate wiring; every "screen" was just a full
+  // #app innerHTML swap with no browser history entry, so the system/browser
+  // back button always left the app entirely instead of navigating between
+  // screens). _navStack mirrors the browser's own history entries as
+  // {restore} closures -- a restore is a zero-arg closure that re-renders
+  // that exact screen with its original arguments (e.g.
+  // `function () { renderWorkoutDetail(weekNum, dayIdx); }`). Every top-level
+  // render* function calls _recordScreen(...) as its first real statement
+  // (after any early-return redirect guard, so a screen that immediately
+  // redirects elsewhere never gets a phantom stack entry of its own).
+  var _navStack = [];
+  var _navReplaying = false; // true only while replaying a popstate -- suppresses re-pushing a duplicate entry
+  function _recordScreen(restoreFn) {
+    if (_navReplaying) { _navReplaying = false; return; }
+    if (_navStack.length === 0) {
+      // First render call this page load (fresh load OR reload). Always the
+      // navigation root -- replace, not push, so a reload never invents an
+      // extra history entry, and any stale navDepth left over from before a
+      // reload (which _navStack can't reconstruct anyway, since restore
+      // closures don't survive a reload) is safely discarded.
+      _navStack.push(restoreFn);
+      window.history.replaceState({ navDepth: 0 }, '');
+      return;
+    }
+    // A genuine new forward navigation discards any "redo" history from a
+    // previous back-then-forward-again sequence, matching standard browser
+    // back/forward semantics (a fresh navigation truncates redo history).
+    var depth = (window.history.state && typeof window.history.state.navDepth === 'number' ? window.history.state.navDepth : _navStack.length - 1) + 1;
+    _navStack.length = depth;
+    _navStack.push(restoreFn);
+    window.history.pushState({ navDepth: depth }, '');
+  }
+  // Used by every in-app "Back"/"Cancel" button instead of calling a
+  // renderX() function directly, so the browser's own back button and this
+  // app's own in-page Back buttons always agree about what the previous
+  // screen was (both go through the same popstate path below). Falls back
+  // to calling fallbackRenderFn directly only if there's truly no recorded
+  // screen to go back to.
+  function goBack(fallbackRenderFn) {
+    if (_navStack.length > 1) window.history.back();
+    else if (fallbackRenderFn) fallbackRenderFn();
+  }
+  window.addEventListener('popstate', function () {
+    if (_navStack.length > 1) {
+      _navStack.pop();
+      var prev = _navStack[_navStack.length - 1];
+      _navReplaying = true;
+      prev();
+    }
+    // Already at the root entry -- nothing of ours left to restore. Let the
+    // browser's own back navigation proceed normally (e.g. exiting the
+    // installed PWA / leaving the tab) rather than trapping the user at a
+    // fake root that never lets a real back-press through.
+  });
 
-    if (source === 'side_mission') {
-      var today = new Date(); today.setHours(0, 0, 0, 0);
-      var weekStart = mondayOfWeek(today);
-      var weekEnd = new Date(weekStart.getTime() + 6 * 86400000);
-      var thisWeekEvents = state.xpEvents.filter(function (e) {
-        if (e.idempotencyKey === idempotencyKey) return false; // exclude the entry being replaced, if any
-        var d = parseDate(e.date);
-        return d >= weekStart && d <= weekEnd;
+  // ── Achievements (docs/COACHING_SPEC.md "Achievements") -- real,
+  // verifiable running milestones, replacing the removed XP/generic-level
+  // system. Two kinds: (1) one-time badges (state.badges, same award-once
+  // pattern already used for Side Mission/challenge/quest-track badges
+  // elsewhere in this file), and (2) recurring personal-record celebrations
+  // (checkForMilestone above, plus checkForWeeklyMileageMilestone below) --
+  // a new longest run or a new highest week happens again and again, so
+  // those get a celebration toast every time, not a permanent badge.
+  var FIRST_RUN_BADGE = 'first_run';
+  var FIRST_DISTANCE_BADGE = 'first_distance_milestone';
+  var FIRST_5K_BADGE = 'first_5k';
+  var FIRST_10K_BADGE = 'first_10k';
+  var FOUR_CONSISTENT_WEEKS_BADGE = 'four_consistent_weeks';
+  var TRAINING_PLAN_COMPLETE_BADGE = 'training_plan_complete';
+  var BADGE_LABEL = {
+    first_run: 'First Run', first_5k: 'First 5K', first_10k: 'First 10K',
+    four_consistent_weeks: 'Four Consistent Weeks', training_plan_complete: 'Training Plan Complete'
+    // first_distance_milestone deliberately omitted -- its label is unit-aware, see badgeLabel() below.
+  };
+  function badgeLabel(id) {
+    if (id === FIRST_DISTANCE_BADGE) return state.units === 'km' ? 'First Kilometer' : 'First Mile';
+    return BADGE_LABEL[id] || humanizeSlug(id);
+  }
+
+  // Called right after a Main Quest day is logged (same call site
+  // checkForMilestone already uses). Only ever fires each badge once --
+  // state.badges already contains it on every subsequent bigger run, so a
+  // new longest run later never re-triggers an earlier distance threshold.
+  function checkForNewDistanceBadges(dayType, entry) {
+    var earned = [];
+    var RUN_TYPES = ['easy', 'long', 'quality', 'race'];
+    if (RUN_TYPES.indexOf(dayType) === -1) return earned;
+    function award(id) { if (state.badges.indexOf(id) === -1) { state.badges.push(id); earned.push({ id: id, label: badgeLabel(id) }); } }
+    award(FIRST_RUN_BADGE);
+    if (dayType === 'race') award(TRAINING_PLAN_COMPLETE_BADGE); // this app's plans always end on race day -- finishing it IS finishing the plan
+    if (entry.distance != null) {
+      var firstDistanceThresholdMiles = state.units === 'km' ? 0.621371 : 1; // "first km" or "first mile," in real miles
+      if (entry.distance >= firstDistanceThresholdMiles) award(FIRST_DISTANCE_BADGE);
+      if (entry.distance >= 3.10686) award(FIRST_5K_BADGE); // 5K in miles
+      if (entry.distance >= 6.21371) award(FIRST_10K_BADGE); // 10K in miles
+    }
+    return earned;
+  }
+
+  // A week's real running-completion ratio -- same exclusions (rest/race/
+  // cross) and same partial/stopped_early half-credit rule as
+  // coaching-rules.js's applyMissedAdjustment, so "consistent" here means
+  // the same thing "missed" means there, just measured from the other
+  // direction. Returns null when the week has nothing loggable to grade
+  // (shouldn't normally happen given this app's plan structure).
+  function weekCompletionRatio(wk) {
+    var loggableCount = 0, creditedCount = 0;
+    wk.days.forEach(function (dd, di) {
+      if (dd.type === 'rest' || dd.type === 'race' || dd.type === 'cross') return;
+      loggableCount++;
+      var e = getLog(wk.weekNum + '-' + di);
+      if (!e || !e.completionType || e.completionType === 'skipped') return;
+      creditedCount += (e.completionType === 'stopped_early' || e.completionType === 'partial') ? 0.5 : 1;
+    });
+    return loggableCount ? creditedCount / loggableCount : null;
+  }
+
+  // Trailing consecutive fully-elapsed weeks at >=80% completion, counting
+  // back from the most recently completed week (currentWeekIdx-2, same
+  // "last week" indexing applyMissedAdjustment already uses). Stops at the
+  // first week that doesn't qualify.
+  function trailingConsistentWeeksCount(weeks, raceDate, planLengthWeeks, today) {
+    var currentWeekIdx = findCurrentWeekIdx(raceDate, planLengthWeeks, today);
+    if (currentWeekIdx <= 1) return 0;
+    var count = 0;
+    for (var idx = currentWeekIdx - 2; idx >= 0; idx--) {
+      var wk = weeks[idx];
+      if (!wk) break;
+      var ratio = weekCompletionRatio(wk);
+      if (ratio != null && ratio >= 0.8) count++; else break;
+    }
+    return count;
+  }
+
+  // Recurring personal-record celebration for total weekly distance --
+  // same "needs a real prior week to beat, not just a first-ever week"
+  // baseline rule as checkForMilestone's pastRunStats, and same run-type
+  // filter (easy/long/quality/race) progress-stats.js already uses
+  // elsewhere for "what counts as a run."
+  function checkForWeeklyMileageMilestone(key, weeks) {
+    var weekNum = parseInt(key.split('-')[0], 10);
+    var totalsByWeek = {};
+    weeks.forEach(function (wk) {
+      var total = 0;
+      wk.days.forEach(function (dd, di) {
+        if (!ProgressStatsDomain.isRunType || !ProgressStatsDomain.isRunType(dd.type)) return;
+        var e = getLog(wk.weekNum + '-' + di);
+        if (e && e.distance != null) total += e.distance;
       });
-      var sideMissionSoFar = thisWeekEvents.filter(function (e) { return e.source === 'side_mission'; })
-        .reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
-      var mainQuestThisWeek = thisWeekEvents.filter(function (e) { return e.source === 'main_quest'; })
-        .reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
-      if (XpDomain.applySideMissionWeeklyCap) {
-        totalXp = XpDomain.applySideMissionWeeklyCap(sideMissionSoFar, mainQuestThisWeek, totalXp);
-      }
-    }
-
-    var event = {
-      idempotencyKey: idempotencyKey, source: source, xpType: xpType,
-      baseXp: baseXp || 0, modifier: modifier != null ? modifier : 1, totalXp: totalXp,
-      date: dateToISO(new Date()), key: (meta && meta.key) || null
-    };
-    var idx = -1;
-    for (var i = 0; i < state.xpEvents.length; i++) {
-      if (state.xpEvents[i].idempotencyKey === idempotencyKey) { idx = i; break; }
-    }
-    if (idx === -1) state.xpEvents.push(event); else state.xpEvents[idx] = event;
-
-    var levelBefore = XpDomain.levelForTotalXp ? XpDomain.levelForTotalXp(state.xp).level : 1;
-    state.xp = state.xpEvents.reduce(function (sum, e) { return sum + (e.totalXp || 0); }, 0);
-    var levelAfterInfo = XpDomain.levelForTotalXp ? XpDomain.levelForTotalXp(state.xp) : { level: levelBefore, rankTitle: '' };
-    if (levelAfterInfo.level > levelBefore) state.xpProfile.lastLevelUpAt = Date.now();
-    saveState(state);
-    return { totalXp: totalXp, levelBefore: levelBefore, levelAfter: levelAfterInfo.level, rankTitle: levelAfterInfo.rankTitle };
-  }
-
-  // Thin wrapper shared by every Side Mission completion path (single-session
-  // quests, quest-track sessions, the AI-chat substitute flow) -- unifies
-  // what used to be three inconsistent `state.xp +=` lines (and one path,
-  // applySideQuest, that never awarded XP at all) into one call.
-  function awardSideMissionXp(idempotencyKey, baseXp, meta) {
-    var calc = XpDomain.xpForSideMission ? XpDomain.xpForSideMission(baseXp) : { baseXp: baseXp || 0, modifier: 1 };
-    return awardXp(idempotencyKey, 'side_mission', 'side_mission', calc.baseXp, calc.modifier, meta);
-  }
-
-  // Minimal Phase 1 surfacing of an awardXp() result -- appended to whichever
-  // toast logAndCelebrate/completeMission were already going to show. The
-  // full 8-step reward sequence (micro-wins/level bar/badge progress/Path
-  // emphasis) is explicitly Phase 2+ work, not built here.
-  function xpToastSuffix(xpResult) {
-    if (!xpResult || !xpResult.totalXp) return '';
-    // docs/COACHING_SPEC.md "Launch scope" / gamification-prominence dial --
-    // the XP ledger, Path, and badges keep working underneath either way;
-    // this only silences the one toast surface where XP currently intrudes
-    // outside its own dedicated screens.
-    if (state.flags.quietGamification) return '';
-    var suffix = ' +' + xpResult.totalXp + ' XP';
-    if (xpResult.levelAfter > xpResult.levelBefore) {
-      suffix += ' · Level up! Now Level ' + xpResult.levelAfter + (xpResult.rankTitle ? ' — ' + xpResult.rankTitle : '');
-    }
-    return suffix;
+      totalsByWeek[wk.weekNum] = total;
+    });
+    var thisWeekTotal = totalsByWeek[weekNum] || 0;
+    if (!thisWeekTotal) return null;
+    var priorMax = 0;
+    Object.keys(totalsByWeek).forEach(function (w) {
+      if (parseInt(w, 10) === weekNum) return;
+      if (totalsByWeek[w] > priorMax) priorMax = totalsByWeek[w];
+    });
+    if (!priorMax || thisWeekTotal <= priorMax) return null;
+    return { distance: toUnit(thisWeekTotal), previousBest: toUnit(priorMax), unit: unitLabel() };
   }
 
   // Shared by the quick calendar row, its done-checkbox, and the workout
-  // detail Save button -- one place decides whether a log is an ordinary
-  // completion (free local message) or an actual personal best (worth a
-  // real AI-phrased note, since those are rare enough that the API call is
-  // cheap and the moment deserves more than a canned line).
+  // detail Save button -- one place decides what confirmation a completed
+  // log deserves: a new badge (rarest, most significant), a new highest
+  // week or personal-best pace/distance (real, recurring records), or an
+  // ordinary calm confirmation. Never more than one message per save.
   function logAndCelebrate(key, patch, dayType, weeks, dayData, label) {
     setLog(key, patch);
     refreshPathProgress(weeks);
@@ -1205,14 +1298,26 @@
     if (!entry) return;
     logTelemetryEvent('workout_logged', dayType);
 
-    var xpResult = null;
-    if (dayData && XpDomain.xpForMainQuestWorkout) {
-      var xpCalc = XpDomain.xpForMainQuestWorkout(dayData, label || dayData.label, entry.completionType);
-      if (xpCalc.totalXp > 0) {
-        xpResult = awardXp('mainquest|' + key, 'main_quest', xpCalc.xpType, xpCalc.baseXp, xpCalc.modifier, { key: key });
+    var newBadges = checkForNewDistanceBadges(dayType, entry);
+    if (state.badges.indexOf(FOUR_CONSISTENT_WEEKS_BADGE) === -1) {
+      var raceDate = parseDate(state.raceGoal.raceDate);
+      var streak = trailingConsistentWeeksCount(weeks, raceDate, state.planMeta.planLengthWeeks, new Date());
+      if (streak >= 4) {
+        state.badges.push(FOUR_CONSISTENT_WEEKS_BADGE);
+        newBadges.push({ id: FOUR_CONSISTENT_WEEKS_BADGE, label: badgeLabel(FOUR_CONSISTENT_WEEKS_BADGE) });
       }
     }
-    var xpSuffix = xpToastSuffix(xpResult);
+    if (newBadges.length) {
+      saveState(state);
+      showToast(newBadges.map(function (b) { return b.label; }).join(' · ') + ' — nice work!');
+      return;
+    }
+
+    var weeklyMilestone = checkForWeeklyMileageMilestone(key, weeks);
+    if (weeklyMilestone) {
+      showToast('Highest weekly mileage yet: ' + weeklyMilestone.distance + ' ' + weeklyMilestone.unit + '.');
+      return;
+    }
 
     var milestone = checkForMilestone(key, dayType, entry, weeks);
     if (milestone) {
@@ -1224,22 +1329,21 @@
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
       }).then(function (result) {
         if (!result.ok) logTelemetryEvent('ai_call_failed', 'celebrate');
-        showToast(((result.ok && result.data.message) || 'That’s a personal best — nice work!') + xpSuffix);
+        showToast((result.ok && result.data.message) || 'That’s a personal best — nice work!');
       }).catch(function () {
         logTelemetryEvent('ai_call_failed', 'celebrate');
-        showToast('That’s a personal best — nice work!' + xpSuffix);
+        showToast('That’s a personal best — nice work!');
       });
     } else {
-      showToast(CELEBRATE_MESSAGES[_celebrateMsgIdx % CELEBRATE_MESSAGES.length] + xpSuffix);
+      showToast(CELEBRATE_MESSAGES[_celebrateMsgIdx % CELEBRATE_MESSAGES.length]);
       _celebrateMsgIdx++;
     }
   }
 
   // docs/COACHING_SPEC.md "Today screen actions" -- deliberately NOT
-  // logAndCelebrate: a skip earns 0 XP (see xp-system.js COMPLETION_MODIFIERS)
-  // and must never trigger a celebratory toast or milestone check -- it's a
-  // real, tracked, non-judgmental fact about what happened, not an
-  // achievement. No guilt language anywhere in the copy.
+  // logAndCelebrate: a skip must never trigger a celebratory toast, badge,
+  // or milestone check -- it's a real, tracked, non-judgmental fact about
+  // what happened, not an achievement. No guilt language anywhere in the copy.
   function skipWorkout(key, dayType) {
     setLog(key, { completionType: 'skipped' });
     logTelemetryEvent('workout_skipped', dayType);
@@ -1514,9 +1618,9 @@
     // any day in the current plan that doesn't already have a log entry,
     // going back at most GH_SYNC_MAX_LOOKBACK_DAYS. It reuses
     // logAndCelebrate for every import -- the exact same path a manual
-    // Save already goes through -- so an imported run gets real XP, and a
-    // genuine personal best still gets the AI-phrased celebration via
-    // /celebrate, not a separate parallel reward mechanism.
+    // Save already goes through -- so an imported run gets real badge/
+    // achievement checks too, and a genuine personal best still gets the
+    // AI-phrased celebration via /celebrate, not a separate parallel path.
     //
     // Never overwrites an existing entry (manual or previously imported) --
     // this only fills gaps. Never touches the race day itself. Only the
@@ -1869,6 +1973,7 @@
 
   // ── Personal intro (shown once before a fresh plan, skipped when editing) ──
   function renderIntro() {
+    _recordScreen(function () { renderIntro(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     var wrap = el(
@@ -1897,6 +2002,7 @@
 
   // ── Intake wizard ──────────────────────────────────────────────────────
   function renderWizard(prefill) {
+    _recordScreen(function () { renderWizard(prefill); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
@@ -2260,6 +2366,7 @@
   // ── Guided goal-change: shown when editing settings changes the race itself,
   // since that's the one edit that resets logged history -- never silent. ──
   function renderGoalChangeConfirm(draft) {
+    _recordScreen(function () { renderGoalChangeConfirm(draft); });
     var app = document.getElementById('app');
     app.innerHTML = '';
 
@@ -2297,7 +2404,7 @@
       finishWizard(draft, true);
     });
     document.getElementById('cancelGoalChangeBtn').addEventListener('click', function () {
-      renderWizard(draft);
+      goBack(function () { renderWizard(draft); });
     });
   }
 
@@ -2556,6 +2663,7 @@
   }
 
   function renderSideQuestOnboarding() {
+    _recordScreen(function () { renderSideQuestOnboarding(); });
     var app = document.getElementById('app');
     var draft = { strengthExperience: 'new_strength', equipment: ['no_equipment'], preferredDuration: 'medium', interest: 'running', limitations: ['no_current_limitations'] };
     function renderStep(step) {
@@ -2615,7 +2723,7 @@
   }
 
   function renderMissionCard(mission, actionLabel, actionAttr) {
-    return '<div class="quest-card mission-card"><div class="quest-name">' + escapeHtml(mission.name) + '</div><div class="quest-desc">' + escapeHtml(mission.description) + '</div><div class="mission-tags"><span>' + durationText(mission) + '</span><span>Load ' + mission.trainingLoad + '</span><span>' + escapeHtml(mission.runningInterference) + ' interference</span></div><div class="quest-meta">' + escapeHtml(mission.relationshipLabel) + ' &middot; ' + mission.xpReward + ' XP</div><button type="button" class="ob-btn ob-btn-secondary quest-btn" ' + actionAttr + '="' + mission.id + '">' + actionLabel + '</button></div>';
+    return '<div class="quest-card mission-card"><div class="quest-name">' + escapeHtml(mission.name) + '</div><div class="quest-desc">' + escapeHtml(mission.description) + '</div><div class="mission-tags"><span>' + durationText(mission) + '</span><span>Load ' + mission.trainingLoad + '</span><span>' + escapeHtml(mission.runningInterference) + ' interference</span></div><div class="quest-meta">' + escapeHtml(mission.relationshipLabel) + '</div><button type="button" class="ob-btn ob-btn-secondary quest-btn" ' + actionAttr + '="' + mission.id + '">' + actionLabel + '</button></div>';
   }
 
   // Bodyweight Challenge card -- distinct from renderMissionCard: shows
@@ -2628,7 +2736,7 @@
     return '<div class="quest-card mission-card">' +
       '<div class="quest-name">' + escapeHtml(challenge.name) + '</div>' +
       '<div class="quest-desc">' + escapeHtml(challenge.description) + '</div>' +
-      '<div class="quest-meta">' + progress.accumulated + ' of ' + progress.levelTarget + ' ' + escapeHtml(challenge.unit) + (progress.complete ? ' &middot; Complete' : '') + ' &middot; ' + challenge.xpReward + ' XP</div>' +
+      '<div class="quest-meta">' + progress.accumulated + ' of ' + progress.levelTarget + ' ' + escapeHtml(challenge.unit) + (progress.complete ? ' &middot; Complete' : '') + '</div>' +
       '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
       '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-challenge-id="' + challenge.id + '" style="margin-top:10px">' + (progress.complete ? 'View' : (progress.accumulated ? 'Continue' : 'Start')) + '</button>' +
     '</div>';
@@ -2636,6 +2744,7 @@
 
   function renderSideQuestsHomeNew() {
     if (!state.sideQuestOnboarding || !state.sideQuestOnboarding.completed) { renderSideQuestOnboarding(); return; }
+    _recordScreen(function () { renderSideQuestsHomeNew(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -2690,7 +2799,7 @@
       return '<div class="ob-sub" style="margin-top:20px">' + escapeHtml(section.name) + '</div>' + cards;
     }).join('');
     var challengesHtml = (SideQuestDomain.CHALLENGE_CATALOG || []).map(renderChallengeCard).join('');
-    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>XP</dt><dd>' + state.xp + '</dd><dt>Side Missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(function (b) { return escapeHtml(humanizeSlug(b)); }).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed Side Missions, badges, personal records, and lifetime totals will appear here.</p>';
+    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>Side Missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(function (b) { return escapeHtml(humanizeSlug(b)); }).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed Side Missions, badges, personal records, and lifetime totals will appear here.</p>';
     var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Missions</div><div class="ob-title">Side Missions</div><p class="intro-body">Your run is the Main Quest. Side Missions make the journey stronger, broader, and more enjoyable.</p><div class="ob-sub">Active Mission Track</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + '<div class="ob-sub" style="margin-top:20px">Recommended for you</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Mission Tracks</div>' + tracksHtml + '<div class="ob-sub" style="margin-top:20px">Challenges</div>' + challengesHtml + sectionsHtml + '<div class="ob-sub" style="margin-top:20px">Completed Side Missions</div>' + completedHtml + '</div>');
     app.appendChild(wrap);
     var resume = document.getElementById('resumeTrackBtn');
@@ -2726,6 +2835,7 @@
   function renderMissionDetail(missionId, key) {
     var mission = missionById(missionId);
     if (!mission) return renderQuestsHome();
+    _recordScreen(function () { renderMissionDetail(missionId, key); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -2753,11 +2863,10 @@
       scheduleOptions = options.length ? '<div class="ob-sub" style="margin-top:18px">Add to Calendar</div>' + options.join('') : '';
     }
     var safetyText = (mission.avoidBeforeWorkoutTypes.length ? 'Avoid before ' + mission.avoidBeforeWorkoutTypes.join(' or ') + '. ' : '') + 'Stop for sharp, worsening, or unusual pain.';
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span><span>' + mission.xpReward + ' XP</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<button type="button" class="ob-cancel" id="missionBackBtn">Back to Side Missions</button></div>');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<button type="button" class="ob-cancel" id="missionBackBtn">Back to Side Missions</button></div>');
     app.appendChild(wrap);
     document.getElementById('startMissionBtn').addEventListener('click', function () { renderMissionPlayer(mission.id, key); });
-    var completeNow = document.getElementById('completeNowBtn');
-    if (completeNow) completeNow.addEventListener('click', function () { completeMission(mission.id, key, { difficulty: 'about_right', pain: 'no' }); renderQuestsHome(); });
+    guardOnce(document.getElementById('completeNowBtn'), function () { completeMission(mission.id, key, { difficulty: 'about_right', pain: 'no' }); renderQuestsHome(); });
     wrap.querySelectorAll('[data-add-key]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var res = addMissionToCalendar(mission.id, btn.getAttribute('data-add-key'));
@@ -2765,12 +2874,13 @@
         renderMain();
       });
     });
-    document.getElementById('missionBackBtn').addEventListener('click', renderQuestsHome);
+    document.getElementById('missionBackBtn').addEventListener('click', function () { goBack(renderQuestsHome); });
   }
 
   function renderBodyweightChallengeDetail(challengeId) {
     var challenge = bodyweightChallengeById(challengeId);
     if (!challenge) return renderQuestsHome();
+    _recordScreen(function () { renderBodyweightChallengeDetail(challengeId); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -2794,7 +2904,6 @@
         '<p class="intro-body">' + escapeHtml(challenge.description) + '</p>' +
         '<div class="quest-meta">' + progress.accumulated + ' of ' + progress.levelTarget + ' ' + escapeHtml(challenge.unit) + '</div>' +
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
-        '<dl class="wd-info"><dt>XP on completion</dt><dd>' + challenge.xpReward + ' XP</dd></dl>' +
         logHtml +
         '<button type="button" class="ob-cancel" id="challengeBackBtn">Back to Side Missions</button>' +
       '</div>'
@@ -2813,18 +2922,21 @@
     var logBtn = document.getElementById('logChallengeBtn');
     if (logBtn) {
       logBtn.addEventListener('click', function () {
+        if (logBtn.disabled) return;
         var amount = parseInt(document.getElementById('challengeAmount').value, 10);
-        if (!amount || amount <= 0) return;
+        if (!amount || amount <= 0) return; // invalid input -- leave the button enabled so the user can correct and retry
+        logBtn.disabled = true; // only disable once we're actually about to submit, so a rapid double-tap can't double-log
         logChallengeProgress(challengeId, amount, selectedVariant);
         renderBodyweightChallengeDetail(challengeId);
       });
     }
-    document.getElementById('challengeBackBtn').addEventListener('click', renderQuestsHome);
+    document.getElementById('challengeBackBtn').addEventListener('click', function () { goBack(renderQuestsHome); });
   }
 
   function renderMissionPlayer(missionId, key) {
     var mission = missionById(missionId);
     if (!mission) return renderQuestsHome();
+    _recordScreen(function () { renderMissionPlayer(missionId, key); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     var exerciseRows = (mission.exercises || []).map(function (ex, i) {
@@ -2847,15 +2959,15 @@
         document.getElementById('missionPain').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); c.setAttribute('aria-pressed', String(!!(c === chip))); });
       });
     });
-    document.getElementById('finishMissionBtn').addEventListener('click', function () {
+    guardOnce(document.getElementById('finishMissionBtn'), function () {
       var activeTrack = state.activeQuestTrack && SideQuestDomain.questTrackById && SideQuestDomain.questTrackById(state.activeQuestTrack.trackId);
       var expectedMissionId = activeTrack ? activeTrack.missionIds[Math.min(state.activeQuestTrack.completedSessions, activeTrack.missionIds.length - 1)] : null;
       if (activeTrack && expectedMissionId === mission.id) completeQuestTrackSession(key);
       else completeMission(mission.id, key, { difficulty: difficulty, pain: pain });
       renderQuestsHome();
     });
-    document.getElementById('stopPainBtn').addEventListener('click', function () {
-      state.sideQuestLog.push({ id: mission.id, key: key || null, date: dateToISO(new Date()), category: mission.category, rewardPoints: 0, stopped: true, reason: 'pain' });
+    guardOnce(document.getElementById('stopPainBtn'), function () {
+      state.sideQuestLog.push({ id: mission.id, key: key || null, date: dateToISO(new Date()), category: mission.category, stopped: true, reason: 'pain' });
       saveState(state);
       showToast('Mission stopped. Do not train through sharp or worsening pain.');
       renderQuestsHome();
@@ -2922,6 +3034,7 @@
 
   function renderPathWindow(selectedNodeId) {
     if (!state.raceGoal || !state.profile || !state.planMeta) { renderIntro(); return; }
+    _recordScreen(function () { renderPathWindow(selectedNodeId); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -2981,7 +3094,7 @@
       '</div>'
     );
     app.appendChild(wrap);
-    document.getElementById('pathBackBtn').addEventListener('click', renderMain);
+    document.getElementById('pathBackBtn').addEventListener('click', function () { goBack(renderMain); });
     wrap.querySelectorAll('[data-node-id]').forEach(function (btn) {
       btn.addEventListener('click', function () { renderPathWindow(btn.getAttribute('data-node-id')); });
     });
@@ -3044,6 +3157,7 @@
 
   function renderMain() {
     if (!state.raceGoal || !state.profile || !state.planMeta) { renderIntro(); return; }
+    _recordScreen(function () { renderMain(); });
 
     var app = document.getElementById('app');
     app.innerHTML = '';
@@ -3492,7 +3606,8 @@
       didAutoScroll = true;
       var todayRow = document.querySelector('.day-row.is-today');
       if (todayRow) {
-        setTimeout(function () { todayRow.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 150);
+        var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        setTimeout(function () { todayRow.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' }); }, 150);
       }
     }
 
@@ -3524,6 +3639,7 @@
   // button. renderMain as the back target matches every other secondary
   // screen's back button (progressBackBtn/safetyBackBtn/etc).
   function renderUpgradePrompt(featureId) {
+    _recordScreen(function () { renderUpgradePrompt(featureId); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -3540,7 +3656,7 @@
       '</div>'
     );
     app.appendChild(wrap);
-    document.getElementById('upgradeBackBtn').addEventListener('click', renderMain);
+    document.getElementById('upgradeBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
   function openCoachChatOrUpgradePrompt() {
     if (SubscriptionDomain.isFeatureLocked && SubscriptionDomain.isFeatureLocked(state.subscription, 'aiCoachChat')) {
@@ -3552,6 +3668,7 @@
 
   // ── AI coach chat -- a real multi-turn conversation, not a single ask-and-forget box ──
   function renderCoachChat() {
+    _recordScreen(function () { renderCoachChat(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -3629,8 +3746,7 @@
       var replaces = quest && (quest.replaces || quest.canReplaceWorkoutTypes || []);
       if (!day || !quest || replaces.indexOf(day.type) === -1) return false;
       if (quest.name === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
-      state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), rewardPoints: quest.xpReward || quest.rewardPoints || 0, relationship: quest.relationshipLabel || 'Can replace an easy Main Mission' });
-      awardSideMissionXp('sidemission|' + quest.id + '|' + key + '|' + dateToISO(new Date()), quest.xpReward || quest.rewardPoints || 0, { key: key });
+      state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), relationship: quest.relationshipLabel || 'Can replace an easy Main Mission' });
       refreshPathProgress();
       return true;
     }
@@ -3715,7 +3831,7 @@
       '</div>'
     );
     app.appendChild(wrap);
-    document.getElementById('coachBackBtn').addEventListener('click', renderMain);
+    document.getElementById('coachBackBtn').addEventListener('click', function () { goBack(renderMain); });
 
     var thread = document.getElementById('coachThread');
     thread.scrollTop = thread.scrollHeight;
@@ -3821,6 +3937,7 @@
   }
 
   function renderSafetyPanel() {
+    _recordScreen(function () { renderSafetyPanel(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('safetyBtn') + '</div>'));
@@ -3841,10 +3958,11 @@
       '</div>'
     );
     app.appendChild(wrap);
-    document.getElementById('safetyBackBtn').addEventListener('click', renderMain);
+    document.getElementById('safetyBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
 
   function renderGlossaryPanel() {
+    _recordScreen(function () { renderGlossaryPanel(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('glossaryBtn') + '</div>'));
@@ -3865,10 +3983,11 @@
       '</div>'
     );
     app.appendChild(wrap);
-    document.getElementById('glossaryBackBtn').addEventListener('click', renderMain);
+    document.getElementById('glossaryBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
 
   function renderWorkoutDetail(weekNum, dayIdx) {
+    _recordScreen(function () { renderWorkoutDetail(weekNum, dayIdx); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -4431,7 +4550,7 @@
         });
       });
 
-      document.getElementById('wdSaveBtn').addEventListener('click', function () {
+      guardOnce(document.getElementById('wdSaveBtn'), function () {
         var time = document.getElementById('wd_time').value.trim();
         var distanceRaw = document.getElementById('wd_distance').value;
         var notes = document.getElementById('wd_notes').value.trim();
@@ -4456,7 +4575,7 @@
         renderMain();
       });
     }
-    document.getElementById('wdBackBtn').addEventListener('click', renderMain);
+    document.getElementById('wdBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
 
   // docs/COACHING_SPEC.md "Session-level architecture" -- an independent
@@ -4468,6 +4587,7 @@
   // (state.sessionLogs/state.sessionOverrides), completely independent of
   // the day's primary session and of every other session on the calendar.
   function renderSessionDetail(weekNum, dayIdx, sessionId) {
+    _recordScreen(function () { renderSessionDetail(weekNum, dayIdx, sessionId); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -4545,7 +4665,7 @@
       setSessionOverride(sessionId, skipped ? null : { skipped: true });
       renderMain();
     });
-    document.getElementById('sdBackBtn').addEventListener('click', renderMain);
+    document.getElementById('sdBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
 
   // docs/COACHING_SPEC.md "Today screen actions" -- Reschedule's day-picker.
@@ -4557,6 +4677,7 @@
   // about on confirm -- so the tradeoff is visible before tapping, not just
   // after.
   function renderReschedulePicker(sourceWeekNum, sourceDayIdx) {
+    _recordScreen(function () { renderReschedulePicker(sourceWeekNum, sourceDayIdx); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -4603,13 +4724,14 @@
         applyMoveWithConfirm(sourceKey, targetKey, targetDayData, sourceWeekNum, sourceDayIdx, renderMain);
       });
     });
-    document.getElementById('rescheduleBackBtn').addEventListener('click', function () { renderWorkoutDetail(sourceWeekNum, sourceDayIdx); });
+    document.getElementById('rescheduleBackBtn').addEventListener('click', function () { goBack(function () { renderWorkoutDetail(sourceWeekNum, sourceDayIdx); }); });
   }
 
   // ── Side Quests: "Not feeling this run?" flow (docs/Runner_SideQuest_Spec.md) ──
   // Fully deterministic -- no AI call. Ask why, filter the fixed catalog by
   // reason + day type, offer real substitutions, apply one if chosen.
   function renderSwitchItUp(weekNum, dayIdx) {
+    _recordScreen(function () { renderSwitchItUp(weekNum, dayIdx); });
     var app = document.getElementById('app');
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
@@ -4649,7 +4771,7 @@
             return '<div class="quest-card">' +
               '<div class="quest-name">' + escapeHtml(q.name) + '</div>' +
               '<div class="quest-desc">' + escapeHtml(q.description) + '</div>' +
-              '<div class="quest-meta">' + q.estimatedMinutes + ' min &middot; ' + (SIDE_QUEST_LOAD_LABEL[q.trainingLoad] || '') + ' effort &middot; ' + q.rewardPoints + ' pts</div>' +
+              '<div class="quest-meta">' + q.estimatedMinutes + ' min &middot; ' + (SIDE_QUEST_LOAD_LABEL[q.trainingLoad] || '') + ' effort</div>' +
               '<div class="quest-replaces">Replaces: today&rsquo;s ' + escapeHtml(baseLabel) + '</div>' +
               '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-quest-idx="' + i + '">Replace today&rsquo;s workout</button>' +
             '</div>';
@@ -4661,7 +4783,7 @@
       app.appendChild(wrap);
 
       var backBtn = document.getElementById('switchBackBtn');
-      if (backBtn) backBtn.addEventListener('click', function () { renderWorkoutDetail(weekNum, dayIdx); });
+      if (backBtn) backBtn.addEventListener('click', function () { goBack(function () { renderWorkoutDetail(weekNum, dayIdx); }); });
 
       if (!showingOptions) {
         wrap.querySelectorAll('.chip[data-group="switchReason"]').forEach(function (chip) {
@@ -4701,6 +4823,7 @@
   }
 
   function renderSettings() {
+    _recordScreen(function () { renderSettings(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('gearBtn') + '</div>'));
@@ -4823,9 +4946,6 @@
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
         '<p class="recap-empty">5K, 10K, and half marathon are always available. Marathon and ultra distances are still being reviewed &mdash; turn this on to unlock them for new plans.</p>' +
         '<div class="chip-grid" id="set_longerDistances">' + chipsHtml('longerDistances', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.enableLongerDistances ? 'on' : 'off', false) + '</div>' +
-        '<div class="ob-label" style="margin-top:18px">Reduce XP/level prominence</div>' +
-        '<p class="recap-empty">Keeps XP, levels, and badges working, just quieter &mdash; hides the "+XP" line from completion toasts.</p>' +
-        '<div class="chip-grid" id="set_quietGamification">' + chipsHtml('quietGamification', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.quietGamification ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -4879,16 +4999,6 @@
       });
     });
 
-    wrap.querySelectorAll('#set_quietGamification .chip').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        state.flags.quietGamification = chip.getAttribute('data-value') === 'on';
-        saveState(state);
-        wrap.querySelectorAll('#set_quietGamification .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.quietGamification ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.flags.quietGamification ? 'on' : 'off'))));
-        });
-      });
-    });
-
     var toReason = 'illness';
     wrap.querySelectorAll('#set_toReason .chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
@@ -4898,10 +5008,13 @@
         });
       });
     });
-    document.getElementById('markUnavailableBtn').addEventListener('click', function () {
+    var markUnavailableBtn = document.getElementById('markUnavailableBtn');
+    markUnavailableBtn.addEventListener('click', function () {
+      if (markUnavailableBtn.disabled) return;
       var startVal = document.getElementById('set_toStart').value;
       var endVal = document.getElementById('set_toEnd').value;
       if (!startVal || !endVal || startVal > endVal) { window.alert('Pick a valid start and end date.'); return; }
+      markUnavailableBtn.disabled = true;
       state.unavailable.push({ start: startVal, end: endVal, reason: toReason });
       saveState(state);
       renderSettings();
@@ -4921,11 +5034,14 @@
         wrap.querySelectorAll('#set_travelIndoor .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === travelIndoor); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === travelIndoor))); });
       });
     });
-    document.getElementById('addTravelPeriodBtn').addEventListener('click', function () {
+    var addTravelPeriodBtn = document.getElementById('addTravelPeriodBtn');
+    addTravelPeriodBtn.addEventListener('click', function () {
+      if (addTravelPeriodBtn.disabled) return;
       var startVal = document.getElementById('set_travelStart').value;
       var endVal = document.getElementById('set_travelEnd').value;
       if (!startVal || !endVal || startVal > endVal) { window.alert('Pick a valid start and end date.'); return; }
       var minDur = parseInt(document.getElementById('set_travelMinDuration').value, 10) || 30;
+      addTravelPeriodBtn.disabled = true;
       state.travelPeriods.push({
         id: 'tp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
         start: startVal, end: endVal, mode: 'travel',
@@ -4959,9 +5075,12 @@
     wireRwChipGroup('set_rwActivity', 'rwActivity', function (v) { rwActivity = v; });
     wireRwChipGroup('set_rwDay', 'rwDay', function (v) { rwDay = v; });
     wireRwChipGroup('set_rwIntensity', 'rwIntensity', function (v) { rwIntensity = v; });
-    document.getElementById('addRecurringWorkoutBtn').addEventListener('click', function () {
+    var addRecurringWorkoutBtn = document.getElementById('addRecurringWorkoutBtn');
+    addRecurringWorkoutBtn.addEventListener('click', function () {
+      if (addRecurringWorkoutBtn.disabled) return;
       var duration = parseInt(document.getElementById('set_rwDuration').value || '0', 10);
       if (!duration || duration <= 0) { document.getElementById('set_rwDuration').focus(); return; }
+      addRecurringWorkoutBtn.disabled = true;
       state.recurringWorkouts.push({
         id: 'rw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
         activityType: rwActivity,
@@ -5173,7 +5292,7 @@
       window.location.reload();
     });
 
-    document.getElementById('settingsBackBtn').addEventListener('click', renderMain);
+    document.getElementById('settingsBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
 
   // docs/PROGRESS_SPEC.md "Required Visualization" -- a restrained, hand-rolled
@@ -5262,6 +5381,7 @@
   }
 
   function renderProgressPanel() {
+    _recordScreen(function () { renderProgressPanel(); });
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('progressBtn') + '</div>'));
@@ -5536,12 +5656,38 @@
       });
     }
 
-    document.getElementById('progressBackBtn').addEventListener('click', renderMain);
+    document.getElementById('progressBackBtn').addEventListener('click', function () { goBack(renderMain); });
+  }
+
+  // P1: sw.js's activate handler already posts an APP_UPDATED message to
+  // every open tab the moment a new version takes control (skipWaiting +
+  // clients.claim -- deliberately not deferred until all tabs close, so a
+  // deploy takes effect promptly). Previously nothing on this side ever
+  // listened for that message, so the update silently happened with no way
+  // for the runner to know or to choose when to reload -- and, since
+  // nothing here forces a reload either, there was never real data-loss
+  // risk, just an invisible update. This makes it visible and puts the
+  // runner in control of *when* to reload, never forcing it mid-form/
+  // mid-workout.
+  function showUpdateBanner() {
+    if (document.querySelector('.update-banner')) return; // already showing -- don't stack a second one
+    var banner = document.createElement('div');
+    banner.className = 'update-banner';
+    banner.setAttribute('role', 'status');
+    banner.innerHTML = '<span>A new version of Runner is ready.</span>' +
+      '<button type="button" id="updateReloadBtn">Reload</button>' +
+      '<button type="button" id="updateDismissBtn" aria-label="Dismiss">&times;</button>';
+    document.body.appendChild(banner);
+    document.getElementById('updateReloadBtn').addEventListener('click', function () { window.location.reload(); });
+    document.getElementById('updateDismissBtn').addEventListener('click', function () { banner.remove(); });
   }
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+    navigator.serviceWorker.addEventListener('message', function (event) {
+      if (event.data && event.data.type === 'APP_UPDATED') showUpdateBanner();
     });
   }
 

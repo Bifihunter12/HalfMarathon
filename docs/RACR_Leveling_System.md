@@ -1,5 +1,7 @@
 # RACR Leveling System — XP, RACR Level, Badges, PRs
 
+> **Superseded (2026-08-03):** XP and the generic RACR Level were removed from V1 — see `docs/COACHING_SPEC.md` "Achievements." Kept for historical context only.
+
 Saved verbatim/condensed (2026-07-22). **Superseded the same day by `docs/RACR_Reward_System_Master_Prompt.md`** — a fuller engineering-grade version of this same material (adds quality bonuses, the XP event system, full data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Kept here for history; build from the newer doc, not this one. Original framing: this completes the reward architecture the RACR Master Prompt only partially specified — it answers *why XP matters, what leveling up means, what a level unlocks,* and *how small wins feel rewarding between major milestones.* **Spec only — no code changes made from either doc yet.**
 
 ## Four distinct progression systems (each answers a different question)
