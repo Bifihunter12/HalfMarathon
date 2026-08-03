@@ -7,7 +7,6 @@
   var MergeStateDomain = window.RACRMergeState || {};
   var CoachingRulesDomain = window.RACRCoachingRules || {};
   var ProgressStatsDomain = window.RACRProgressStats || {};
-  var SubscriptionDomain = window.RACRSubscription || {};
   // docs/COACHING_SPEC.md "Achievements" -- XP/generic player levels were
   // removed from V1 (RACRXp / xp-system.js no longer exist); this app
   // never rewards points, only real, verifiable running progress.
@@ -901,10 +900,11 @@
     if (!s.weightEntries) s.weightEntries = []; // [{ dateIso, weightLb }], one entry per date (adding again for the same date replaces it)
     if (!s.weightUnits) s.weightUnits = s.units === 'km' ? 'kg' : 'lb';
     if (!s.lastModified) s.lastModified = 0;
-    // docs/COACHING_SPEC.md "Subscription / premium features" -- freemium;
-    // free by default for everyone, including everyone using the app before
-    // this feature existed (no migration needed beyond this default).
-    if (!s.subscription) s.subscription = { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: null };
+    // The subscription/premium-gating feature was built, then removed the
+    // same session before any real launch -- explicitly dropped here (not
+    // left un-migrated) for any install that briefly had it, same treatment
+    // as the earlier XP removal.
+    delete s.subscription;
     return s;
   }
   // docs/COACHING_SPEC.md "Error handling" -- a quota-exceeded or corrupted-
@@ -3391,7 +3391,7 @@
           (todayMission ? '<div class="today-side"><div class="mission-label">Side Mission</div><button type="button" class="side-mission-link" id="todaySideMissionBtn">' + escapeHtml(todayMission.name) + ' &middot; ' + todayMission.durationMinutesMin + '-' + todayMission.durationMinutesMax + ' min</button></div>' : '') +
           (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
           '<div class="ai-coach">' +
-            '<button type="button" class="pain-toggle" id="aiCoachOpenBtn">Ask your coach' + ((SubscriptionDomain.isFeatureLocked && SubscriptionDomain.isFeatureLocked(state.subscription, 'aiCoachChat')) ? ' (Premium)' : '') + '</button>' +
+            '<button type="button" class="pain-toggle" id="aiCoachOpenBtn">Ask your coach</button>' +
           '</div>' +
         '</div>'
       );
@@ -3406,7 +3406,7 @@
           renderMissionDetail(todayMission.id, todayKey);
         });
       }
-      document.getElementById('aiCoachOpenBtn').addEventListener('click', openCoachChatOrUpgradePrompt);
+      document.getElementById('aiCoachOpenBtn').addEventListener('click', renderCoachChat);
     }
 
     // docs/PROGRESS_SPEC.md "Main Dashboard" -- one primary number (this
@@ -3612,58 +3612,6 @@
     }
 
     Notifications.check();
-  }
-
-  // docs/COACHING_SPEC.md "Subscription / premium features" -- Runner is
-  // freemium: the core plan, safety guidance, logging, calendar, recurring
-  // workouts, and progress tracking stay free for everyone. Only these two
-  // features (real per-use AI/backend cost) are gated. UI copy only --
-  // SubscriptionDomain owns the actual lock/entitlement logic.
-  var PREMIUM_FEATURE_COPY = {
-    aiCoachChat: {
-      title: 'AI coach chat',
-      body: 'A real back-and-forth conversation with an AI coach about today’s plan — ask it to explain a workout, negotiate a change, or talk through how you’re feeling.'
-    },
-    googleHealthSync: {
-      title: 'Google Health / Fitbit sync',
-      body: 'Automatically import completed runs from Google Health so you don’t have to log them by hand.'
-    },
-    general: {
-      title: 'Premium',
-      body: 'Unlocks AI coach chat and Google Health / Fitbit sync.'
-    }
-  };
-  // No real Apple/Google purchase flow exists yet (see COACHING_SPEC.md --
-  // that requires a native app shell this project doesn't have), so this
-  // screen is honest about that instead of faking a working "Subscribe"
-  // button. renderMain as the back target matches every other secondary
-  // screen's back button (progressBackBtn/safetyBackBtn/etc).
-  function renderUpgradePrompt(featureId) {
-    _recordScreen(function () { renderUpgradePrompt(featureId); });
-    var app = document.getElementById('app');
-    app.innerHTML = '';
-    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
-    wireHeaderIcons();
-    var copy = PREMIUM_FEATURE_COPY[featureId] || { title: 'This feature', body: 'This is a premium feature.' };
-    var wrap = el(
-      '<div class="ob">' +
-        '<div class="ob-title">' + escapeHtml(copy.title) + ' is a premium feature</div>' +
-        '<p class="intro-body">' + escapeHtml(copy.body) + '</p>' +
-        '<p class="recap-empty">Everything else — your training plan, safety guidance, logging, calendar, recurring workouts, and progress tracking — stays free, no matter what.</p>' +
-        '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>Subscriptions aren’t open yet in this preview. When they launch, this button will start the real purchase.</span></div>' +
-        '<button class="ob-btn" id="upgradeCta" disabled>Upgrade (coming soon)</button>' +
-        '<button type="button" class="ob-cancel" id="upgradeBackBtn">Back</button>' +
-      '</div>'
-    );
-    app.appendChild(wrap);
-    document.getElementById('upgradeBackBtn').addEventListener('click', function () { goBack(renderMain); });
-  }
-  function openCoachChatOrUpgradePrompt() {
-    if (SubscriptionDomain.isFeatureLocked && SubscriptionDomain.isFeatureLocked(state.subscription, 'aiCoachChat')) {
-      renderUpgradePrompt('aiCoachChat');
-    } else {
-      renderCoachChat();
-    }
   }
 
   // ── AI coach chat -- a real multi-turn conversation, not a single ask-and-forget box ──
@@ -4837,13 +4785,6 @@
           '<input class="ob-input" type="text" id="set_raceName" placeholder="e.g. Santa Fe Half Marathon" value="' + escapeHtml(state.raceGoal.raceName || '') + '">' : '') +
         '<div class="ob-label">Units</div>' +
         '<div class="chip-grid" id="set_units">' + chipsHtml('units', ['mi', 'km'], { mi: 'Miles', km: 'Kilometers' }, state.units, false) + '</div>' +
-        '<div class="ob-label" style="margin-top:26px">Subscription</div>' +
-        (SubscriptionDomain.hasActiveEntitlement && SubscriptionDomain.hasActiveEntitlement(state.subscription) ?
-          '<p class="recap-empty">Premium — thanks for subscribing.' + (state.subscription.expiresAtIso ? ' Renews ' + state.subscription.expiresAtIso.slice(0, 10) + '.' : '') + '</p>'
-          :
-          '<p class="recap-empty">Free plan. AI coach chat and Google Health sync are premium — everything else stays free.</p>' +
-          '<button class="ob-btn ob-btn-secondary" id="settingsUpgradeBtn">See premium features</button>'
-        ) +
         '<div class="ob-label" style="margin-top:26px">Time off</div>' +
         (state.unavailable.length ? '<div class="timeoff-list" id="timeoff_list">' + state.unavailable.map(function (r, i) {
           return '<div class="timeoff-row"><span>' + (r.reason === 'vacation' ? 'Away' : 'Illness') + ' &middot; ' + r.start + ' &ndash; ' + r.end + '</span><button type="button" class="timeoff-remove" data-idx="' + i + '">Remove</button></div>';
@@ -4925,7 +4866,7 @@
           '<p class="recap-empty">Connected &mdash; workout detail screens can now offer to import a matching activity.</p>' +
           '<button class="ob-btn ob-btn-secondary" id="ghDisconnectBtn">Disconnect</button>'
           :
-          '<p class="recap-empty">Connect Google Health (Fitbit) to import completed runs into your log. Fully optional &mdash; read-only, and the connection stays on this device only.' + ((SubscriptionDomain.isFeatureLocked && SubscriptionDomain.isFeatureLocked(state.subscription, 'googleHealthSync')) ? ' Premium feature.' : '') + '</p>' +
+          '<p class="recap-empty">Connect Google Health (Fitbit) to import completed runs into your log. Fully optional &mdash; read-only, and the connection stays on this device only.</p>' +
           '<button class="ob-btn ob-btn-secondary" id="ghConnectBtn">Connect Google Health</button>'
         ) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Notifications</div>' +
@@ -4946,9 +4887,6 @@
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
         '<p class="recap-empty">5K, 10K, and half marathon are always available. Marathon and ultra distances are still being reviewed &mdash; turn this on to unlock them for new plans.</p>' +
         '<div class="chip-grid" id="set_longerDistances">' + chipsHtml('longerDistances', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.enableLongerDistances ? 'on' : 'off', false) + '</div>' +
-        '<div class="ob-label" style="margin-top:18px">Simulate premium (testing only)</div>' +
-        '<p class="recap-empty">Turns on Premium locally on this device for testing &mdash; no charge, no real store involved. Turn off to go back to the free plan. Remove this toggle before a real launch.</p>' +
-        '<div class="chip-grid" id="set_simulatePremium">' + chipsHtml('simulatePremium', ['off', 'on'], { off: 'Off', on: 'On' }, (SubscriptionDomain.hasActiveEntitlement && SubscriptionDomain.hasActiveEntitlement(state.subscription)) ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Your data</div>' +
         '<button class="ob-btn ob-btn-secondary" id="exportBtn">Export data (.json)</button>' +
         '<button class="ob-btn ob-btn-secondary" id="importBtn">Import data (.json)</button>' +
@@ -4989,9 +4927,6 @@
       });
     });
 
-    var settingsUpgradeBtn = document.getElementById('settingsUpgradeBtn');
-    if (settingsUpgradeBtn) settingsUpgradeBtn.addEventListener('click', function () { renderUpgradePrompt('general'); });
-
     wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         state.flags.enableLongerDistances = chip.getAttribute('data-value') === 'on';
@@ -4999,24 +4934,6 @@
         wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (c) {
           c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off'))));
         });
-      });
-    });
-
-    // docs/COACHING_SPEC.md "Subscription / premium features" -- lets the
-    // runner unlock premium locally for testing without a real store (none
-    // exists yet). Full re-render, not just chip repaint, since the
-    // Subscription section near the top of this same screen also needs to
-    // reflect the change. Ships with a beta flag treatment (off by default,
-    // clearly labeled) since a toggle like this must be removed once real
-    // in-app purchase exists -- otherwise it would be a permanent free bypass.
-    wrap.querySelectorAll('#set_simulatePremium .chip').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        var on = chip.getAttribute('data-value') === 'on';
-        state.subscription = on
-          ? { tier: 'premium', productId: 'test_simulated', source: null, expiresAtIso: '2099-01-01T00:00:00.000Z', willRenew: false, lastVerifiedIso: new Date().toISOString() }
-          : { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: null };
-        saveState(state);
-        renderSettings();
       });
     });
 
@@ -5226,10 +5143,6 @@
       });
     } else {
       document.getElementById('ghConnectBtn').addEventListener('click', function () {
-        if (SubscriptionDomain.isFeatureLocked && SubscriptionDomain.isFeatureLocked(state.subscription, 'googleHealthSync')) {
-          renderUpgradePrompt('googleHealthSync');
-          return;
-        }
         GoogleHealth.connect();
       });
     }

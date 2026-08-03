@@ -15,8 +15,7 @@ function baseState(overrides) {
     logs: {}, overrides: {}, crossType: {},
     unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: [],
     weightTrackingEnabled: false, weightUnits: 'lb', weightEntries: [],
-    sessionLogs: {}, sessionOverrides: {}, dayAdjustments: {},
-    subscription: { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: null }
+    sessionLogs: {}, sessionOverrides: {}, dayAdjustments: {}
   }, overrides || {});
 }
 
@@ -280,53 +279,3 @@ test('legacy states missing dayAdjustments entirely still merge to a safe empty 
   assert.deepEqual(merged.dayAdjustments, {});
 });
 
-// docs/COACHING_SPEC.md "Subscription / premium features" -- unlike every
-// other scalar field above, a subscription record protects something the
-// runner actually paid for, so it must never silently downgrade a paying
-// user just because the OTHER device happens to have a newer lastModified
-// for unrelated reasons.
-test('an active premium subscription is never overwritten by a stale/free record from a device with a newer lastModified', function () {
-  const local = baseState({
-    lastModified: 1000, // older device...
-    subscription: { tier: 'premium', productId: 'runner_premium_annual', source: 'ios', expiresAtIso: '2027-01-01T00:00:00.000Z', willRenew: true, lastVerifiedIso: '2026-08-01T00:00:00.000Z' }
-  });
-  const remote = baseState({
-    lastModified: 5000, // ...but newer overall lastModified (e.g. logged a run since)
-    subscription: { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: null }
-  });
-  const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.subscription.tier, 'premium', 'the active entitlement must win outright, not the newer-lastModified-but-free device');
-});
-
-test('an expired subscription record does not block the other device\'s more-recently-verified record from winning', function () {
-  const local = baseState({
-    lastModified: 2000,
-    subscription: { tier: 'premium', productId: 'p', source: 'ios', expiresAtIso: '2020-01-01T00:00:00.000Z', willRenew: false, lastVerifiedIso: '2026-01-01T00:00:00.000Z' } // long expired
-  });
-  const remote = baseState({
-    lastModified: 1000,
-    subscription: { tier: 'premium', productId: 'p', source: 'android', expiresAtIso: '2027-01-01T00:00:00.000Z', willRenew: true, lastVerifiedIso: '2026-08-01T00:00:00.000Z' } // still active, verified more recently
-  });
-  const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.subscription.source, 'android', 'the still-active, more-recently-verified record wins since the local one is expired');
-});
-
-test('when neither side has an active subscription, the more recently verified record wins regardless of lastModified', function () {
-  const local = baseState({
-    lastModified: 5000,
-    subscription: { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: '2026-01-01T00:00:00.000Z' }
-  });
-  const remote = baseState({
-    lastModified: 1000,
-    subscription: { tier: 'free', productId: null, source: null, expiresAtIso: null, willRenew: null, lastVerifiedIso: '2026-08-01T00:00:00.000Z' }
-  });
-  const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.subscription.lastVerifiedIso, '2026-08-01T00:00:00.000Z');
-});
-
-test('legacy states missing subscription entirely still merge to a safe free default', function () {
-  const local = { lastModified: 2000, units: 'mi' };
-  const remote = { lastModified: 1000, units: 'mi' };
-  const merged = mergeState.mergeRunnerState(local, remote);
-  assert.equal(merged.subscription.tier, 'free');
-});
