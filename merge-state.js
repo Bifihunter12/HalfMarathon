@@ -142,11 +142,24 @@
       logs: mergeMap(local.logs, remote.logs),
       overrides: mergeMap(local.overrides, remote.overrides),
       crossType: mergeMap(local.crossType, remote.crossType),
+      // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary
+      // same-day session's log/override, keyed by its own stable session id
+      // (coaching-rules.js sessionIdFor) instead of a day key. Same
+      // mergeMap semantics as logs/overrides above -- two sessions on one
+      // date never collide because they're different keys entirely, and
+      // this reuses the exact same merge function rather than a new one.
+      sessionLogs: mergeMap(local.sessionLogs, remote.sessionLogs),
+      sessionOverrides: mergeMap(local.sessionOverrides, remote.sessionOverrides),
       unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
       sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
       runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),
       recurringWorkouts: Object.keys(recurringWorkoutsMap).map(function (k) { return recurringWorkoutsMap[k]; }),
       travelPeriods: Object.keys(travelPeriodsMap).map(function (k) { return travelPeriodsMap[k]; }),
+      // docs/COACHING_SPEC.md "Key-session conflict" -- a workoutId->optionId
+      // map, same shape as logs/overrides/crossType above -- reuse mergeMap
+      // directly (real per-key last-write-wins, matching how a runner
+      // changing their mind about a conflict resolution should behave).
+      scheduleChoices: mergeMap(local.scheduleChoices, remote.scheduleChoices),
       weightEntries: Object.keys(weightEntriesMap).map(function (k) { return weightEntriesMap[k]; }),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };

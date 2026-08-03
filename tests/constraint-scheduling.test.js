@@ -137,6 +137,107 @@ test('Tuesday 12-3-30 plus Tabata never gets an additional hard run stacked on i
   });
 });
 
+// docs/COACHING_SPEC.md "Key-session conflict" -- profile.preferredLongRunDay
+// moves the plan's key/long run off the race weekday (Sunday for this
+// benchmark) onto Friday, matching the master prompt's "Friday: key or long
+// run" weekly rhythm. Combined with the every-other-week Friday Tabata, this
+// is the exact conflict scenario the app must never resolve silently.
+function fridayLongRunProfile() { return benchmarkProfile({ preferredLongRunDay: 4 }); }
+function fridayTabataOnly() {
+  return [{ id: 'tabataFriAlt', activityType: 'tabata', day: 4, durationMinutes: 20, intensity: 'high', fixed: true, timeWindow: 'midday', recurrence: 'alternating', recurrenceAnchorIso: null }];
+}
+
+test('key-session conflict: with no stored choice, a Friday Tabata on the long-run day is visible, never silently dropped or silently overriding the long run', function () {
+  var profile = fridayLongRunProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', fridayTabataOnly(), {});
+  // Weeks 1 and 3 are "on" weeks for this null-anchor alternating workout
+  // (see the anchor-week-math regression test above).
+  assert.equal(weeks[0].days[4].type, 'long', 'the long run itself must never be silently displaced by an unresolved conflict');
+  assert.match(weeks[0].days[4].label, /Tabata/, 'the conflicting fixed workout must still be visible on the calendar, not silently dropped (the original bug)');
+  assert.match(weeks[0].days[4].label, /conflicts with your long run/i, 'an unresolved conflict must be flagged in plain language, not presented as a normal coexistence');
+  // Week 2 is an "off" week for the alternating Tabata -- no conflict exists,
+  // so nothing should be flagged.
+  assert.equal(weeks[1].days[4].type, 'long');
+  assert.doesNotMatch(weeks[1].days[4].label, /Tabata/);
+});
+
+test('key-session conflict: detectKeySessionConflict returns the fixed workout and exactly the 4 documented safe options', function () {
+  var raceGoal = benchmarkRaceGoal();
+  var conflicts = rules.detectKeySessionConflict(fridayTabataOnly(), raceGoal.raceDate, 4);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].workoutId, 'tabataFriAlt');
+  var ids = conflicts[0].options.map(function (o) { return o.id; });
+  assert.deepEqual(ids, ['keep_long_easy', 'move_long_run', 'keep_long_reduce', 'coexist']);
+  conflicts[0].options.forEach(function (o) { assert.ok(o.label && o.description, 'every option needs a plain-language label and description'); });
+});
+
+test('key-session conflict: detectKeySessionConflict returns nothing once the two activities do not actually share a day', function () {
+  var raceGoal = benchmarkRaceGoal();
+  assert.deepEqual(rules.detectKeySessionConflict(fridayTabataOnly(), raceGoal.raceDate, 0), []); // long run moved to Monday -- no more conflict
+});
+
+test('key-session conflict choice "keep_long_easy": the long run stays, the fixed workout is skipped on conflicting weeks only', function () {
+  var profile = fridayLongRunProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', fridayTabataOnly(), { tabataFriAlt: 'keep_long_easy' });
+  assert.equal(weeks[0].days[4].type, 'long');
+  assert.doesNotMatch(weeks[0].days[4].label, /Tabata/, 'week 1 (an "on" week) must skip the Tabata once the runner has chosen to keep the long run');
+  assert.equal(weeks[1].days[4].type, 'long');
+  assert.doesNotMatch(weeks[1].days[4].label, /Tabata/, 'week 2 (an "off" week) has no Tabata to begin with');
+});
+
+test('key-session conflict choice "move_long_run": the long run itself relocates to a free weekend day, freeing Friday for the fixed workout', function () {
+  var profile = fridayLongRunProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', fridayTabataOnly(), { tabataFriAlt: 'move_long_run' });
+  var wk = weeks[0]; // an "on" week
+  assert.notEqual(wk.days[4].type, 'long', 'Friday must no longer hold the long run on a conflicting week once the runner chose to move it');
+  assert.match(wk.days[4].label, /Tabata/, 'Friday should still carry the fixed workout normally once the long run has moved off it');
+  var movedToWeekend = wk.days[5].type === 'long' || wk.days[6].type === 'long';
+  assert.ok(movedToWeekend, 'the long run must land on Saturday or Sunday instead');
+  // An "off" week has nothing to resolve -- the long run stays put on Friday.
+  assert.equal(weeks[1].days[4].type, 'long');
+});
+
+test('key-session conflict choice "keep_long_reduce": both sessions coexist, the fixed workout is flagged reduced', function () {
+  var profile = fridayLongRunProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', fridayTabataOnly(), { tabataFriAlt: 'keep_long_reduce' });
+  var wk = weeks[0];
+  assert.equal(wk.days[4].type, 'long');
+  assert.match(wk.days[4].label, /Tabata \(reduced\)/);
+  var secondary = wk.days[4].sessions.filter(function (s) { return s.recurringWorkoutId === 'tabataFriAlt'; })[0];
+  assert.equal(secondary.loadClass, 'low', 'a reduced session must not still count as a full hard load');
+});
+
+test('key-session conflict choice "coexist": both sessions happen unchanged, no reduced flag', function () {
+  var profile = fridayLongRunProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', fridayTabataOnly(), { tabataFriAlt: 'coexist' });
+  var wk = weeks[0];
+  assert.equal(wk.days[4].type, 'long');
+  assert.match(wk.days[4].label, /Tabata/);
+  assert.doesNotMatch(wk.days[4].label, /reduced/);
+});
+
+test('key-session conflict: race week is never touched by any stored choice', function () {
+  var profile = fridayLongRunProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  ['keep_long_easy', 'move_long_run', 'keep_long_reduce', 'coexist'].forEach(function (choice) {
+    var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', fridayTabataOnly(), { tabataFriAlt: choice });
+    var raceWeek = weeks[weeks.length - 1];
+    assert.equal(raceWeek.phase, 'race');
+    assert.notEqual(raceWeek.days[4].type, 'long', 'race week never gets a relocated/altered long run from a schedule choice -- choice: ' + choice);
+  });
+});
+
 test('Wednesday easy run stays easy (never quality) alongside a fixed circuit session', function () {
   var profile = benchmarkProfile();
   var raceGoal = benchmarkRaceGoal();
@@ -190,6 +291,26 @@ test('travel mode creates real indoor sessions, never a week of blanket rest day
   assert.ok(restDayCount <= 1, 'a travel week must keep at most its one normal rest day, not convert every day to rest');
   var sessionDays = travelWeek.days.filter(function (d) { return d.travelSession; });
   assert.ok(sessionDays.length >= 5, 'most days in a travel week should have a real indoor session');
+});
+
+test('a travel-overridden day never leaves a stale pre-travel session underneath the correctly-updated day label', function () {
+  // Regression: applyTravelPeriods used to mutate day.type/miles/label but
+  // never touched day.sessions[], so opening the individual session (e.g.
+  // Tuesday's home Tabata class) during a trip would still show "Threshold
+  // intervals -- Tabata, RPE 7-8" even though the day itself correctly said
+  // "easy indoor movement (travel)" -- and home classes aren't expected to
+  // happen while traveling anyway.
+  var profile = benchmarkProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var travelPeriods = [{ id: 't1', start: '2026-08-25', end: '2026-09-08', mode: 'travel', indoorOnly: true, minDurationMinutes: 30, preferredDurationMinutes: 45 }];
+  var result = rules.generatePlan(profile, raceGoal, planMeta, {}, rules.parseDate(raceGoal.startDate), [], 'mi', benchmarkRecurringWorkouts(), travelPeriods);
+  var travelDay = null;
+  result.weeks.forEach(function (wk) { wk.days.forEach(function (d) { if (!travelDay && d.travelSession) travelDay = d; }); });
+  assert.ok(travelDay, 'at least one travel-overridden day should exist');
+  assert.equal(travelDay.sessions.length, 1, 'stale home-class sessions must not linger alongside the travel session');
+  assert.equal(travelDay.sessions[0].label, travelDay.label, 'the session shown must match the day it lives on, not a pre-travel label');
+  assert.doesNotMatch(travelDay.sessions[0].label, /Tabata|Circuit|Spinning/, 'a home recurring class must not still appear as if it will happen while traveling');
 });
 
 test('Miami (indoor-only travel) never produces an outdoor-implying session', function () {
@@ -257,15 +378,52 @@ test('unplanned evening intervals move the next morning to an easy hike/recovery
 });
 
 test('evening intervals logged the night before the long run or race day never downgrade that session', function () {
+  // docs/COACHING_SPEC.md "Unplanned hard-workout adaptation" -- the FULL
+  // 48-72 hour window is inspected (not just the next calendar day), so a
+  // later day within that window may legitimately still be adapted; what
+  // must never happen, in any scenario, is the long run or race day itself
+  // being touched.
   var profile = benchmarkProfile();
   var raceGoal = benchmarkRaceGoal();
   var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
   var logs = { '1-5': { time: '25:00', distance: 2, eveningIntervals: true } }; // Saturday -> next day is Sunday's long run
   var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', []);
   var before = weeks[0].days[6].type;
-  var note = rules.applyEveningIntervalAdaptation(weeks, raceGoal, planMeta, logs);
-  assert.equal(note, null, 'no adaptation should fire when the next day is the long run');
+  rules.applyEveningIntervalAdaptation(weeks, raceGoal, planMeta, logs);
   assert.equal(weeks[0].days[6].type, before, 'the long run must remain untouched');
+  assert.notEqual(weeks[0].days[6].type, 'easy', 'the long run must never be silently downgraded to easy');
+});
+
+test('evening intervals logged with nothing left to adapt in the following 72 hours (race day, then the plan simply ends) produce no adaptation at all', function () {
+  var profile = { weeklyMileage: 20, longestRun: 6, runDaysPerWeek: 3, experienceLevel: 'intermediate', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 3, terrains: ['road'], crossOptions: ['Bike'] };
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  // Saturday of race week -- the next day is race day itself (protected),
+  // and the plan has no days at all beyond that to inspect.
+  var logs = { '11-5': { time: '25:00', distance: 2, eveningIntervals: true } };
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', []);
+  var note = rules.applyEveningIntervalAdaptation(weeks, raceGoal, planMeta, logs);
+  assert.equal(note, null);
+});
+
+test('evening intervals the night before a fixed hard recurring commitment (Tuesday Tabata) mark it reduced instead of being ignored', function () {
+  // docs/COACHING_SPEC.md "Unplanned hard-workout adaptation" -- a fixed
+  // commitment inside the 48-72 hour window is a real conflict too, not
+  // just a plan-generated quality/easy run; this is the branch the old
+  // next-morning-only, running-day-only version could never reach at all
+  // (Tuesday is never a running day for this benchmark customer).
+  var profile = benchmarkProfile();
+  var raceGoal = benchmarkRaceGoal();
+  var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
+  var logs = { '1-0': { time: '25:00', distance: 2, eveningIntervals: true } }; // Monday evening
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', benchmarkRecurringWorkouts());
+  var note = rules.applyEveningIntervalAdaptation(weeks, raceGoal, planMeta, logs);
+  assert.match(note, /reduced/);
+  var tuesday = weeks[0].days[1];
+  assert.equal(tuesday.adaptedFromEveningIntervals, true);
+  var tabataSession = tuesday.sessions.filter(function (s) { return s.recurringWorkoutId === 'tabataTue'; })[0];
+  assert.equal(tabataSession.loadClass, 'moderate', 'the fixed hard session itself is downgraded, not silently skipped');
+  assert.match(tabataSession.label, /reduced/);
 });
 
 test('half-marathon readiness checkpoint recommends keeping the half when training evidence is sufficient', function () {
@@ -340,7 +498,7 @@ test('a weekly-availability constraint down to just the long-run day leaves canR
   } });
   var raceGoal = benchmarkRaceGoal();
   var canRunSlots = rules.weeklyAvailabilityCanRunSlots(profile, rules.parseDate(raceGoal.raceDate));
-  assert.equal(canRunSlots.length, 0, 'no non-long-run slots are available');
+  assert.equal(canRunSlots.all.length, 0, 'no non-long-run slots are available');
   var planMeta = buildBenchmarkPlanMeta(profile, raceGoal, 11);
   var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi', []);
   // Excludes race week -- a separate, pre-existing rule (the race-week

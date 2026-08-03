@@ -31,6 +31,19 @@
   var LEVELS = ['beginner', 'novice', 'intermediate', 'advanced'];
 
   var EVENT_LABEL = { '5k': '5K', '10k': '10K', half: 'Half Marathon', marathon: 'Marathon', '50k': '50K', '50mi': '50 Mile', '100k': '100K', '100mi': '100 Mile' };
+  // docs/COACHING_SPEC.md "Launch scope" -- 5K/10K/half are publicly
+  // available without the beta flag; marathon and every ultra distance stay
+  // gated until each is separately reviewed.
+  var PUBLIC_EVENTS = ['5k', '10k', 'half'];
+  function visibleEventsFor(allEvents, enableLongerDistances, currentEvent) {
+    if (enableLongerDistances) return allEvents.slice();
+    // The `|| e === currentEvent` clause keeps an existing longer-distance
+    // plan's own event selectable when editing, even with the flag off, so
+    // toggling it (or a fresh install that never enabled it) never strands
+    // that plan -- its event stays visible until the runner picks a
+    // different one.
+    return allEvents.filter(function (e) { return PUBLIC_EVENTS.indexOf(e) !== -1 || e === currentEvent; });
+  }
 
   // { idealWeeks, minWeeks, longRunPeak (mi), peakVolume (mi/wk), taperWeeks }
   var EVENT_TABLE = {
@@ -594,7 +607,20 @@
       // record already has -- so old data's plan output is byte-identical.
       // Only an EXPLICIT non-morning window (midday/evening) lets a fixed
       // workout coexist with a same-day morning run instead of replacing it.
-      timeWindow: w.timeWindow || null
+      timeWindow: w.timeWindow || null,
+      // docs/COACHING_SPEC.md "Weekend hikes" -- only meaningful when
+      // activityType==='hiking'; null/low defaults for every record that
+      // predates these fields (a hike with no stated terrain/elevation is
+      // treated as the least-demanding case, never assumed to be strenuous).
+      terrainDifficulty: w.terrainDifficulty || 'easy', // 'easy'|'moderate'|'hard'
+      elevationGainFt: w.elevationGainFt || 0,
+      distanceMiles: w.distanceMiles || null,
+      // docs/COACHING_SPEC.md "12-3-20 and 12-3-30" -- only meaningful when
+      // activityType==='twelveThreeThirty'; falls back to the classic
+      // 12-3-30 parameters (12% incline, 3 mph, 30 min) for any record that
+      // predates named templates, which is exactly what this app already
+      // assumed implicitly before this field existed.
+      inclineWalk: w.inclineWalk || { template: '12-3-30', inclinePct: 12, speedMph: 3, durationMinutes: w.durationMinutes || 30 }
     };
   }
 
@@ -637,6 +663,130 @@
     };
   }
 
+  // ── Named incline-walk templates (docs/COACHING_SPEC.md "12-3-20 and
+  // 12-3-30") -- real, editable parameters (not just a bare activity name).
+  // "12-3-30" is the well-known public protocol (12% incline, 3 mph, 30
+  // min); "12-3-20" is the same incline/speed at a shorter 20-minute
+  // duration, a common lower-fatigue variant. Neither is assumed universal
+  // -- evaluateInclineWalkSafety below flags a combination that's unusually
+  // demanding for a given profile so the runner (or the app) can dial it
+  // back, rather than silently prescribing 12% incline to everyone.
+  var INCLINE_WALK_TEMPLATES = {
+    '12-3-30': { inclinePct: 12, speedMph: 3, durationMinutes: 30 },
+    '12-3-20': { inclinePct: 12, speedMph: 3, durationMinutes: 20 },
+    custom: null // caller supplies inclinePct/speedMph/durationMinutes directly
+  };
+  function inclineWalkParams(templateName, overrides) {
+    var base = INCLINE_WALK_TEMPLATES[templateName] || INCLINE_WALK_TEMPLATES['12-3-30'];
+    return Object.assign({ template: templateName || '12-3-30' }, base, overrides || {});
+  }
+  // Conservative, deterministic check -- never a hard block, matching this
+  // app's established "warn, don't gate" posture elsewhere. A true beginner
+  // or anyone with an active injury cap attempting the full 12% incline is
+  // flagged with a concrete, easy-to-apply adjustment (reduce incline
+  // first, then speed) instead of a vague "be careful."
+  function evaluateInclineWalkSafety(params, level) {
+    if (!params || params.inclinePct == null) return null;
+    var demanding = params.inclinePct >= 10 && params.speedMph >= 2.8;
+    if (demanding && (level === 'beginner')) {
+      return 'This is a demanding incline/speed combination for a beginner level -- consider starting around 6-8% incline at the same speed, or the same incline at a slightly slower pace, and increasing from there.';
+    }
+    return null;
+  }
+
+  // ── Purposeful cross-training prescriptions (docs/COACHING_SPEC.md
+  // "Purposeful cross-training prescriptions") -- "Bike" or "Cross-training"
+  // alone is never a complete workout. Every prescription names a purpose,
+  // a simple structure, an RPE range, and the training effect, matching the
+  // spec's own worked example almost exactly ("Easy endurance bike -- 35
+  // minutes: 5 min easy, 25 min conversational RPE 3-4, 5 min easy").
+  // Deterministic and pure -- no AI call, matching this project's
+  // established pattern for every other coaching-rule generator.
+  var CROSS_PURPOSE_LABEL = {
+    recovery: 'Recovery', easy: 'Easy aerobic endurance', steady: 'Steady endurance',
+    aerobic_intervals: 'Aerobic intervals', threshold: 'Threshold intervals',
+    strength: 'Strength / hill resistance', technique: 'Technique',
+    free: 'Free ride / class', race_supporting: 'Race-supporting low-impact volume'
+  };
+  function buildCrossTrainingPrescription(activityType, purpose, durationMinutes) {
+    var actName = RECURRING_ACTIVITY_LABEL[activityType] || 'Cross-training';
+    var dur = Math.max(10, durationMinutes || 30);
+    var warmCool = Math.min(5, Math.round(dur * 0.15));
+    var mainMin = Math.max(0, dur - warmCool * 2);
+    var structure, rpeRange, trainingEffect;
+    switch (purpose) {
+      case 'recovery':
+        structure = 'Entirely easy, conversational effort throughout -- ' + dur + ' min.';
+        rpeRange = [1, 2]; trainingEffect = 'Promotes blood flow and recovery without adding fatigue.';
+        break;
+      case 'steady':
+        structure = warmCool + ' min easy, ' + mainMin + ' min steady at RPE 4-5, ' + warmCool + ' min easy.';
+        rpeRange = [4, 5]; trainingEffect = 'Builds aerobic capacity at a sustainable, controlled effort.';
+        break;
+      case 'aerobic_intervals':
+        structure = warmCool + ' min warm-up, then alternating 4 min moderate / 2 min easy for ' + mainMin + ' min, ' + warmCool + ' min cool-down.';
+        rpeRange = [5, 6]; trainingEffect = 'Raises the aerobic ceiling without running-specific impact.';
+        break;
+      case 'threshold':
+        structure = warmCool + ' min warm-up, then 3 x 8 min at threshold effort (RPE 7) with 2 min easy between, ' + warmCool + ' min cool-down.';
+        rpeRange = [7, 8]; trainingEffect = 'Raises lactate threshold -- a genuinely hard session, not a recovery day.';
+        break;
+      case 'strength':
+        structure = warmCool + ' min easy, ' + mainMin + ' min at high resistance/incline (RPE 6-7), ' + warmCool + ' min easy.';
+        rpeRange = [6, 7]; trainingEffect = 'Builds muscular strength/endurance that supports running economy.';
+        break;
+      case 'technique':
+        structure = dur + ' min focused on form/technique at an easy, controlled effort.';
+        rpeRange = [2, 3]; trainingEffect = 'Improves movement efficiency without adding physiological load.';
+        break;
+      case 'race_supporting':
+        structure = dur + ' min easy, low-impact aerobic volume.';
+        rpeRange = [2, 3]; trainingEffect = 'Adds aerobic volume with minimal impact stress, supporting race fitness.';
+        break;
+      case 'free':
+        structure = 'Whatever feels right -- free ride/class, no prescribed structure.';
+        rpeRange = null; trainingEffect = 'Maintains enjoyment and consistency.';
+        break;
+      default: // 'easy'
+        structure = warmCool + ' min easy, ' + mainMin + ' min conversational at RPE 3-4, ' + warmCool + ' min easy.';
+        rpeRange = [3, 4]; trainingEffect = 'Supplements aerobic training without adding another run.';
+    }
+    return {
+      activityType: activityType, purpose: CROSS_PURPOSE_LABEL[purpose] || CROSS_PURPOSE_LABEL.easy,
+      label: (CROSS_PURPOSE_LABEL[purpose] || CROSS_PURPOSE_LABEL.easy) + ' — ' + actName + ' — ' + dur + ' minutes',
+      structure: structure, rpeRange: rpeRange, trainingEffect: trainingEffect, durationMinutes: dur
+    };
+  }
+
+  // ── Hikes as a legitimate planned activity, not an emergency fallback
+  // (docs/COACHING_SPEC.md "Weekend hikes") -- load is driven by duration
+  // AND terrain difficulty (elevation-gain-aware, not just time on feet), so
+  // a long, steep hike is never silently treated as equivalent to rest.
+  var HIKE_LOAD_ORDER = ['low', 'moderate', 'high'];
+  function classifyHikeLoad(durationMinutes, terrainDifficulty) {
+    var dur = durationMinutes || 0;
+    var base = dur >= 180 ? 2 : dur >= 90 ? 1 : 0;
+    var bump = terrainDifficulty === 'hard' ? 1 : 0;
+    return HIKE_LOAD_ORDER[Math.min(HIKE_LOAD_ORDER.length - 1, base + bump)];
+  }
+  function buildHikePrescription(hike, units) {
+    var dur = hike.durationMinutes || 60;
+    var distText = hike.distanceMiles ? ', ' + toUnit(hike.distanceMiles, units) + ' ' + unitLabel(units) : '';
+    var elevText = hike.elevationGainFt ? ', ~' + hike.elevationGainFt + ' ft gain' : '';
+    var terrainText = { easy: 'easy terrain', moderate: 'moderate terrain', hard: 'difficult/steep terrain' }[hike.terrainDifficulty || 'easy'];
+    var loadClass = classifyHikeLoad(dur, hike.terrainDifficulty);
+    return {
+      activityType: 'hiking', purpose: 'Aerobic volume, time on feet, and (on harder terrain) real musculoskeletal/climbing load',
+      label: 'Hike — ' + dur + ' min' + distText + elevText + ' (' + terrainText + ')',
+      structure: 'Sustained aerobic effort at a natural hiking pace over ' + terrainText + '.',
+      rpeRange: hike.terrainDifficulty === 'hard' ? [5, 7] : hike.terrainDifficulty === 'moderate' ? [4, 6] : [3, 5],
+      trainingEffect: loadClass === 'high'
+        ? 'Significant aerobic and climbing load with real recovery demand -- not equivalent to rest.'
+        : 'Meaningful aerobic volume and time on feet, supporting race fitness with low impact stress.',
+      durationMinutes: dur, loadClass: loadClass
+    };
+  }
+
   // docs/COACHING_SPEC.md "Weekly availability" -- profile.weeklyAvailability
   // is an OPTIONAL new profile field: { [weekday 0-6]: { canRun: bool,
   // window: 'morning'|'midday'|'evening'|'flexible' } }. When present, it
@@ -649,34 +799,47 @@
   // running days elsewhere (targetRunDaysFor), but never overrides which
   // specific weekdays are used once weeklyAvailability exists, per the
   // explicit backward-compatibility requirement.
+  // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- `entry.preference`
+  // ('preferred'|'possible', defaults to 'preferred' when absent -- the
+  // only possible value before this field existed) distinguishes "I want
+  // this to be one of my normal running days" from "I can run here if
+  // another session must move." Returns { preferred, possible, all } (slot
+  // index arrays, long-run slot 6 excluded) instead of a flat list so
+  // buildStructuredWeeks can exhaust preferred days before ever touching a
+  // possible-only day, rather than treating every canRun day identically.
   function weeklyAvailabilityCanRunSlots(profile, raceDate) {
     if (!profile.weeklyAvailability) return null;
-    var slots = [];
+    var preferred = [], possible = [];
     for (var day = 0; day <= 6; day++) {
       var entry = profile.weeklyAvailability[day];
       if (!entry || !entry.canRun) continue;
       var slot = slotForFixedDay(raceDate, day);
-      if (slot !== 6) slots.push(slot);
+      if (slot === 6) continue;
+      if (entry.preference === 'possible') possible.push(slot); else preferred.push(slot);
     }
-    return slots;
+    return { preferred: preferred, possible: possible, all: preferred.concat(possible) };
   }
 
   // Deterministic schedule-safety check (docs/COACHING_SPEC.md) -- warns
   // rather than silently overloading the runner, reusing the exact
   // planMeta.warnings mechanism evaluateSafety already populates.
-  function evaluateRecurringWorkoutSchedule(recurringWorkouts, targetRunDays, raceDateIso) {
+  function evaluateRecurringWorkoutSchedule(recurringWorkouts, targetRunDays, raceDateIso, preferredLongRunDay) {
     var warnings = [];
     var list = recurringWorkouts || [];
     var fixedCount = list.filter(function (w) { return w.fixed && w.day != null; }).length;
     if (fixedCount + targetRunDays > 6) {
       warnings.push('Your fixed weekly workouts (' + fixedCount + ') plus your running days (' + targetRunDays + ') leave no room for a rest day. Consider making one of your fixed sessions movable, or reducing running days available.');
     }
-    // slotForFixedDay needs a real race date to know which weekday slot 6
-    // (the long run) falls on -- if it's not available yet (e.g. mid-wizard,
-    // before a race date is chosen), skip this specific check rather than
-    // guessing.
+    // slotForFixedDay needs a real race date to know which weekday the long
+    // run falls on -- if it's not available yet (e.g. mid-wizard, before a
+    // race date is chosen), skip this specific check rather than guessing.
+    // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- preferredLongRunDay
+    // (optional) moves this check off slot 6 the same way buildStructuredWeeks
+    // itself does, so a fixed Sunday hike isn't wrongly flagged as "on your
+    // long-run day" once Friday, not Sunday, is where the long run actually is.
     var raceDate = raceDateIso ? parseDate(raceDateIso) : null;
-    var onLongRunDay = raceDate ? list.filter(function (w) { return w.fixed && w.day != null && slotForFixedDay(raceDate, w.day) === 6; }) : [];
+    var longRunSlot = (raceDate && preferredLongRunDay != null) ? slotForFixedDay(raceDate, preferredLongRunDay) : 6;
+    var onLongRunDay = raceDate ? list.filter(function (w) { return w.fixed && w.day != null && slotForFixedDay(raceDate, w.day) === longRunSlot; }) : [];
     if (onLongRunDay.length) {
       warnings.push('A fixed workout is scheduled on your long-run day. Cross-training can\'t replace the running-specific benefit of your long run, so this day still needs to be resolved manually.');
     }
@@ -722,6 +885,38 @@
       warnings.push('Between your fixed hard workouts and the plan\'s own speed session, some weeks may have more than 2 genuinely hard days. Consider making one of your hard workouts easier or movable.');
     }
     return { warnings: warnings };
+  }
+
+  // docs/COACHING_SPEC.md "Key-session conflict" -- a fixed/alternating hard
+  // commitment landing on the SAME weekday as this week's long/key run (see
+  // profile.preferredLongRunDay) is a genuine tradeoff between two things the
+  // runner values, not something safe to resolve silently one way or the
+  // other. Pure detection only -- returns the conflicting workouts and a
+  // fixed set of 2-4 safe resolution options for each, described in plain
+  // language; buildStructuredWeeks applies whichever option (if any) is
+  // recorded in state.scheduleChoices[workout.id], and otherwise falls back
+  // to a visible, flagged coexistence (never a silent drop, never a silent
+  // override) until the runner actually picks one.
+  function buildKeySessionConflictOptions(workout) {
+    var name = (workout.activityType === 'other' || workout.activityType === 'sport') && workout.customName
+      ? workout.customName
+      : RECURRING_ACTIVITY_LABEL[workout.activityType] || RECURRING_ACTIVITY_LABEL.other;
+    return [
+      { id: 'keep_long_easy', label: 'Keep the long run, skip ' + name + ' those weeks', description: 'Your long run stays on this day every week; ' + name + ' is skipped whenever the two land on the same day.' },
+      { id: 'move_long_run', label: 'Move the long run to the weekend', description: 'The long run shifts to Saturday or Sunday instead (replacing that day’s hike or rest); ' + name + ' stays on its usual day.' },
+      { id: 'keep_long_reduce', label: 'Keep both, mark ' + name + ' reduced', description: 'The long run stays as planned; ' + name + ' still happens but is flagged as reduced, so the day isn’t treated as double-hard.' },
+      { id: 'coexist', label: 'Keep both as scheduled', description: name + ' and the long run both happen that day, back to back, unchanged.' }
+    ];
+  }
+  function detectKeySessionConflict(recurringWorkouts, raceDateIso, preferredLongRunDay) {
+    if (!raceDateIso) return [];
+    var raceDate = parseDate(raceDateIso);
+    var longRunSlot = preferredLongRunDay != null ? slotForFixedDay(raceDate, preferredLongRunDay) : 6;
+    var list = (recurringWorkouts || []).map(normalizeRecurringWorkout);
+    var conflicting = list.filter(function (w) { return w.fixed && w.day != null && slotForFixedDay(raceDate, w.day) === longRunSlot; });
+    return conflicting.map(function (w) {
+      return { workoutId: w.id, activityType: w.activityType, customName: w.customName, options: buildKeySessionConflictOptions(w) };
+    });
   }
 
   // docs/COACHING_SPEC.md "Plan Explanations" -- short, positive, specific
@@ -775,18 +970,30 @@
   // conflicts pushed to the back so quality lands on a clean day first) in
   // place of the static RUN_SLOT_PRIORITY -- optional and purely additive,
   // every existing call site that omits it gets byte-identical behavior.
-  function assignWeekTemplate(runDays, wantCross, priorityOverride) {
+  // `longSlot` (docs/COACHING_SPEC.md "Preferred weekly rhythm") lets a
+  // caller move which slot holds 'long' away from the default (slot 6,
+  // the actual race weekday) -- e.g. a runner whose intended rhythm puts
+  // her long/key run on Friday and reserves the weekend for hikes rather
+  // than running at all. Omitted (or null), every existing call site gets
+  // byte-identical behavior to before this parameter existed. Race week
+  // itself is unaffected either way -- slot 6 always becomes 'race' there
+  // regardless of longSlot, since that's a real calendar fact, not a
+  // preference (see buildStructuredWeeks's race-phase branch).
+  function assignWeekTemplate(runDays, wantCross, priorityOverride, longSlot) {
+    var LONG_SLOT = longSlot != null ? longSlot : 6;
     // capped at 5 (not 6) so one of the 6 non-long slots is always structurally
     // left as 'rest' below, satisfying the "at least one rest day" rule without
     // ever having to overwrite an already-assigned run day after the fact
     var additional = Math.max(0, Math.min(5, runDays - 1));
-    var slots = ['rest', 'rest', 'rest', 'rest', 'rest', 'rest', 'long'];
-    var priority = priorityOverride || RUN_SLOT_PRIORITY;
+    var slots = ['rest', 'rest', 'rest', 'rest', 'rest', 'rest', 'rest'];
+    slots[LONG_SLOT] = 'long';
+    var priority = (priorityOverride || RUN_SLOT_PRIORITY).filter(function (s) { return s !== LONG_SLOT; });
     var chosen = priority.slice(0, additional);
     chosen.forEach(function (idx, i) { slots[idx] = i === 0 ? 'quality' : 'easy'; });
-    var restPref = [4, 0, 2, 3, 5, 1];
+    var restPref = [4, 0, 2, 3, 5, 1].filter(function (s) { return s !== LONG_SLOT; });
     var restSlot = restPref.filter(function (i) { return slots[i] === 'rest'; })[0];
-    for (var j = 0; j < 6; j++) {
+    for (var j = 0; j < 7; j++) {
+      if (j === LONG_SLOT) continue;
       if (slots[j] === 'rest' && j !== restSlot && wantCross) slots[j] = 'cross';
     }
     return slots;
@@ -1018,7 +1225,13 @@
     var name = (workout.activityType === 'other' || workout.activityType === 'sport') && workout.customName
       ? workout.customName
       : RECURRING_ACTIVITY_LABEL[workout.activityType] || RECURRING_ACTIVITY_LABEL.other;
-    return workout.durationMinutes + ' min ' + name;
+    var label = workout.durationMinutes + ' min ' + name;
+    // docs/COACHING_SPEC.md "Key-session conflict" -- flags set by the
+    // long-run-day conflict resolution above (reduced/pendingConflict are
+    // never present on a normal recurring-workout record).
+    if (workout.reduced) label += ' (reduced)';
+    if (workout.pendingConflict) label += ' — conflicts with your long run, choose how to handle it';
+    return label;
   }
   // docs/COACHING_SPEC.md "Constraint-aware scheduling" -- more than one
   // fixed workout can now share a weekday (e.g. a morning 12-3-30 and a
@@ -1031,7 +1244,100 @@
     return workouts.map(formatRecurringWorkoutLabel).join(' · ');
   }
 
-  function buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts) {
+  // ── First-class multi-session model (docs/COACHING_SPEC.md "Multiple
+  // workouts per day") -- built ADDITIVELY alongside the existing
+  // day.type/miles/label fields (never replacing them, so every existing
+  // renderer/logger/XP call site keeps working unchanged). day.sessions[]
+  // holds 1-2 structured session objects (a day can have a primary run/
+  // hike/rest/cross session and, when a fixed workout coexists with a
+  // morning run, one secondary session) -- each with its own stable id,
+  // purpose, structure, RPE range, load classification, and status, so a
+  // run and a same-day spin class are never merged into one ambiguous
+  // entry the way a bare "+ 45 min Spinning" label suffix was before this.
+  var RUN_SESSION_META = {
+    long: { subtype: 'long', purpose: "This week's primary endurance session -- builds the aerobic and musculoskeletal durability the race distance demands.", loadClass: 'high' },
+    quality: { subtype: 'quality', purpose: "Race-specific intensity -- this week's key hard running stimulus.", loadClass: 'high' },
+    easy: { subtype: 'easy', purpose: 'Easy aerobic run -- supports weekly volume without adding meaningful fatigue.', loadClass: 'low' },
+    race: { subtype: 'race', purpose: 'Race day.', loadClass: 'high' },
+    rest: { subtype: 'rest', purpose: 'Full day off running -- adaptation happens here.', loadClass: 'none' }
+  };
+  function sessionIdFor(weekNum, slot, role, suffix) {
+    return 'sess_' + weekNum + '_' + slot + '_' + role + (suffix ? '_' + suffix : '');
+  }
+  function buildRunSession(day, weekNum, slot) {
+    var meta = RUN_SESSION_META[day.type] || { subtype: day.type, purpose: null, loadClass: 'none' };
+    return {
+      id: sessionIdFor(weekNum, slot, 'primary'), role: 'primary', activityType: 'run', subtype: meta.subtype,
+      purpose: meta.purpose, structure: day.runWalk ? null : null, rpeRange: RPE_TARGET[day.type] || null,
+      durationMinutes: null, distanceMiles: day.miles || null, intensity: null, loadClass: meta.loadClass,
+      status: 'planned', isRaceSpecific: ['long', 'quality', 'easy', 'race'].indexOf(day.type) !== -1,
+      replaces: null, source: 'generated', explanation: meta.purpose, label: day.label
+    };
+  }
+  // A recurring-workout-driven session (fixed or movable, primary or
+  // secondary) -- routes to the purposeful hike/incline-walk/cross-training
+  // prescription builders above instead of a bare activity name.
+  function buildRecurringSession(workout, weekNum, slot, role, units) {
+    var presc;
+    if (workout.activityType === 'hiking') {
+      presc = buildHikePrescription(workout, units);
+    } else if (workout.activityType === 'twelveThreeThirty') {
+      var iw = workout.inclineWalk || inclineWalkParams('12-3-30');
+      presc = {
+        label: (iw.template === 'custom' ? 'Custom incline walk' : iw.template) + ' — ' + iw.inclinePct + '% @ ' + iw.speedMph + ' mph, ' + iw.durationMinutes + ' min',
+        structure: iw.durationMinutes + ' min continuous at ' + iw.inclinePct + '% incline, ' + iw.speedMph + ' mph.',
+        rpeRange: [3, 4], trainingEffect: 'Deliberate low-sweat aerobic work -- a genuine training stimulus, not a rest day.',
+        durationMinutes: iw.durationMinutes, loadClass: 'low'
+      };
+    } else {
+      var purposeGuess = classifyRecurringWorkout(workout).isHardDay ? 'threshold' : (workout.intensity === 'low' ? 'recovery' : 'steady');
+      presc = buildCrossTrainingPrescription(workout.activityType, purposeGuess, workout.durationMinutes);
+      presc.loadClass = classifyRecurringWorkout(workout).isHardDay ? 'high' : (workout.intensity === 'low' ? 'low' : 'moderate');
+    }
+    // docs/COACHING_SPEC.md "Key-session conflict" -- reduced/pendingConflict
+    // are set only on the copy detectKeySessionConflict resolution attaches
+    // when this workout coexists with the long run on its own day; a normal
+    // recurring-workout record never carries them.
+    var loadClass = workout.reduced ? 'low' : (presc.loadClass || 'low');
+    var status = workout.pendingConflict ? 'pending_conflict' : (workout.status || (workout.fixed ? 'fixed' : 'optional'));
+    var explanation = presc.trainingEffect || null;
+    if (workout.reduced) explanation = (explanation ? explanation + ' ' : '') + 'Kept, but reduced since it falls on your long-run day.';
+    if (workout.pendingConflict) explanation = (explanation ? explanation + ' ' : '') + 'Falls on your long-run day -- choose how to handle this in the app.';
+    return {
+      id: sessionIdFor(weekNum, slot, role, workout.id), role: role, activityType: workout.activityType, subtype: null,
+      purpose: presc.trainingEffect || null, structure: presc.structure || null, rpeRange: presc.rpeRange || null,
+      durationMinutes: presc.durationMinutes || workout.durationMinutes, distanceMiles: workout.distanceMiles || null,
+      intensity: workout.intensity, loadClass: loadClass, status: status,
+      isRaceSpecific: false, replaces: workout.replaces, source: 'recurring', recurringWorkoutId: workout.id,
+      explanation: explanation, label: presc.label
+    };
+  }
+  function buildGenericCrossSession(day, weekNum, slot, crossPref, addStrength) {
+    var purpose = addStrength ? 'strength' : 'easy';
+    var presc = buildCrossTrainingPrescription(crossPref !== 'Cross-train' ? crossPref.toLowerCase() : 'cycling', purpose, Math.round(day.miles ? 0 : 30));
+    return {
+      id: sessionIdFor(weekNum, slot, 'primary'), role: 'primary', activityType: 'cross', subtype: null,
+      purpose: presc.trainingEffect, structure: presc.structure, rpeRange: presc.rpeRange,
+      durationMinutes: presc.durationMinutes, distanceMiles: null, intensity: null,
+      loadClass: addStrength ? 'moderate' : 'low', status: 'planned', isRaceSpecific: false,
+      replaces: null, source: 'generated', explanation: presc.trainingEffect, label: day.label
+    };
+  }
+  // Combined daily load (docs/COACHING_SPEC.md "Multiple workouts per
+  // day") -- two sessions are fine; two independently-hard sessions
+  // accidentally stacked are flagged. 'high'+'high' -> flagged; anything
+  // else combines to the higher of the two (a 'high' + 'low' day is still
+  // just a hard day with an easy add-on, not double-hard).
+  var LOAD_ORDER = { none: 0, low: 1, moderate: 2, high: 3 };
+  function computeCombinedDailyLoad(day) {
+    var sessions = (day && day.sessions) || [];
+    if (!sessions.length) return { combinedLoadClass: 'none', accidentalDoubleHard: false };
+    var maxLoad = sessions.reduce(function (m, s) { return (LOAD_ORDER[s.loadClass] || 0) > (LOAD_ORDER[m] || 0) ? s.loadClass : m; }, 'none');
+    var hardCount = sessions.filter(function (s) { return s.loadClass === 'high'; }).length;
+    return { combinedLoadClass: maxLoad, accidentalDoubleHard: hardCount >= 2 };
+  }
+
+  function buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts, scheduleChoices) {
     var event = raceGoal.event;
     var level = planMeta.level;
     var cfg = EVENT_TABLE[event][level];
@@ -1104,6 +1410,13 @@
     // their own -- this plan's own week-1 slot-0 date, not whatever the
     // runner separately typed as a start date (see isRecurringWorkoutActiveInWeek).
     var planStartDate = dateForSlot(raceDate, planLengthWeeks, 1, 0);
+    // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- optional. Defaults
+    // to slot 6 (the actual race weekday), unchanged from before this field
+    // existed. When set, the long/key run moves to a different weekday for
+    // every non-race week (e.g. Friday, with the weekend reserved for
+    // hikes) -- race week itself is unaffected regardless (slot 6 is always
+    // 'race' there, a calendar fact, not a preference).
+    var longRunSlot = profile.preferredLongRunDay != null ? slotForFixedDay(raceDate, profile.preferredLongRunDay) : 6;
 
     var weeks = [];
     for (var w = 1; w <= planLengthWeeks; w++) {
@@ -1129,7 +1442,16 @@
       // changes week to week).
       var weekStartDate = dateForSlot(raceDate, planLengthWeeks, w, 0);
       var activeRecurring = allRecurring.filter(function (rw) { return isRecurringWorkoutActiveInWeek(rw, weekStartDate, planStartDate); });
-      var fixedWorkouts = activeRecurring.filter(function (rw) { return rw.fixed && rw.day != null && slotForFixedDay(raceDate, rw.day) !== 6; });
+      // docs/COACHING_SPEC.md "Key-session conflict" -- a fixed workout whose
+      // day maps to longRunSlot is no longer silently excluded from the plan
+      // (that used to make it vanish from the calendar entirely, invisible
+      // to the runner). It's still tracked separately from the "normal"
+      // override-or-coexist handling below, since the resolution for a
+      // conflict with THE LONG RUN specifically depends on scheduleChoices,
+      // not the generic timeWindow coexistence rule.
+      var allFixedWorkouts = activeRecurring.filter(function (rw) { return rw.fixed && rw.day != null; });
+      var fixedWorkouts = allFixedWorkouts.filter(function (rw) { return slotForFixedDay(raceDate, rw.day) !== longRunSlot; });
+      var longRunConflictWorkouts = allFixedWorkouts.filter(function (rw) { return slotForFixedDay(raceDate, rw.day) === longRunSlot; });
       var movableWorkouts = activeRecurring.filter(function (rw) { return !rw.fixed; });
 
       // docs/COACHING_SPEC.md "Weekly availability" -- when the runner has
@@ -1146,12 +1468,20 @@
       // "keep it easy before a same-day hard commitment" without blocking
       // the morning run entirely.
       var sameDayFixedSlots = fixedWorkouts.map(function (rw) { return slotForFixedDay(raceDate, rw.day); });
+      // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- preferred days
+      // are exhausted (in AVAILABILITY_AWARE_PRIORITY order) before a
+      // possible-only day is ever chosen, so "I could run here if needed"
+      // only actually gets used as a genuine fallback, never as an
+      // automatic extra running day just because the calendar has room.
       var basePriority = canRunSlots
-        ? AVAILABILITY_AWARE_PRIORITY.filter(function (s) { return canRunSlots.indexOf(s) !== -1; }).concat(canRunSlots.filter(function (s) { return AVAILABILITY_AWARE_PRIORITY.indexOf(s) === -1; }))
+        ? AVAILABILITY_AWARE_PRIORITY.filter(function (s) { return canRunSlots.preferred.indexOf(s) !== -1; })
+            .concat(canRunSlots.preferred.filter(function (s) { return AVAILABILITY_AWARE_PRIORITY.indexOf(s) === -1; }))
+            .concat(AVAILABILITY_AWARE_PRIORITY.filter(function (s) { return canRunSlots.possible.indexOf(s) !== -1; }))
+            .concat(canRunSlots.possible.filter(function (s) { return AVAILABILITY_AWARE_PRIORITY.indexOf(s) === -1; }))
         : RUN_SLOT_PRIORITY;
       var priorityOverride = basePriority.filter(function (s) { return sameDayFixedSlots.indexOf(s) === -1; })
         .concat(basePriority.filter(function (s) { return sameDayFixedSlots.indexOf(s) !== -1; }));
-      var template = assignWeekTemplate(weekRunDays, wantCross, priorityOverride);
+      var template = assignWeekTemplate(weekRunDays, wantCross, priorityOverride, longRunSlot);
 
       // Existing-commitments quality-slot conflict, "make it smart" per the
       // product decision in docs/COACHING_SPEC.md -- the quality/speed slot
@@ -1239,6 +1569,52 @@
           template[slot] = 'recurring';
         }
       });
+
+      // docs/COACHING_SPEC.md "Key-session conflict" -- a fixed workout on
+      // the SAME day as this week's long run is resolved per
+      // scheduleChoices[workout.id] (set by the runner via the app's
+      // conflict-resolution prompt, see detectKeySessionConflict). Race week
+      // itself is never touched by any choice -- that slot is the actual
+      // race day, a calendar fact, not a preference.
+      if (longRunConflictWorkouts.length && phase !== 'race') {
+        longRunConflictWorkouts.forEach(function (cw) {
+          var choice = (scheduleChoices || {})[cw.id];
+          if (choice === 'keep_long_easy') {
+            // Long run stays; this commitment is skipped whenever the two
+            // land on the same day -- an explicit, informed choice, unlike
+            // the old behavior of silently dropping it every time.
+            return;
+          }
+          if (choice === 'move_long_run') {
+            var satSlot = slotForFixedDay(raceDate, 5), sunSlot = slotForFixedDay(raceDate, 6);
+            var altSlot = [satSlot, sunSlot].filter(function (s) { return s !== longRunSlot && template[s] !== 'long'; })[0];
+            if (altSlot != null) {
+              template[altSlot] = 'long';
+              template[longRunSlot] = 'recurring';
+            } else {
+              // No free weekend slot this week (e.g. long run already there) --
+              // fall back to visible coexistence rather than losing either session.
+              sameDaySecondary[longRunSlot] = (sameDaySecondary[longRunSlot] || []).concat([cw]);
+            }
+            return;
+          }
+          if (choice === 'keep_long_reduce') {
+            sameDaySecondary[longRunSlot] = (sameDaySecondary[longRunSlot] || []).concat([Object.assign({}, cw, { reduced: true })]);
+            return;
+          }
+          if (choice === 'coexist') {
+            sameDaySecondary[longRunSlot] = (sameDaySecondary[longRunSlot] || []).concat([cw]);
+            return;
+          }
+          // No choice recorded yet -- never silently drop it (the old bug)
+          // and never silently override the long run either. Surface it as
+          // a flagged secondary session so it's visible on the calendar,
+          // and leave the actual decision to the runner (planMeta surfaces
+          // the pending conflict via evaluateRecurringWorkoutSchedule / the
+          // app's conflict-resolution prompt).
+          sameDaySecondary[longRunSlot] = (sameDaySecondary[longRunSlot] || []).concat([Object.assign({}, cw, { pendingConflict: true })]);
+        });
+      }
 
       // Strength double-credit guard: reduce this week's auto "+ Strength"
       // budget by however many recurring workouts (fixed, always placed; and
@@ -1334,11 +1710,16 @@
             day.label = formatEasyRunLabel(easyEach, units);
           }
         } else if (tok === 'recurring') {
-          var fixedWorkoutsHere = fixedWorkouts.filter(function (w) { return slotForFixedDay(raceDate, w.day) === slot; });
+          // docs/COACHING_SPEC.md "Key-session conflict" -- a 'move_long_run'
+          // choice can put a longRunConflictWorkouts entry onto this exact
+          // slot (see above), so both lists need to be searched here, not
+          // just the normal fixedWorkouts set.
+          var fixedWorkoutsHere = fixedWorkouts.concat(longRunConflictWorkouts).filter(function (w) { return slotForFixedDay(raceDate, w.day) === slot; });
           day.type = 'cross';
           day.label = formatRecurringWorkoutsLabel(fixedWorkoutsHere);
           day.recurringWorkout = { id: fixedWorkoutsHere[0].id, activityType: fixedWorkoutsHere[0].activityType, fixed: true };
           if (fixedWorkoutsHere.length > 1) day.recurringWorkoutIds = fixedWorkoutsHere.map(function (w) { return w.id; });
+          day.sessions = fixedWorkoutsHere.map(function (fw, fwi) { return buildRecurringSession(fw, w, slot, fwi === 0 ? 'primary' : 'secondary', units); });
         } else if (tok === 'cross') {
           var movableWorkoutHere = movableIdx < placedMovable.length ? placedMovable[movableIdx] : null;
           if (movableWorkoutHere) {
@@ -1346,21 +1727,33 @@
             day.type = 'cross';
             day.label = formatRecurringWorkoutLabel(movableWorkoutHere);
             day.recurringWorkout = { id: movableWorkoutHere.id, activityType: movableWorkoutHere.activityType, fixed: false };
+            day.sessions = [buildRecurringSession(movableWorkoutHere, w, slot, 'primary', units)];
           } else {
             var addStrength = strengthAssigned < strengthBudget;
             if (addStrength) strengthAssigned++;
             day.type = 'cross';
             day.label = (30 + Math.min(30, Math.round(targetVolume))) + ' min cross' + (crossPref !== 'Cross-train' ? ' · ' + crossPref : '') + (addStrength ? ' + Strength' : '');
+            day.sessions = [buildGenericCrossSession(day, w, slot, crossPref, addStrength)];
           }
         } else {
           day.type = 'rest'; day.label = 'Rest';
         }
+        // Every run/rest/race day (everything not already given a
+        // recurring-driven day.sessions above) gets its own structured
+        // primary session too, matching the day's already-computed type/
+        // miles/label -- built last so runWalk/shakeout overrides above are
+        // reflected in the session's own label.
+        if (!day.sessions) day.sessions = [buildRunSession(day, w, slot)];
         // docs/COACHING_SPEC.md "Recurring activities" -- a same-day
         // coexisting fixed workout (see sameDaySecondary above) rides along
-        // on the running day's own label rather than replacing it.
+        // on the running day's own label AND as its own independently
+        // loggable secondary session (not just a label suffix).
         if (sameDaySecondary[slot]) {
           day.label += ' + ' + formatRecurringWorkoutsLabel(sameDaySecondary[slot]);
           day.secondaryRecurringWorkoutIds = sameDaySecondary[slot].map(function (w) { return w.id; });
+          sameDaySecondary[slot].forEach(function (sw) {
+            day.sessions.push(buildRecurringSession(sw, w, slot, 'secondary', units));
+          });
         }
         days.push(day);
       }
@@ -1446,7 +1839,26 @@
     return minutes + ' min ' + envNote + ' ' + kindText + ' (travel)';
   }
 
-  function applyTravelDayOverride(day, travel, keepAsRest) {
+  // docs/COACHING_SPEC.md "Session-level architecture" -- a travel override
+  // replaces day.sessions[] with a single real travel session matching the
+  // new label/duration, instead of leaving the pre-travel sessions (e.g. a
+  // Tuesday Tabata class) stale underneath a day whose label/type already
+  // correctly say "easy indoor movement (travel)". Home recurring classes
+  // are dropped entirely for the day, not just hidden -- "Do not expect
+  // absent home classes to be completed while traveling."
+  function buildTravelSession(day, weekNum, slot, kind) {
+    return {
+      id: sessionIdFor(weekNum, slot, 'primary', 'travel'), role: 'primary', activityType: 'cross', subtype: 'travel',
+      purpose: 'Keeps training active while away from your normal routine, matched to what travel actually allows.',
+      structure: null, rpeRange: kind === 'quality' ? [5, 7] : [3, 4],
+      durationMinutes: day.travelSession ? day.travelSession.minutes : null, distanceMiles: null,
+      intensity: kind === 'quality' ? 'moderate' : 'low', loadClass: kind === 'quality' ? 'moderate' : 'low',
+      status: 'planned', isRaceSpecific: false, replaces: null, source: 'travel', recurringWorkoutId: null,
+      explanation: 'Keeps training active while away from your normal routine, matched to what travel actually allows.',
+      label: day.label
+    };
+  }
+  function applyTravelDayOverride(day, travel, keepAsRest, weekNum, slot) {
     if (keepAsRest) return; // this week's one preserved rest day -- left untouched
     var minDur = Math.max(10, travel.minDurationMinutes || 30);
     var prefDur = Math.max(minDur, travel.preferredDurationMinutes || 45);
@@ -1456,6 +1868,7 @@
     day.miles = 0;
     day.travelSession = { minutes: minutes, indoorOnly: !!travel.indoorOnly };
     day.label = travelDayLabel(kind, minutes, travel.indoorOnly);
+    day.sessions = [buildTravelSession(day, weekNum, slot, kind)];
   }
 
   function applyTravelPeriods(weeks, raceGoal, planMeta, travelPeriods, units, terrainNote) {
@@ -1475,7 +1888,7 @@
             else if (day.type === 'quality') qualityUsedThisWeek = true;
             var keepAsRest = day.type === 'rest' && !restKeptThisWeek;
             if (keepAsRest) restKeptThisWeek = true;
-            applyTravelDayOverride(day, hit, keepAsRest);
+            applyTravelDayOverride(day, hit, keepAsRest, wk.weekNum, di);
           }
         }
         allDays.push({ day: day, iso: iso });
@@ -1499,6 +1912,11 @@
           if (units) {
             rec.day.label = rec.day.type === 'long' ? formatLongRunLabel(rec.day.miles, terrainNote, units) : formatEasyRunLabel(rec.day.miles, units);
           }
+          // Keep the primary session's own distance/label in sync with the
+          // day-level ramp-back, same reasoning as the travel override above --
+          // a session detail screen must never show a stale pre-ramp value.
+          var primarySession = (rec.day.sessions || []).filter(function (s) { return s.role === 'primary'; })[0];
+          if (primarySession) { primarySession.distanceMiles = rec.day.miles; primarySession.label = rec.day.label; }
         }
       });
     });
@@ -1533,15 +1951,44 @@
       var parts = key.split('-');
       var wkNum = parseInt(parts[0], 10), di = parseInt(parts[1], 10);
       var loggedIso = dateToISO(dateForSlot(raceDate, planLengthWeeks, wkNum, di));
-      var nextIso = dateToISO(new Date(parseDate(loggedIso).getTime() + 86400000));
-      var target = byIso[nextIso];
-      if (!target || target.type === 'long' || target.type === 'race' || target.type === 'rest') return;
-      if (target.type === 'quality' || target.type === 'easy') {
-        target.type = 'easy';
-        target.miles = round5((target.miles || 0) * 0.6);
-        target.label = 'Easy recovery hike or walk';
-        target.adaptedFromEveningIntervals = true;
-        note = "Moved tomorrow's session to an easy hike/recovery pace after your evening intervals -- protects recovery without dropping the day entirely.";
+      // docs/COACHING_SPEC.md "Unplanned hard-workout adaptation" -- inspect
+      // the full 48-72 hour window (the next 3 calendar days), not just the
+      // next morning; stop at the FIRST genuinely conflicting hard day found
+      // (a stacked recovery day for every day in the window would be
+      // over-correcting for one unplanned session). Long run/race day are
+      // never touched regardless of where they fall in the window.
+      for (var offsetDays = 1; offsetDays <= 3; offsetDays++) {
+        var candidateIso = dateToISO(new Date(parseDate(loggedIso).getTime() + offsetDays * 86400000));
+        var target = byIso[candidateIso];
+        if (!target || target.type === 'long' || target.type === 'race') continue;
+        if (target.type === 'rest') continue; // already the lightest possible day -- nothing to downgrade
+        if (target.type === 'quality') {
+          target.type = 'easy';
+          target.miles = round5((target.miles || 0) * 0.6);
+          target.label = 'Easy recovery hike or walk';
+          target.adaptedFromEveningIntervals = true;
+          note = "Moved your " + (offsetDays === 1 ? 'next' : offsetDays + '-days-out') + " hard session to an easy hike/recovery pace after your unplanned evening intervals -- protects recovery without dropping the day entirely.";
+          break;
+        }
+        // A fixed/recurring hard commitment (e.g. a Tabata class) inside the
+        // window -- reduce it in place rather than skipping it outright, the
+        // same 'reduced' treatment already used for a key-session conflict.
+        var hardSession = (target.sessions || []).filter(function (s) { return s.loadClass === 'high'; })[0];
+        if (hardSession) {
+          hardSession.loadClass = 'moderate';
+          hardSession.label += ' (reduced)';
+          hardSession.explanation = (hardSession.explanation ? hardSession.explanation + ' ' : '') + 'Reduced after your unplanned evening intervals.';
+          target.adaptedFromEveningIntervals = true;
+          note = "Marked your " + (offsetDays === 1 ? 'next' : offsetDays + '-days-out') + " hard commitment reduced after your unplanned evening intervals -- your call whether to still do it at full intensity.";
+          break;
+        }
+        if (target.type === 'easy') {
+          target.miles = round5((target.miles || 0) * 0.6);
+          target.label = 'Easy recovery hike or walk';
+          target.adaptedFromEveningIntervals = true;
+          note = "Moved your " + (offsetDays === 1 ? 'next' : offsetDays + '-days-out') + " session to an easy hike/recovery pace after your evening intervals -- protects recovery without dropping the day entirely.";
+          break;
+        }
       }
     });
     return note;
@@ -1618,8 +2065,8 @@
   // missed week -> (if nothing was already adapted) adapt to an RPE trend.
   // Lets tests/plan-scenarios.test.js exercise the real end-to-end pipeline
   // instead of a hand-reconstructed approximation of it.
-  function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units, recurringWorkouts, travelPeriods) {
-    var weeks = buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts);
+  function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units, recurringWorkouts, travelPeriods, scheduleChoices) {
+    var weeks = buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts, scheduleChoices);
     var terrainNote = terrainNoteFrom(profile.terrains);
     weeks = applyTravelPeriods(weeks, raceGoal, planMeta, travelPeriods, units, terrainNote);
     weeks = applyUnavailableRanges(weeks, raceGoal, planMeta, unavailable, units, terrainNote);
@@ -1682,6 +2129,8 @@
     LEVELS: LEVELS,
     EVENT_TABLE: EVENT_TABLE,
     EVENT_LABEL: EVENT_LABEL,
+    PUBLIC_EVENTS: PUBLIC_EVENTS,
+    visibleEventsFor: visibleEventsFor,
     RPE_TARGET: RPE_TARGET,
     GOAL_FACTOR: GOAL_FACTOR,
     RUN_DAYS_DEFAULT: RUN_DAYS_DEFAULT,
@@ -1714,9 +2163,17 @@
     RECURRING_ACTIVITY_PROFILE: RECURRING_ACTIVITY_PROFILE,
     classifyRecurringWorkout: classifyRecurringWorkout,
     evaluateRecurringWorkoutSchedule: evaluateRecurringWorkoutSchedule,
+    detectKeySessionConflict: detectKeySessionConflict,
     generateRecurringWorkoutNotes: generateRecurringWorkoutNotes,
     formatRecurringWorkoutLabel: formatRecurringWorkoutLabel,
     formatRecurringWorkoutsLabel: formatRecurringWorkoutsLabel,
+    INCLINE_WALK_TEMPLATES: INCLINE_WALK_TEMPLATES,
+    inclineWalkParams: inclineWalkParams,
+    evaluateInclineWalkSafety: evaluateInclineWalkSafety,
+    buildCrossTrainingPrescription: buildCrossTrainingPrescription,
+    classifyHikeLoad: classifyHikeLoad,
+    buildHikePrescription: buildHikePrescription,
+    computeCombinedDailyLoad: computeCombinedDailyLoad,
     normalizeRecurringWorkout: normalizeRecurringWorkout,
     isRecurringWorkoutActiveInWeek: isRecurringWorkoutActiveInWeek,
     weeklyAvailabilityCanRunSlots: weeklyAvailabilityCanRunSlots,

@@ -14,7 +14,8 @@ function baseState(overrides) {
     raceGoal: null, profile: null, planMeta: null,
     logs: {}, overrides: {}, crossType: {},
     unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: [],
-    weightTrackingEnabled: false, weightUnits: 'lb', weightEntries: []
+    weightTrackingEnabled: false, weightUnits: 'lb', weightEntries: [],
+    sessionLogs: {}, sessionOverrides: {}
   }, overrides || {});
 }
 
@@ -205,4 +206,69 @@ test('legacy states missing travelPeriods entirely still merge to a safe empty a
   const remote = { lastModified: 1000, units: 'mi' };
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.deepEqual(merged.travelPeriods, []);
+});
+
+// docs/COACHING_SPEC.md "Key-session conflict" -- scheduleChoices is a plain
+// workoutId->optionId map, same shape/merge semantics as logs/overrides/
+// crossType (mergeMap: per-key newer-device-wins, union of untouched keys).
+test('scheduleChoices made on different devices for different workouts both survive the merge', function () {
+  const local = baseState({ lastModified: 2000, scheduleChoices: { tabataFriAlt: 'move_long_run' } });
+  const remote = baseState({ lastModified: 1000, scheduleChoices: { yogaFri: 'coexist' } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.scheduleChoices, { tabataFriAlt: 'move_long_run', yogaFri: 'coexist' });
+});
+
+test('changing the same workout\'s schedule choice on the newer device wins, not a merge of both values', function () {
+  const local = baseState({ lastModified: 2000, scheduleChoices: { tabataFriAlt: 'keep_long_easy' } });
+  const remote = baseState({ lastModified: 1000, scheduleChoices: { tabataFriAlt: 'move_long_run' } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.scheduleChoices.tabataFriAlt, 'keep_long_easy');
+});
+
+test('legacy states missing scheduleChoices entirely still merge to a safe empty object', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = { lastModified: 1000, units: 'mi' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.scheduleChoices, {});
+});
+
+// docs/COACHING_SPEC.md "Session-level architecture" -- sessionLogs/
+// sessionOverrides are keyed by stable session id (not by day key), so two
+// sessions on the same date get independent entries that can never collide
+// or overwrite one another during merge -- same mergeMap semantics as
+// logs/overrides, just proven here on session ids specifically.
+test('two sessions on the same date (a run and a spin class) merge independently without overwriting each other', function () {
+  const local = baseState({
+    lastModified: 2000,
+    sessionLogs: { sess_1_0_primary: { distance: 3.5, completionType: 'as_planned' } }
+  });
+  const remote = baseState({
+    lastModified: 1000,
+    sessionLogs: { sess_1_0_secondary_spin1: { time: '45', completionType: 'as_planned' } }
+  });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.sessionLogs.sess_1_0_primary.distance, 3.5, 'the run log survives');
+  assert.equal(merged.sessionLogs.sess_1_0_secondary_spin1.time, '45', 'the spin log survives too, not overwritten by the run');
+});
+
+test('editing the same session id on the newer device wins outright, matching logs/overrides', function () {
+  const local = baseState({ lastModified: 2000, sessionLogs: { sess_1_0_secondary_spin1: { time: '50' } } });
+  const remote = baseState({ lastModified: 1000, sessionLogs: { sess_1_0_secondary_spin1: { time: '45' } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.sessionLogs.sess_1_0_secondary_spin1.time, '50');
+});
+
+test('a skipped-session tombstone survives merge instead of being silently resurrected by an older remote copy', function () {
+  const local = baseState({ lastModified: 2000, sessionOverrides: { sess_1_4_secondary_tabataFriAlt: { skipped: true } } });
+  const remote = baseState({ lastModified: 1000, sessionOverrides: {} });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.sessionOverrides.sess_1_4_secondary_tabataFriAlt.skipped, true, 'the tombstone (a real key, not an absence) always wins per normal mergeMap rules');
+});
+
+test('legacy states missing sessionLogs/sessionOverrides entirely still merge to safe empty objects', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = { lastModified: 1000, units: 'mi' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.sessionLogs, {});
+  assert.deepEqual(merged.sessionOverrides, {});
 });

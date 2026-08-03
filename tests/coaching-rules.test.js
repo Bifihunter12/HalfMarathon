@@ -105,3 +105,25 @@ test('findCurrentWeekIdx returns -1 once today is past the entire plan', functio
   var wayAfterRace = rules.parseDate('2026-06-01');
   assert.equal(rules.findCurrentWeekIdx(raceDate, planLengthWeeks, wayAfterRace), -1);
 });
+
+// docs/COACHING_SPEC.md "Launch scope" -- 5K/10K/half publicly available;
+// marathon and every ultra distance stay beta-gated until reviewed.
+var ALL_EVENTS = ['5k', '10k', 'half', 'marathon', '50k', '50mi', '100k', '100mi'];
+
+test('visibleEventsFor: with the beta flag off, only 5K/10K/half are offered', function () {
+  assert.deepEqual(rules.visibleEventsFor(ALL_EVENTS, false, null), ['5k', '10k', 'half']);
+});
+
+test('visibleEventsFor: with the beta flag on, every distance is offered', function () {
+  assert.deepEqual(rules.visibleEventsFor(ALL_EVENTS, true, null), ALL_EVENTS);
+});
+
+test('visibleEventsFor: an existing longer-distance plan keeps its own event visible even with the flag off', function () {
+  var visible = rules.visibleEventsFor(ALL_EVENTS, false, 'marathon');
+  assert.ok(visible.indexOf('marathon') !== -1, 'editing an existing marathon plan must not strand it');
+  assert.deepEqual(visible, ['5k', '10k', 'half', 'marathon']);
+});
+
+test('visibleEventsFor: does not duplicate the current event when it is already public', function () {
+  assert.deepEqual(rules.visibleEventsFor(ALL_EVENTS, false, 'half'), ['5k', '10k', 'half']);
+});

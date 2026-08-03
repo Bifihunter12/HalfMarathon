@@ -848,6 +848,12 @@
     // rest override): [{ id, start, end, mode ('travel'|'reduced'|'custom'),
     // indoorOnly, minDurationMinutes, preferredDurationMinutes }].
     if (!s.travelPeriods) s.travelPeriods = [];
+    // docs/COACHING_SPEC.md "Key-session conflict" -- { recurringWorkoutId:
+    // optionId }, the runner's own resolution for a fixed workout landing on
+    // the same day as the long run (see detectKeySessionConflict). Absent
+    // here, buildStructuredWeeks falls back to a visible, flagged
+    // coexistence rather than silently dropping or silently overriding.
+    if (!s.scheduleChoices) s.scheduleChoices = {};
     // docs/COACHING_SPEC.md "Goal decision checkpoints" -- whether the
     // runner has already responded to the current plan's checkpoint (see
     // planMeta.checkpointDateIso); reset to false whenever a new plan is
@@ -859,6 +865,13 @@
     if (!s.logs) s.logs = {};
     if (!s.overrides) s.overrides = {};
     if (!s.crossType) s.crossType = {};
+    // docs/COACHING_SPEC.md "Session-level architecture" -- independent
+    // state for a secondary same-day session, keyed by stable session id
+    // (see getSessionLog/setSessionLog). Nothing to migrate from an older
+    // shape: day.sessions[] itself never existed as persisted state before
+    // this, so there is no legacy secondary-session data to convert.
+    if (!s.sessionLogs) s.sessionLogs = {};
+    if (!s.sessionOverrides) s.sessionOverrides = {};
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
@@ -911,6 +924,40 @@
     var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType || next.eveningIntervals);
     if (hasContent) state.logs[key] = next;
     else delete state.logs[key];
+    saveState(state);
+  }
+
+  // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary same-
+  // day session (e.g. an 11am spin class riding alongside a morning run) has
+  // no day-key of its own to share with the primary session's log/override/
+  // crossType entries, so it gets independent state keyed by its own stable
+  // session id (coaching-rules.js's sessionIdFor -- deterministic per week/
+  // slot/role, so it survives plan regeneration). The primary session on
+  // every day keeps using the existing date-keyed state.logs/overrides/
+  // crossType untouched -- this is purely additive, zero risk to the
+  // existing single-session history the overwhelming majority of days have.
+  function getSessionLog(sessionId) { return state.sessionLogs[sessionId] || null; }
+  function setSessionLog(sessionId, patch) {
+    var next = Object.assign({}, getSessionLog(sessionId), patch);
+    var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType);
+    if (hasContent) state.sessionLogs[sessionId] = next;
+    else delete state.sessionLogs[sessionId];
+    saveState(state);
+  }
+  // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary
+  // session can be replaced or skipped independently of the primary one;
+  // stored the same way state.overrides stores a day-level label override,
+  // just keyed by session id instead of day key. Skipping/removing a
+  // session is modeled as WRITING a tombstone override ({skipped:true}),
+  // never as deleting the key outright -- so a sync merge can't silently
+  // resurrect a session the runner deliberately removed on another device
+  // (mergeMap's per-key newer-wins logic already handles a present tombstone
+  // correctly; it only mishandles an outright-absent key, which this design
+  // never produces for a deliberate skip).
+  function getSessionOverride(sessionId) { return state.sessionOverrides[sessionId] || null; }
+  function setSessionOverride(sessionId, patch) {
+    if (patch === null) { delete state.sessionOverrides[sessionId]; saveState(state); return; }
+    state.sessionOverrides[sessionId] = Object.assign({}, getSessionOverride(sessionId), patch);
     saveState(state);
   }
 
@@ -1710,7 +1757,7 @@
   // (tested in tests/plan-scenarios.test.js) so the whole plan generator is
   // testable in one place, not just its adaptation/scheduling helpers.
   function buildStructuredWeeks(profile, raceGoal, planMeta) {
-    return CoachingRulesDomain.buildStructuredWeeks(profile, raceGoal, planMeta, state.units, state.recurringWorkouts);
+    return CoachingRulesDomain.buildStructuredWeeks(profile, raceGoal, planMeta, state.units, state.recurringWorkouts, state.scheduleChoices);
   }
 
   function findCurrentWeekIdx(raceDate, planLengthWeeks, today) { return CoachingRulesDomain.findCurrentWeekIdx(raceDate, planLengthWeeks, today); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
@@ -1723,7 +1770,7 @@
   // the pure pipeline function needs explicitly.
   var RPE_TARGET = CoachingRulesDomain.RPE_TARGET;
   function generateAll(profile, raceGoal, planMeta, logs, today) {
-    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts, state.travelPeriods);
+    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts, state.travelPeriods, state.scheduleChoices);
   }
 
   function el(html) {
@@ -1771,7 +1818,7 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null, preferRunWalkThroughRace: false, customizeWeeklyAvailability: false, weeklyAvailabilityDays: ['0', '1', '2', '3', '4', '5', '6'] };
+    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null, preferRunWalkThroughRace: false, customizeWeeklyAvailability: false, weeklyAvailabilityDays: ['0', '1', '2', '3', '4', '5', '6'], weeklyAvailabilityPossibleDays: [], preferredLongRunDay: null };
     if (draft.raceName === undefined) draft.raceName = ''; // editing a plan created before this field existed
     if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
@@ -1789,14 +1836,10 @@
       var body = '';
       var stepLabel = 'Step ' + (step + 1) + ' of ' + steps.length;
       if (steps[step] === 'event') {
-        // Launch scope is 5K/10K (docs/COACHING_SPEC.md "Launch scope") --
-        // longer distances stay in the codebase but are hidden here unless
-        // the beta flag is on. The `|| e === draft.event` clause keeps an
-        // existing longer-distance plan's own event selectable when editing,
-        // even with the flag off, so toggling it never strands that plan.
-        var visibleEvents = state.flags.enableLongerDistances
-          ? EVENTS
-          : EVENTS.filter(function (e) { return e === '5k' || e === '10k' || e === draft.event; });
+        // docs/COACHING_SPEC.md "Launch scope" -- shared with
+        // CoachingRulesDomain.visibleEventsFor so this rule is unit-tested
+        // in one place instead of duplicated here.
+        var visibleEvents = CoachingRulesDomain.visibleEventsFor(EVENTS, state.flags.enableLongerDistances, draft.event);
         body =
           '<div class="ob-title">New Training Plan</div>' +
           '<div class="ob-sub">' + stepLabel + ' · Event</div>' +
@@ -1886,7 +1929,24 @@
           (draft.customizeWeeklyAvailability ?
             '<div class="ob-label" style="margin-top:10px">I can run on these mornings</div>' +
             '<div class="chip-grid">' + chipsHtml('weeklyAvailabilityDays', ['0', '1', '2', '3', '4', '5', '6'], DOW_CHIP_LABEL, draft.weeklyAvailabilityDays.map(String), true) + '</div>' +
-            '<p class="ob-hint">Other days can still get an easy cross-training or recovery session &mdash; this just marks which mornings work for an actual run.</p>'
+            '<p class="ob-hint">Other days can still get an easy cross-training or recovery session &mdash; this just marks which mornings work for an actual run.</p>' +
+            // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- a normal
+            // running day vs. "I could run here if needed" (a genuine
+            // fallback, only used once every preferred day is already
+            // spoken for). Only worth asking once there are >=2 days picked
+            // above -- with a single day there's nothing to distinguish.
+            (draft.weeklyAvailabilityDays.length > 1 ?
+              '<div class="ob-label" style="margin-top:14px">Which of these are just &ldquo;I could run here if needed&rdquo;, not a normal running day?</div>' +
+              '<div class="chip-grid">' + chipsHtml('weeklyAvailabilityPossibleDays', draft.weeklyAvailabilityDays.slice().sort(), DOW_CHIP_LABEL, draft.weeklyAvailabilityPossibleDays, true) + '</div>' +
+              '<p class="ob-hint">Leave none selected if every day above is an equally normal running day.</p>'
+              : '') +
+            // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- lets the
+            // long/key run move off the race weekday (e.g. Friday, with the
+            // weekend reserved for hikes) instead of always defaulting to it.
+            (draft.weeklyAvailabilityDays.length ?
+              '<div class="ob-label" style="margin-top:14px">Which day should be your long run?</div>' +
+              '<div class="chip-grid">' + chipsHtml('preferredLongRunDay', ['race'].concat(draft.weeklyAvailabilityDays.filter(function (d) { return draft.weeklyAvailabilityPossibleDays.indexOf(d) === -1; }).sort()), Object.assign({ race: 'Race day (default)' }, DOW_CHIP_LABEL), draft.preferredLongRunDay != null ? String(draft.preferredLongRunDay) : 'race', false) + '</div>'
+              : '')
             : '') +
           '<div class="ob-label" style="margin-top:14px">Terrain</div>' +
           '<div class="chip-grid">' + chipsHtml('terrains', TERRAINS, TERRAIN_LABEL, draft.terrains, true) + '</div>' +
@@ -1932,7 +1992,7 @@
         input.addEventListener('input', syncFieldsToDraft);
       });
 
-      var MULTI_GROUPS = { crossOptions: 'None', terrains: null, weeklyAvailabilityDays: null };
+      var MULTI_GROUPS = { crossOptions: 'None', terrains: null };
       wrap.querySelectorAll('.chip').forEach(function (chip) {
         chip.addEventListener('click', function () {
           var group = chip.getAttribute('data-group');
@@ -1989,6 +2049,28 @@
             draft.customizeWeeklyAvailability = value === 'yes';
             renderStep();
             return;
+          } else if (group === 'weeklyAvailabilityDays') {
+            // Re-render (the possible-days and long-run-day pickers below
+            // are both derived from this list, so they need to rebuild) and
+            // prune any now-stale selections in those dependent fields
+            // rather than leaving them pointed at a day no longer picked.
+            var wadIdx = draft.weeklyAvailabilityDays.indexOf(value);
+            if (wadIdx !== -1) draft.weeklyAvailabilityDays.splice(wadIdx, 1); else draft.weeklyAvailabilityDays.push(value);
+            draft.weeklyAvailabilityPossibleDays = draft.weeklyAvailabilityPossibleDays.filter(function (d) { return draft.weeklyAvailabilityDays.indexOf(d) !== -1; });
+            if (draft.preferredLongRunDay != null && draft.weeklyAvailabilityDays.indexOf(String(draft.preferredLongRunDay)) === -1) draft.preferredLongRunDay = null;
+            renderStep();
+            return;
+          } else if (group === 'weeklyAvailabilityPossibleDays') {
+            var wapIdx = draft.weeklyAvailabilityPossibleDays.indexOf(value);
+            if (wapIdx !== -1) draft.weeklyAvailabilityPossibleDays.splice(wapIdx, 1); else draft.weeklyAvailabilityPossibleDays.push(value);
+            // A day just marked "possible only" can no longer be the long-run
+            // day (that picker only ever offers preferred days) -- re-render
+            // so the now-stale selection doesn't linger.
+            if (draft.preferredLongRunDay != null && draft.weeklyAvailabilityPossibleDays.indexOf(String(draft.preferredLongRunDay)) !== -1) draft.preferredLongRunDay = null;
+            renderStep();
+            return;
+          } else if (group === 'preferredLongRunDay') {
+            draft.preferredLongRunDay = value === 'race' ? null : parseInt(value, 10);
           } else {
             draft[group] = value;
           }
@@ -2142,9 +2224,21 @@
       // touch this -- the overwhelming majority of existing and new plans.
       weeklyAvailability: draft.customizeWeeklyAvailability ? (function () {
         var map = {};
-        for (var d = 0; d <= 6; d++) map[d] = { canRun: draft.weeklyAvailabilityDays.indexOf(String(d)) !== -1 };
+        for (var d = 0; d <= 6; d++) {
+          map[d] = {
+            canRun: draft.weeklyAvailabilityDays.indexOf(String(d)) !== -1,
+            // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- 'possible'
+            // is a genuine fallback (used only once every preferred day is
+            // exhausted), never an automatic extra running day.
+            preference: draft.weeklyAvailabilityPossibleDays.indexOf(String(d)) !== -1 ? 'possible' : 'preferred'
+          };
+        }
         return map;
-      })() : undefined
+      })() : undefined,
+      // docs/COACHING_SPEC.md "Preferred weekly rhythm" -- moves the plan's
+      // long/key run off the race weekday onto a specific day (e.g. Friday,
+      // weekend reserved for hikes); null keeps the existing default.
+      preferredLongRunDay: draft.customizeWeeklyAvailability ? draft.preferredLongRunDay : null
     };
     var raceGoal = { event: draft.event, raceName: (draft.raceName || '').trim(), raceDate: draft.raceDate, startDate: draft.startDate, goal: draft.goal };
     var raceUnchanged = isEdit && state.raceGoal && state.raceGoal.event === raceGoal.event
@@ -2210,6 +2304,7 @@
         : null;
       state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings, checkpointDateIso: checkpointDateIso };
       state.logs = {}; state.overrides = {}; state.crossType = {};
+      state.sessionLogs = {}; state.sessionOverrides = {};
       state.goalCheckpointResolved = false;
     }
     // docs/COACHING_SPEC.md "Race readiness" -- evaluateReadiness above is
@@ -2264,6 +2359,10 @@
       weeklyAvailabilityDays: state.profile.weeklyAvailability
         ? Object.keys(state.profile.weeklyAvailability).filter(function (d) { return state.profile.weeklyAvailability[d].canRun; })
         : ['0', '1', '2', '3', '4', '5', '6'],
+      weeklyAvailabilityPossibleDays: state.profile.weeklyAvailability
+        ? Object.keys(state.profile.weeklyAvailability).filter(function (d) { return state.profile.weeklyAvailability[d].canRun && state.profile.weeklyAvailability[d].preference === 'possible'; })
+        : [],
+      preferredLongRunDay: state.profile.preferredLongRunDay != null ? state.profile.preferredLongRunDay : null,
       recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null
     };
   }
@@ -2997,6 +3096,39 @@
       });
     }
 
+    // docs/COACHING_SPEC.md "Key-session conflict" -- a fixed workout on the
+    // same weekday as the long run is a genuine tradeoff between two things
+    // the runner values, never resolved silently. Recomputed on every render
+    // (cheap, pure) so it disappears the moment a choice is stored; only the
+    // first still-unresolved conflict is shown at a time.
+    var keySessionConflicts = state.raceGoal
+      ? CoachingRulesDomain.detectKeySessionConflict(state.recurringWorkouts, state.raceGoal.raceDate, state.profile.preferredLongRunDay)
+      : [];
+    var unresolvedConflict = keySessionConflicts.filter(function (c) { return !state.scheduleChoices[c.workoutId]; })[0];
+    if (unresolvedConflict) {
+      var conflictName = (unresolvedConflict.activityType === 'other' || unresolvedConflict.activityType === 'sport') && unresolvedConflict.customName
+        ? unresolvedConflict.customName
+        : CoachingRulesDomain.RECURRING_ACTIVITY_LABEL[unresolvedConflict.activityType] || CoachingRulesDomain.RECURRING_ACTIVITY_LABEL.other;
+      var conflictCard = el(
+        '<div class="today-card">' +
+          '<div class="today-eyebrow">SCHEDULE CONFLICT</div>' +
+          '<p class="progress-insight">' + escapeHtml(conflictName) + ' falls on the same day as your long run. How would you like to handle it?</p>' +
+          unresolvedConflict.options.map(function (opt, oi) {
+            return '<button class="ob-btn' + (oi === 0 ? '' : ' ob-btn-secondary') + '" data-choice="' + escapeHtml(opt.id) + '" style="margin-top:' + (oi === 0 ? '10px' : '8px') + ';text-align:left">' +
+              escapeHtml(opt.label) + '<br><span style="font-weight:400;font-size:0.85em;opacity:0.8">' + escapeHtml(opt.description) + '</span></button>';
+          }).join('') +
+        '</div>'
+      );
+      app.appendChild(conflictCard);
+      conflictCard.querySelectorAll('button[data-choice]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          state.scheduleChoices[unresolvedConflict.workoutId] = btn.getAttribute('data-choice');
+          saveState(state);
+          renderMain();
+        });
+      });
+    }
+
     var mainTabs = el(bottomTabsHtml('main'));
     app.appendChild(mainTabs);
     wireBottomTabs(mainTabs);
@@ -3196,6 +3328,30 @@
         }
 
         dayList.appendChild(row);
+
+        // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary
+        // same-day session (e.g. an 11am spin class riding alongside the
+        // morning run) gets its own row, independently displayed/opened/
+        // logged/skipped, not just a "+ 45 min Spinning" suffix on the
+        // primary row's label (which stays, as a quick at-a-glance hint).
+        (dayData.sessions || []).filter(function (s) { return s.role === 'secondary'; }).forEach(function (sess) {
+          var sOverride = state.sessionOverrides[sess.id];
+          var sEntry = state.sessionLogs[sess.id];
+          var sSkipped = sOverride && sOverride.skipped;
+          var sRow = el(
+            '<div class="day-row day-row--secondary' + (sSkipped ? ' is-rest' : '') + '">' +
+              (sSkipped ? '<span class="day-status day-status--modified" title="Skipped">&ndash;</span>' :
+                (sEntry && sEntry.completionType ? '<span class="day-status day-status--done" title="Completed"><i class="ti ti-check"></i></span>' : '<span class="day-status day-status--upcoming" title="Not logged"></span>')) +
+              '<div class="day-date"></div>' +
+              '<div class="day-main">' +
+                '<div class="day-plan">' + escapeHtml(sess.label) + '</div>' +
+                (sess.purpose ? '<div class="day-hint">' + escapeHtml(sess.purpose) + '</div>' : '') +
+              '</div>' +
+            '</div>'
+          );
+          sRow.addEventListener('click', function () { renderSessionDetail(weekNum, di, sess.id); });
+          dayList.appendChild(sRow);
+        });
       });
 
       list.appendChild(block);
@@ -4070,6 +4226,95 @@
     document.getElementById('wdBackBtn').addEventListener('click', renderMain);
   }
 
+  // docs/COACHING_SPEC.md "Session-level architecture" -- an independent
+  // detail screen for a single secondary session (e.g. a same-day spin
+  // class or Tabata riding alongside the morning run). Deliberately leaner
+  // than renderWorkoutDetail (no pace zones/planned-vs-actual/pain report --
+  // none of those apply to a fixed cross-training class), but every action
+  // here is real: it reads/writes its own session-id-keyed state
+  // (state.sessionLogs/state.sessionOverrides), completely independent of
+  // the day's primary session and of every other session on the calendar.
+  function renderSessionDetail(weekNum, dayIdx, sessionId) {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
+    wireHeaderIcons();
+
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var raceDate = parseDate(state.raceGoal.raceDate);
+    var planLengthWeeks = state.planMeta.planLengthWeeks;
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var dayData = result.weeks[weekNum - 1].days[dayIdx];
+    var sess = (dayData.sessions || []).filter(function (s) { return s.id === sessionId; })[0];
+    var d = dateForSlot(raceDate, planLengthWeeks, weekNum, dayIdx);
+    if (!sess) { renderMain(); return; } // plan changed under us (e.g. a schedule choice was just made) -- nothing stale to show
+
+    var entry = getSessionLog(sessionId) || {};
+    var override = getSessionOverride(sessionId);
+    var skipped = !!(override && override.skipped);
+
+    var rpeChips = '';
+    for (var i = 1; i <= 10; i++) rpeChips += '<button type="button" class="rpe-chip' + (entry.effort === i ? ' selected' : '') + '" data-rpe="' + i + '">' + i + '</button>';
+    var completionSelected = entry.completionType || 'planned';
+
+    var wrap = el(
+      '<div class="ob wd">' +
+        '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
+        '<div class="ob-title wd-title">' + escapeHtml(sess.label) + '</div>' +
+        (skipped ? '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>Marked skipped.</span></div>' : '') +
+        '<dl class="wd-info">' +
+          (sess.purpose ? '<dt>Purpose</dt><dd>' + escapeHtml(sess.purpose) + '</dd>' : '') +
+          (sess.structure ? '<dt>Structure</dt><dd>' + escapeHtml(sess.structure) + '</dd>' : '') +
+          (sess.durationMinutes ? '<dt>Duration</dt><dd>' + sess.durationMinutes + ' min</dd>' : '') +
+          (sess.rpeRange ? '<dt>Target RPE</dt><dd>' + sess.rpeRange[0] + '&ndash;' + sess.rpeRange[1] + '</dd>' : '') +
+          (sess.explanation ? '<dt>Why</dt><dd>' + escapeHtml(sess.explanation) + '</dd>' : '') +
+        '</dl>' +
+        '<div class="wd-log">' +
+          '<div class="ob-label">Duration</div>' +
+          '<input class="ob-input" type="text" id="sd_time" placeholder="e.g. 32:10" value="' + escapeHtml(entry.time || '') + '">' +
+          '<div class="ob-label">Effort (RPE 1&ndash;10)</div>' +
+          '<div class="chip-grid" id="sd_rpe">' + rpeChips + '</div>' +
+          '<div class="ob-label">Completion</div>' +
+          '<div class="chip-grid" id="sd_completion">' + chipsHtml('sdCompletion', COMPLETION_TYPES, COMPLETION_TYPE_LABEL, completionSelected, false) + '</div>' +
+          '<div class="ob-label">Notes</div>' +
+          '<textarea class="ob-input wd-notes" id="sd_notes" rows="3" placeholder="How did it feel?">' + escapeHtml(entry.notes || '') + '</textarea>' +
+        '</div>' +
+        '<button class="ob-btn" id="sdSaveBtn">Save</button>' +
+        '<button class="ob-btn ob-btn-secondary" id="sdSkipBtn">' + (skipped ? 'Unmark skipped' : 'Skip this session') + '</button>' +
+        '<div class="ob-cancel" id="sdBackBtn">Back</div>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+
+    var effortSelected = entry.effort || null;
+    wrap.querySelectorAll('#sd_rpe .rpe-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        effortSelected = parseInt(chip.getAttribute('data-rpe'), 10);
+        wrap.querySelectorAll('#sd_rpe .rpe-chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+      });
+    });
+    var completionSel = completionSelected;
+    wrap.querySelectorAll('#sd_completion .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        completionSel = chip.getAttribute('data-value');
+        wrap.querySelectorAll('#sd_completion .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === completionSel); });
+      });
+    });
+
+    document.getElementById('sdSaveBtn').addEventListener('click', function () {
+      var time = document.getElementById('sd_time').value.trim();
+      var notes = document.getElementById('sd_notes').value.trim();
+      setSessionLog(sessionId, { time: time || null, effort: effortSelected, completionType: completionSel, notes: notes || null });
+      showToast('Session logged.');
+      renderMain();
+    });
+    document.getElementById('sdSkipBtn').addEventListener('click', function () {
+      setSessionOverride(sessionId, skipped ? null : { skipped: true });
+      renderMain();
+    });
+    document.getElementById('sdBackBtn').addEventListener('click', renderMain);
+  }
+
   // ── Side Quests: "Not feeling this run?" flow (docs/Runner_SideQuest_Spec.md) ──
   // Fully deterministic -- no AI call. Ask why, filter the fixed catalog by
   // reason + day type, offer real substitutions, apply one if chosen.
@@ -4207,7 +4452,13 @@
         (state.recurringWorkouts.length ? '<div class="recurring-list" id="recurringWorkoutsList">' + state.recurringWorkouts.map(function (w, i) {
           var name = (w.activityType === 'other' || w.activityType === 'sport') && w.customName ? w.customName : RECURRING_ACTIVITY_LABEL[w.activityType];
           var dayLabel = w.day != null ? DOW_SHORT[w.day] : 'No fixed day';
-          return '<div class="recurring-row"><span>' + escapeHtml(name) + ' &middot; ' + w.durationMinutes + ' min &middot; ' + dayLabel + '</span><button type="button" class="recurring-workout-remove" data-idx="' + i + '">Remove</button></div>';
+          // docs/COACHING_SPEC.md "Key-session conflict" -- a workout that
+          // shares a day with the long run has a stored resolution once the
+          // runner picks one on the dashboard prompt; this is the only place
+          // to change that choice afterward.
+          var choiceId = state.scheduleChoices[w.id];
+          var choiceHtml = choiceId ? '<button type="button" class="schedule-choice-reset" data-idx="' + i + '" style="margin-left:6px">Change long-run-day choice</button>' : '';
+          return '<div class="recurring-row"><span>' + escapeHtml(name) + ' &middot; ' + w.durationMinutes + ' min &middot; ' + dayLabel + '</span><button type="button" class="recurring-workout-remove" data-idx="' + i + '">Remove</button>' + choiceHtml + '</div>';
         }).join('') + '</div>' : '<p class="recap-empty">No recurring workouts added.</p>') +
         // docs/COACHING_SPEC.md "Plan explanations" -- short, positive notes
         // on how each workout affects the plan, shown right next to the
@@ -4272,7 +4523,7 @@
         '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
         '<p class="recap-empty">Experimental toggles from RACR\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
-        '<p class="recap-empty">Half marathon, marathon, and ultra plans still work but are hidden from new plans until each distance is separately reviewed.</p>' +
+        '<p class="recap-empty">5K, 10K, and half marathon are always available. Marathon and ultra distances are still being reviewed &mdash; turn this on to unlock them for new plans.</p>' +
         '<div class="chip-grid" id="set_longerDistances">' + chipsHtml('longerDistances', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.enableLongerDistances ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:18px">Reduce XP/level prominence</div>' +
         '<p class="recap-empty">Keeps XP, levels, and badges working, just quieter &mdash; hides the "+XP" line from completion toasts.</p>' +
@@ -4424,7 +4675,17 @@
     });
     wrap.querySelectorAll('.recurring-workout-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
+        var removed = state.recurringWorkouts[parseInt(btn.getAttribute('data-idx'), 10)];
         state.recurringWorkouts.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+        if (removed) delete state.scheduleChoices[removed.id];
+        saveState(state);
+        renderSettings();
+      });
+    });
+    wrap.querySelectorAll('.schedule-choice-reset').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var w = state.recurringWorkouts[parseInt(btn.getAttribute('data-idx'), 10)];
+        if (w) delete state.scheduleChoices[w.id];
         saveState(state);
         renderSettings();
       });
@@ -4593,6 +4854,8 @@
       state.logs = {};
       state.overrides = {};
       state.crossType = {};
+      state.sessionLogs = {};
+      state.sessionOverrides = {};
       saveState(state);
       didAutoScroll = false;
       renderMain();
