@@ -1994,6 +1994,128 @@
     return note;
   }
 
+  // ── Manual day adjustments: Shorten and Move (docs/COACHING_SPEC.md "Today
+  // screen actions") -- the runner's own explicit, in-the-moment decisions
+  // (make today easier, push it to another day), applied as the FINAL step
+  // in the pipeline so they're never silently re-adjusted by an automatic
+  // rule (missed-week dampening, evening-interval adaptation, etc.). Keyed
+  // by day-key ("weekNum-dayIdx"), same identifier app.js already uses for
+  // state.logs/overrides. Race day is never touched by either action.
+  //
+  // Scope, stated plainly: Move only applies to real running days (easy/
+  // quality/long) -- a recurring-workout ('cross') day has its own separate
+  // recurrence rules and moving it is a materially harder problem, not
+  // built this pass. Shorten applies to any non-race day with real content.
+  function applyShortenAdjustment(day, factor, units, terrainNote, weekNum, slot) {
+    if (day.type === 'long') {
+      day.miles = round5(Math.max(0.5, day.miles * factor));
+      day.label = formatLongRunLabel(day.miles, terrainNote, units) + ' (shortened)';
+    } else if (day.type === 'easy') {
+      day.miles = round5(Math.max(0.5, day.miles * factor));
+      day.label = formatEasyRunLabel(day.miles, units) + ' (shortened)';
+    } else if (day.type === 'quality') {
+      // A quality session's label is a structured prescription (e.g. "Tempo:
+      // 3 x 10 min @ threshold") that can't be safely rescaled by percentage
+      // without inventing a new workout -- instead give the runner a clear,
+      // honest instruction to reduce it themselves, at the same pace/effort.
+      day.miles = day.miles ? round5(Math.max(0.5, day.miles * factor)) : day.miles;
+      day.label = day.label + ' — shortened: cut the reps/intervals by about ' + Math.round((1 - factor) * 100) + '%, same pace/effort';
+    } else if (day.type === 'cross') {
+      var durMatch = /(\d+)\s*min/.exec(day.label);
+      if (durMatch) {
+        var newMin = Math.max(10, Math.round(parseInt(durMatch[1], 10) * factor));
+        day.label = day.label.replace(/\d+\s*min/, newMin + ' min') + ' (shortened)';
+      } else {
+        day.label = day.label + ' (shortened)';
+      }
+    } else {
+      return false; // rest/race -- nothing to shorten
+    }
+    day.adjustedByUser = true;
+    // Keep day.sessions[] in sync with the shortened label/miles -- same
+    // staleness fix already applied to travel overrides (docs/COACHING_SPEC.md
+    // "Session-level architecture"). A running-type day's primary session is
+    // always 'generated' (buildRunSession reads day.type/miles/label
+    // directly, safe to rebuild outright); a 'cross' day's primary session
+    // may be recurring-workout-driven and isn't safely reconstructable
+    // without its original workout record, so its label/duration are updated
+    // in place instead.
+    var primaryIdx = (day.sessions || []).findIndex(function (s) { return s.role === 'primary'; });
+    if (primaryIdx !== -1) {
+      if (day.type === 'cross') {
+        var durM = /(\d+)\s*min/.exec(day.label);
+        if (durM) day.sessions[primaryIdx].durationMinutes = parseInt(durM[1], 10);
+        day.sessions[primaryIdx].label = day.label;
+      } else {
+        day.sessions[primaryIdx] = buildRunSession(day, weekNum, slot);
+      }
+    }
+    return true;
+  }
+  function applyMoveAdjustment(source, target, units, terrainNote) {
+    // Only running-type days are moveable this pass (see scope note above).
+    if (['easy', 'quality', 'long'].indexOf(source.day.type) === -1) return false;
+    // day.label can carry a same-day secondary session's suffix (e.g. "4.5 mi
+    // easy run + 45 min Spinning / Cycling") appended AFTER the primary
+    // session was built -- since only the primary content moves (a
+    // coexisting secondary session, like a spin class, stays on its own
+    // day), the moved label must be the primary session's own clean label,
+    // not the combined day.label, or the destination day would claim to
+    // include a class that never actually happens there.
+    var sourcePrimary = (source.day.sessions || []).filter(function (s) { return s.role === 'primary'; })[0];
+    var movedType = source.day.type, movedMiles = source.day.miles, movedLabel = (sourcePrimary && sourcePrimary.label) || source.day.label, movedRunWalk = source.day.runWalk;
+
+    target.day.type = movedType;
+    target.day.miles = movedMiles;
+    target.day.label = movedLabel + ' (moved)';
+    target.day.runWalk = movedRunWalk;
+    target.day.movedFromKey = source.weekNum + '-' + source.slot;
+    var targetPrimaryIdx = (target.day.sessions || []).findIndex(function (s) { return s.role === 'primary'; });
+    var newTargetSession = buildRunSession(target.day, target.weekNum, target.slot);
+    if (targetPrimaryIdx !== -1) target.day.sessions[targetPrimaryIdx] = newTargetSession;
+    else target.day.sessions = [newTargetSession].concat(target.day.sessions || []);
+
+    source.day.type = 'rest';
+    source.day.miles = 0;
+    source.day.runWalk = null;
+    source.day.label = 'Moved to ' + target.dateLabel;
+    source.day.movedToKey = target.weekNum + '-' + target.slot;
+    var sourcePrimaryIdx = (source.day.sessions || []).findIndex(function (s) { return s.role === 'primary'; });
+    var newSourceSession = buildRunSession(source.day, source.weekNum, source.slot);
+    if (sourcePrimaryIdx !== -1) source.day.sessions[sourcePrimaryIdx] = newSourceSession;
+    else source.day.sessions = [newSourceSession];
+    return true;
+  }
+  function applyDayAdjustments(weeks, raceGoal, planMeta, dayAdjustments, units, terrainNote) {
+    if (!dayAdjustments || !Object.keys(dayAdjustments).length) return weeks;
+    var raceDate = parseDate(raceGoal.raceDate);
+    var planLengthWeeks = planMeta.planLengthWeeks;
+    var byKey = {};
+    weeks.forEach(function (wk) {
+      wk.days.forEach(function (day, di) {
+        var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
+        byKey[wk.weekNum + '-' + di] = { day: day, weekNum: wk.weekNum, slot: di, dateLabel: DOW_LABEL[(d.getDay() + 6) % 7] + ' (' + dateToISO(d) + ')' };
+      });
+    });
+    // 'shortened' first (self-contained, one day each) ...
+    Object.keys(dayAdjustments).forEach(function (key) {
+      var adj = dayAdjustments[key];
+      var entry = byKey[key];
+      if (!entry || !adj || entry.day.type === 'race' || adj.action !== 'shortened') return;
+      applyShortenAdjustment(entry.day, adj.factor || 0.7, units, terrainNote, entry.weekNum, entry.slot);
+    });
+    // ... then 'moved' (touches two days, so it must see shortened values first).
+    Object.keys(dayAdjustments).forEach(function (key) {
+      var adj = dayAdjustments[key];
+      var source = byKey[key];
+      if (!adj || adj.action !== 'moved' || !source) return;
+      var target = byKey[adj.targetKey];
+      if (!target || source.day.type === 'race' || target.day.type === 'race') return;
+      applyMoveAdjustment(source, target, units, terrainNote);
+    });
+    return weeks;
+  }
+
   // ── Goal decision checkpoint: half marathon vs. 10K (docs/COACHING_SPEC.md
   // "Goal decision checkpoints") -- a dated, deterministic evidence check,
   // never a silent race change. Evaluates real signals already available in
@@ -2065,7 +2187,7 @@
   // missed week -> (if nothing was already adapted) adapt to an RPE trend.
   // Lets tests/plan-scenarios.test.js exercise the real end-to-end pipeline
   // instead of a hand-reconstructed approximation of it.
-  function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units, recurringWorkouts, travelPeriods, scheduleChoices) {
+  function generatePlan(profile, raceGoal, planMeta, logs, today, unavailable, units, recurringWorkouts, travelPeriods, scheduleChoices, dayAdjustments) {
     var weeks = buildStructuredWeeks(profile, raceGoal, planMeta, units, recurringWorkouts, scheduleChoices);
     var terrainNote = terrainNoteFrom(profile.terrains);
     weeks = applyTravelPeriods(weeks, raceGoal, planMeta, travelPeriods, units, terrainNote);
@@ -2079,6 +2201,11 @@
       var eveningNote = applyEveningIntervalAdaptation(adjusted.weeks, raceGoal, planMeta, logs);
       if (eveningNote) adjusted.note = eveningNote;
     }
+    // docs/COACHING_SPEC.md "Today screen actions" -- the runner's own
+    // explicit Shorten/Move decisions are the final word, applied after
+    // every automatic adaptation so nothing silently re-adjusts a choice
+    // the runner just made themselves.
+    adjusted.weeks = applyDayAdjustments(adjusted.weeks, raceGoal, planMeta, dayAdjustments, units, terrainNote);
     return adjusted;
   }
 
@@ -2164,6 +2291,7 @@
     classifyRecurringWorkout: classifyRecurringWorkout,
     evaluateRecurringWorkoutSchedule: evaluateRecurringWorkoutSchedule,
     detectKeySessionConflict: detectKeySessionConflict,
+    applyDayAdjustments: applyDayAdjustments,
     generateRecurringWorkoutNotes: generateRecurringWorkoutNotes,
     formatRecurringWorkoutLabel: formatRecurringWorkoutLabel,
     formatRecurringWorkoutsLabel: formatRecurringWorkoutsLabel,

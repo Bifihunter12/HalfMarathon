@@ -38,7 +38,11 @@
   // adaptation 85-100%" -> 0.9). 'missed' isn't a stored completionType (it's
   // inferred from an absent log entry), so it never reaches this table --
   // there's simply no XP event for a day nobody logged.
-  var COMPLETION_MODIFIERS = { planned: 1.0, modified: 0.9, partial: 0.6, stopped_early: 0.4 };
+  // 'skipped' (docs/COACHING_SPEC.md "Today screen actions") deliberately
+  // earns 0, not a small consolation amount and not a negative -- neither
+  // rewarded nor punished, matching the project's anti-guilt rule for
+  // missed/skipped work throughout.
+  var COMPLETION_MODIFIERS = { planned: 1.0, modified: 0.9, partial: 0.6, stopped_early: 0.4, skipped: 0 };
 
   var SIDE_MISSION_WEEKLY_CAP_RATIO = 0.3; // spec: Side Mission XP <= 30% of that week's Main Quest XP
 

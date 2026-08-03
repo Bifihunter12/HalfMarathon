@@ -623,7 +623,11 @@
   // the existing inline label-edit -- adding overlapping status values for
   // those would just be two ways to represent the same fact.
   var COMPLETION_TYPES = ['planned', 'modified', 'partial', 'stopped_early'];
-  var COMPLETION_TYPE_LABEL = { planned: 'Completed as planned', modified: 'Modified', partial: 'Partially completed', stopped_early: 'Stopped early' };
+  // docs/COACHING_SPEC.md "Today screen actions" -- 'skipped' is deliberately
+  // NOT in COMPLETION_TYPES (the log form's own chip choices): logging a
+  // completed activity and skipping one entirely are different actions, not
+  // two options in the same form. Only the dedicated Skip button writes it.
+  var COMPLETION_TYPE_LABEL = { planned: 'Completed as planned', modified: 'Modified', partial: 'Partially completed', stopped_early: 'Stopped early', skipped: 'Skipped' };
 
   var PAIN_LOCATIONS = ['Foot', 'Ankle', 'Shin', 'Knee', 'Hip', 'Hamstring', 'Calf', 'Back', 'Other'];
   // docs/SAFETY_POLICY.md -- moved to coaching-rules.js so this safety-critical
@@ -872,6 +876,11 @@
     // this, so there is no legacy secondary-session data to convert.
     if (!s.sessionLogs) s.sessionLogs = {};
     if (!s.sessionOverrides) s.sessionOverrides = {};
+    // docs/COACHING_SPEC.md "Today screen actions" -- the runner's own
+    // explicit Shorten/Move decisions, keyed by day-key ("weekNum-dayIdx",
+    // same identifier as state.logs/overrides). Applied as the final step
+    // of CoachingRulesDomain.generatePlan (see applyDayAdjustments).
+    if (!s.dayAdjustments) s.dayAdjustments = {};
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category, rewardPoints }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
@@ -902,9 +911,31 @@
     if (!s.lastModified) s.lastModified = 0;
     return s;
   }
+  // docs/COACHING_SPEC.md "Error handling" -- a quota-exceeded or corrupted-
+  // storage failure here used to throw uncaught, crashing whatever click
+  // handler called saveState with no user-facing message and no signal
+  // about whether anything was lost. The in-memory `state` object itself is
+  // always still correct (loadState() runs exactly once at startup, so a
+  // failed write never gets overwritten by a stale re-read) -- what's at
+  // risk is only that this particular change won't survive a reload, which
+  // the message below says plainly. Throttled to one notice per failure
+  // streak (_saveFailedNotified), not one per keystroke/tap, since almost
+  // every user action calls this and a full quota fails every single time
+  // until the user frees up space.
+  var _saveFailedNotified = false;
   function saveState(state) {
     state.lastModified = Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      _saveFailedNotified = false;
+    } catch (e) {
+      reportError('saveState failed: ' + (e && e.name), e && e.stack);
+      if (!_saveFailedNotified) {
+        _saveFailedNotified = true;
+        showToast("Couldn't save that — your browser storage may be full. This change will be lost on reload; try Settings → Export data, then free up space.");
+      }
+      return; // nothing new was actually written, so nothing new to sync either
+    }
     if (!_skipCloudPush && CloudSync.isSignedIn) {
       clearTimeout(_cloudPushTimer);
       _cloudPushTimer = setTimeout(function () { CloudSync.push(); }, 5000);
@@ -1197,6 +1228,17 @@
       showToast(CELEBRATE_MESSAGES[_celebrateMsgIdx % CELEBRATE_MESSAGES.length] + xpSuffix);
       _celebrateMsgIdx++;
     }
+  }
+
+  // docs/COACHING_SPEC.md "Today screen actions" -- deliberately NOT
+  // logAndCelebrate: a skip earns 0 XP (see xp-system.js COMPLETION_MODIFIERS)
+  // and must never trigger a celebratory toast or milestone check -- it's a
+  // real, tracked, non-judgmental fact about what happened, not an
+  // achievement. No guilt language anywhere in the copy.
+  function skipWorkout(key, dayType) {
+    setLog(key, { completionType: 'skipped' });
+    logTelemetryEvent('workout_skipped', dayType);
+    showToast('Marked as skipped — no problem, back on track next session.');
   }
 
   // ── Cloud sync (Supabase, fully optional -- app works entirely offline without it) ──
@@ -1762,6 +1804,34 @@
 
   function findCurrentWeekIdx(raceDate, planLengthWeeks, today) { return CoachingRulesDomain.findCurrentWeekIdx(raceDate, planLengthWeeks, today); } // docs/COACHING_SPEC.md -- moved to coaching-rules.js
 
+  // docs/COACHING_SPEC.md "Today screen actions" -- shared by the Postpone
+  // button and the Reschedule day-picker. Returns null once past the last
+  // day of the plan rather than wrapping or guessing.
+  function advanceDayKey(weekNum, dayIdx, offset, planLengthWeeks) {
+    var totalSlot = (weekNum - 1) * 7 + dayIdx + offset;
+    var newWeekNum = Math.floor(totalSlot / 7) + 1;
+    var newDayIdx = totalSlot % 7;
+    if (newWeekNum < 1 || newWeekNum > planLengthWeeks) return null;
+    return { weekNum: newWeekNum, dayIdx: newDayIdx };
+  }
+  // A short, honest heads-up when a move would overwrite an already-
+  // meaningful day -- never blocks the choice, just names the tradeoff
+  // (docs/COACHING_SPEC.md "Calendar and week view" -- "warn, don't block").
+  function describeMoveConflict(targetDayData) {
+    if (targetDayData.type === 'long') return 'that day already has your long run planned, which would be replaced';
+    if (targetDayData.type === 'quality') return 'that day already has a quality session planned, which would be replaced';
+    return null;
+  }
+  function applyMoveWithConfirm(sourceKey, targetKey, targetDayData, weekNum, dayIdx, onDone) {
+    if (targetDayData.type === 'race') { window.alert("Can't move a workout onto race day."); return; }
+    var conflict = describeMoveConflict(targetDayData);
+    var confirmText = 'Move this workout there' + (conflict ? ' — ' + conflict : '') + '?';
+    if (!window.confirm(confirmText)) return;
+    state.dayAdjustments[sourceKey] = { action: 'moved', targetKey: targetKey };
+    saveState(state);
+    onDone();
+  }
+
   // docs/COACHING_SPEC.md / docs/SAFETY_POLICY.md -- applyUnavailableRanges,
   // applyMissedAdjustment, and applyDifficultyAdjustment all moved to
   // coaching-rules.js's generatePlan pipeline (tested in
@@ -1770,7 +1840,7 @@
   // the pure pipeline function needs explicitly.
   var RPE_TARGET = CoachingRulesDomain.RPE_TARGET;
   function generateAll(profile, raceGoal, planMeta, logs, today) {
-    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts, state.travelPeriods, state.scheduleChoices);
+    return CoachingRulesDomain.generatePlan(profile, raceGoal, planMeta, logs, today, state.unavailable, state.units, state.recurringWorkouts, state.travelPeriods, state.scheduleChoices, state.dayAdjustments);
   }
 
   function el(html) {
@@ -1781,7 +1851,14 @@
   function chipsHtml(name, options, labelMap, selected, multi) {
     return options.map(function (opt) {
       var isSel = multi ? selected.indexOf(opt) !== -1 : selected === opt;
-      return '<button type="button" class="chip' + (isSel ? ' selected' : '') + '" data-group="' + name + '" data-value="' + opt + '">' + (labelMap ? labelMap[opt] : opt) + '</button>';
+      // docs/COACHING_SPEC.md "Accessibility" -- chips are real <button>s
+      // already, but selection was signaled only by color (border/text/
+      // background tint) -- invisible to a screen reader, which doesn't
+      // see color at all. aria-pressed gives every chip group real toggle-
+      // button semantics; the matching runtime updates (wherever a click
+      // handler does classList.toggle('selected', ...)) now also set this
+      // attribute, so it never goes stale after the first click.
+      return '<button type="button" class="chip' + (isSel ? ' selected' : '') + '" data-group="' + name + '" data-value="' + opt + '" aria-pressed="' + isSel + '">' + (labelMap ? labelMap[opt] : opt) + '</button>';
     }).join('');
   }
 
@@ -1962,7 +2039,7 @@
           (step > 0 ? '<button class="ob-btn ob-btn-secondary" id="backBtn">Back</button>' : '<div></div>') +
           '<button class="ob-btn" id="nextBtn">' + (step === steps.length - 1 ? (isEdit ? 'Save' : 'Generate Plan') : 'Next') + '</button>' +
         '</div>' +
-        (isEdit ? '<div class="ob-cancel" id="cancelWizardBtn">Cancel</div>' : '');
+        (isEdit ? '<button type="button" class="ob-cancel" id="cancelWizardBtn">Cancel</button>' : '');
       var wrap = el('<div class="ob">' + body + nav + '</div>');
       app.appendChild(wrap);
       var cancelBtn = document.getElementById('cancelWizardBtn');
@@ -2084,7 +2161,7 @@
               : group === 'rw_timeWindow' ? (draft.rwDraftTimeWindow || 'unset') === v
               : group === 'customizeWeeklyAvailability' ? (draft.customizeWeeklyAvailability ? 'yes' : 'no') === v
               : draft[group] === v;
-            c.classList.toggle('selected', sel);
+            c.classList.toggle('selected', sel); c.setAttribute('aria-pressed', String(!!(sel)));
           });
         });
       });
@@ -2135,6 +2212,19 @@
           if (!draft.event) return;
         } else if (steps[step] === 'race') {
           if (!draft.raceDate) { document.getElementById('f_raceDate').focus(); return; }
+          // docs/COACHING_SPEC.md "Error handling" -- a wholly past (or
+          // today) race date used to slip through here: the only checks
+          // were "start date is before race date" and a clamp that pulls a
+          // past START date up to today, which does nothing to catch a
+          // past RACE date -- that just leaves startDate=today sitting
+          // AFTER raceDate, an inverted range that would send negative or
+          // nonsensical values into choosePlanLength/date math downstream.
+          var todayForRaceCheck = new Date(); todayForRaceCheck.setHours(0, 0, 0, 0);
+          if (parseDate(draft.raceDate) <= todayForRaceCheck) {
+            window.alert("Race date must be in the future — pick an upcoming date so there's time to train.");
+            document.getElementById('f_raceDate').focus();
+            return;
+          }
           if (!draft.startDate) { document.getElementById('f_startDate').focus(); return; }
           if (parseDate(draft.startDate) >= parseDate(draft.raceDate)) { document.getElementById('f_startDate').focus(); return; }
           // A start date already in the past has no real meaning -- clamp to
@@ -2194,7 +2284,7 @@
         (safety.unsafe ? '<div class="warn-banner" style="margin-top:16px"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(safety.warnings[0]) + '</span></div>' : '') +
         '<div class="warn-banner warn-banner--info" style="margin-top:16px"><i class="ti ti-info-circle"></i><span>Because the race itself is changing, your logged workouts and any day edits will be cleared &mdash; the calendar dates are shifting under them.</span></div>' +
         '<button class="ob-btn" id="confirmGoalChangeBtn">Confirm changes</button>' +
-        '<div class="ob-cancel" id="cancelGoalChangeBtn">Go back</div>' +
+        '<button type="button" class="ob-cancel" id="cancelGoalChangeBtn">Go back</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -2305,6 +2395,7 @@
       state.planMeta = { level: level, weeksAvailable: weeksAvailable, planLengthWeeks: planLengthWeeks, unsafe: unsafe, neededWeeks: readiness.neededWeeks, warnings: safety.warnings, checkpointDateIso: checkpointDateIso };
       state.logs = {}; state.overrides = {}; state.crossType = {};
       state.sessionLogs = {}; state.sessionOverrides = {};
+      state.dayAdjustments = {};
       state.goalCheckpointResolved = false;
     }
     // docs/COACHING_SPEC.md "Race readiness" -- evaluateReadiness above is
@@ -2330,16 +2421,25 @@
   // Shared icon strip so Progress/Glossary/Safety/Edit/Settings are reachable
   // from any subscreen, not just the main plan view -- avoids forcing a detour
   // through "Back to plan" just to switch between them.
+  // docs/COACHING_SPEC.md "Accessibility" -- these five icons are the app's
+  // primary navigation, present on nearly every screen; they used to be
+  // bare <i> tags with only a hover `title` (no semantic role, no keyboard
+  // access, no screen-reader label). Real <button> elements get all of that
+  // for free -- Tab/Enter/Space, a native focus ring, and an accessible
+  // name -- with zero change to the click-wiring in wireHeaderIcons below
+  // (still just getElementById(id).addEventListener('click', ...)). The
+  // glyph itself is aria-hidden since the button's own aria-label already
+  // names the action.
   function headerIconsHtml(activeId) {
-    function cls(id) { return 'ti hd-install' + (id === activeId ? ' active' : ''); }
+    function cls(id) { return 'hd-icon-btn' + (id === activeId ? ' active' : ''); }
     return (
       '<div class="hd-actions">' +
-        '<i class="' + cls('progressBtn') + ' ti-chart-line" id="progressBtn" title="Progress"></i>' +
-        '<i class="' + cls('glossaryBtn') + ' ti-book-2" id="glossaryBtn" title="What this all means"></i>' +
-        '<i class="' + cls('safetyBtn') + ' ti-shield-check" id="safetyBtn" title="Safety info"></i>' +
-        '<i class="ti ti-download hd-install" id="installBtn" style="display:none" title="Install app"></i>' +
-        '<i class="' + cls('editPlanBtn') + ' ti-edit" id="editPlanBtn" title="Edit plan"></i>' +
-        '<i class="ti hd-gear' + (activeId === 'gearBtn' ? ' active' : '') + ' ti-settings" id="gearBtn" title="Settings"></i>' +
+        '<button type="button" class="' + cls('progressBtn') + '" id="progressBtn" aria-label="Progress"><i class="ti ti-chart-line" aria-hidden="true"></i></button>' +
+        '<button type="button" class="' + cls('glossaryBtn') + '" id="glossaryBtn" aria-label="What this all means"><i class="ti ti-book-2" aria-hidden="true"></i></button>' +
+        '<button type="button" class="' + cls('safetyBtn') + '" id="safetyBtn" aria-label="Safety info"><i class="ti ti-shield-check" aria-hidden="true"></i></button>' +
+        '<button type="button" class="hd-icon-btn" id="installBtn" style="display:none" aria-label="Install app"><i class="ti ti-download" aria-hidden="true"></i></button>' +
+        '<button type="button" class="' + cls('editPlanBtn') + '" id="editPlanBtn" aria-label="Edit plan"><i class="ti ti-edit" aria-hidden="true"></i></button>' +
+        '<button type="button" class="hd-icon-btn' + (activeId === 'gearBtn' ? ' active' : '') + '" id="gearBtn" aria-label="Settings"><i class="ti ti-settings" aria-hidden="true"></i></button>' +
       '</div>'
     );
   }
@@ -2396,9 +2496,12 @@
       ['side', 'Side Missions', 'ti-trophy'],
       ['path', 'Path', 'ti-route']
     ];
+    // Already real <button> elements with visible text -- keyboard/screen-
+    // reader accessible by default. aria-current names which tab is active
+    // for a screen-reader user the same way the ".active" style does visually.
     return '<div class="bottom-tabs">' + items.map(function (item) {
-      return '<button type="button" class="bottom-tab' + (active === item[0] ? ' active' : '') + '" data-tab="' + item[0] + '">' +
-        '<i class="ti ' + item[2] + '"></i><span>' + item[1] + '</span></button>';
+      return '<button type="button" class="bottom-tab' + (active === item[0] ? ' active' : '') + '" data-tab="' + item[0] + '"' + (active === item[0] ? ' aria-current="page"' : '') + '>' +
+        '<i class="ti ' + item[2] + '" aria-hidden="true"></i><span>' + item[1] + '</span></button>';
     }).join('') + '</div>';
   }
   function wireBottomTabs(scope) {
@@ -2542,7 +2645,7 @@
       var total = SideQuestDomain.questTrackTotalMissions(activeTrack);
       var weekNum = Math.min(activeTrack.durationWeeks, Math.floor(active.completedSessions / activeTrack.missionsPerWeek) + 1);
       var nextMission = missionById(activeTrack.missionIds[Math.min(active.completedSessions, activeTrack.missionIds.length - 1)]);
-      activeHtml = '<div class="quest-card active-quest-card"><div class="quest-name">' + escapeHtml(activeTrack.name) + '</div><div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.durationWeeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' missions complete</div><div class="progress-track"><div class="progress-fill" style="width:' + (total ? Math.round(100 * active.completedSessions / total) : 0) + '%"></div></div><div class="quest-desc">' + (nextMission ? 'Next: ' + escapeHtml(nextMission.name) + ' &middot; ' + durationText(nextMission) : 'Quest Complete') + '</div>' + (nextMission ? '<button type="button" class="ob-btn quest-btn" id="resumeTrackBtn">Resume</button>' : '') + '<div class="ob-cancel" id="stopQuestBtn">Stop this quest</div></div>';
+      activeHtml = '<div class="quest-card active-quest-card"><div class="quest-name">' + escapeHtml(activeTrack.name) + '</div><div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.durationWeeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' missions complete</div><div class="progress-track"><div class="progress-fill" style="width:' + (total ? Math.round(100 * active.completedSessions / total) : 0) + '%"></div></div><div class="quest-desc">' + (nextMission ? 'Next: ' + escapeHtml(nextMission.name) + ' &middot; ' + durationText(nextMission) : 'Quest Complete') + '</div>' + (nextMission ? '<button type="button" class="ob-btn quest-btn" id="resumeTrackBtn">Resume</button>' : '') + '<button type="button" class="ob-cancel" id="stopQuestBtn">Stop this quest</button></div>';
     } else {
       activeHtml = '<div class="quest-card"><div class="quest-name">No active Mission Track</div><div class="quest-desc">Start one progressive Side Mission track. Your Main Quest keeps scheduling priority.</div></div>';
     }
@@ -2561,7 +2664,7 @@
           '<div class="quest-meta">' + wcProgress + ' of ' + challenge.target + ' this week</div>' +
           '<div class="progress-track" style="margin:10px 0"><div class="progress-fill" id="weeklyChallengeFill"></div></div>' +
           (wcProgress >= challenge.target ? '<p class="recap-empty">Challenge complete – nice work.</p>' : '') +
-          '<div class="ob-cancel" id="dropChallengeBtn">Drop this challenge</div>' +
+          '<button type="button" class="ob-cancel" id="dropChallengeBtn">Drop this challenge</button>' +
         '</div>';
     } else {
       weeklyChallengeHtml = '<div class="quest-card">' +
@@ -2645,7 +2748,7 @@
       scheduleOptions = options.length ? '<div class="ob-sub" style="margin-top:18px">Add to Calendar</div>' + options.join('') : '';
     }
     var safetyText = (mission.avoidBeforeWorkoutTypes.length ? 'Avoid before ' + mission.avoidBeforeWorkoutTypes.join(' or ') + '. ' : '') + 'Stop for sharp, worsening, or unusual pain.';
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span><span>' + mission.xpReward + ' XP</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<div class="ob-cancel" id="missionBackBtn">Back to Side Missions</div></div>');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span><span>' + mission.xpReward + ' XP</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<button type="button" class="ob-cancel" id="missionBackBtn">Back to Side Missions</button></div>');
     app.appendChild(wrap);
     document.getElementById('startMissionBtn').addEventListener('click', function () { renderMissionPlayer(mission.id, key); });
     var completeNow = document.getElementById('completeNowBtn');
@@ -2688,7 +2791,7 @@
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
         '<dl class="wd-info"><dt>XP on completion</dt><dd>' + challenge.xpReward + ' XP</dd></dl>' +
         logHtml +
-        '<div class="ob-cancel" id="challengeBackBtn">Back to Side Missions</div>' +
+        '<button type="button" class="ob-cancel" id="challengeBackBtn">Back to Side Missions</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -2698,7 +2801,7 @@
       variantWrap.querySelectorAll('.chip').forEach(function (chip) {
         chip.addEventListener('click', function () {
           selectedVariant = chip.getAttribute('data-value');
-          variantWrap.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+          variantWrap.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); c.setAttribute('aria-pressed', String(!!(c === chip))); });
         });
       });
     }
@@ -2730,13 +2833,13 @@
     document.getElementById('missionDifficulty').querySelectorAll('.chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         difficulty = chip.getAttribute('data-value');
-        document.getElementById('missionDifficulty').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+        document.getElementById('missionDifficulty').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); c.setAttribute('aria-pressed', String(!!(c === chip))); });
       });
     });
     document.getElementById('missionPain').querySelectorAll('.chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         pain = chip.getAttribute('data-value');
-        document.getElementById('missionPain').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+        document.getElementById('missionPain').querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('selected', c === chip); c.setAttribute('aria-pressed', String(!!(c === chip))); });
       });
     });
     document.getElementById('finishMissionBtn').addEventListener('click', function () {
@@ -2869,7 +2972,7 @@
         '</dl>' +
         selectedHtml +
         '<div class="path-timeline" id="pathTimeline">' + nodesHtml + '</div>' +
-        '<div class="ob-cancel" id="pathBackBtn">Back to plan</div>' +
+        '<button type="button" class="ob-cancel" id="pathBackBtn">Back to plan</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -2894,6 +2997,12 @@
     if (entry && entry.completionType) {
       if (entry.completionType === 'planned') {
         return '<span class="day-status day-status--done" title="Completed as planned"><i class="ti ti-check"></i></span>';
+      }
+      // docs/COACHING_SPEC.md "Today screen actions" -- visually distinct
+      // from both "done" (check) and "missed" (a bare dash meaning nobody
+      // decided anything) -- a skip is a deliberate choice, not a silent gap.
+      if (entry.completionType === 'skipped') {
+        return '<span class="day-status day-status--skipped" title="Skipped">&raquo;</span>';
       }
       return '<span class="day-status day-status--modified" title="' + escapeHtml(COMPLETION_TYPE_LABEL[entry.completionType] || 'Modified') + '">~</span>';
     }
@@ -3163,7 +3272,7 @@
           (todayMission ? '<div class="today-side"><div class="mission-label">Side Mission</div><button type="button" class="side-mission-link" id="todaySideMissionBtn">' + escapeHtml(todayMission.name) + ' &middot; ' + todayMission.durationMinutesMin + '-' + todayMission.durationMinutesMax + ' min</button></div>' : '') +
           (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
           '<div class="ai-coach">' +
-            '<div class="pain-toggle" id="aiCoachOpenBtn">Ask your coach</div>' +
+            '<button type="button" class="pain-toggle" id="aiCoachOpenBtn">Ask your coach</button>' +
           '</div>' +
         '</div>'
       );
@@ -3260,16 +3369,30 @@
         if (race) classes += ' is-race';
         if (isRest(label)) classes += ' is-rest';
 
+        // docs/COACHING_SPEC.md "Accessibility" -- a real <button>, not a
+        // bare <div> with a click listener, so opening a day's detail
+        // screen works from the keyboard and has a real accessible name
+        // (the DOW/date text alone, e.g. "MON 3", isn't enough out of
+        // context -- the aria-label spells out the full date and what's
+        // planned). Scoped to just this button, not the whole row: the
+        // row also contains a cross-training <select> and an inline-
+        // editable label elsewhere, and a button can't contain those.
+        var dateAriaLabel = DOW_FULL[d.getDay()] + ' ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + label + ' -- open details';
         var row = el(
           '<div class="' + classes + '">' +
             dayStatusHtml(loggable, entry, isToday, isPast) +
-            '<div class="day-date"><span class="day-dow">' + DOW_FULL[d.getDay()] + '</span><span class="day-dom">' + d.getDate() + '</span></div>' +
+            '<button type="button" class="day-date" aria-label="' + escapeHtml(dateAriaLabel) + '"><span class="day-dow">' + DOW_FULL[d.getDay()] + '</span><span class="day-dom">' + d.getDate() + '</span></button>' +
             '<div class="day-main">' +
-              '<div class="day-plan">' + escapeHtml(label) + '</div>' +
+              // docs/COACHING_SPEC.md "Accessibility" -- a real <button>
+              // (was a bare <div>), since clicking it swaps in an editable
+              // <input> -- a genuine action, not just text, and now
+              // reachable/triggerable from the keyboard like the input it
+              // produces already was.
+              '<button type="button" class="day-plan" aria-label="Edit: ' + escapeHtml(label) + '">' + escapeHtml(label) + '</button>' +
               (calendarHint(label) ? '<div class="day-hint">' + escapeHtml(calendarHint(label)) + '</div>' : '') +
               (loggable ? targetSummaryHtml(dayData, label) + completedSummaryHtml(entry) : '') +
               (scheduledMission ? '<button type="button" class="calendar-side-mission" data-mission-id="' + scheduledMission.id + '">Side Mission: ' + escapeHtml(scheduledMission.name) + '</button>' : '') +
-              (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
+              (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '" aria-label="Cross-training activity for ' + escapeHtml(DOW_FULL[d.getDay()]) + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
           '</div>'
         );
@@ -3338,8 +3461,11 @@
           var sOverride = state.sessionOverrides[sess.id];
           var sEntry = state.sessionLogs[sess.id];
           var sSkipped = sOverride && sOverride.skipped;
+          // docs/COACHING_SPEC.md "Accessibility" -- a real <button> (no
+          // nested interactive children here, unlike the primary row), so
+          // the whole card is keyboard-operable with one real accessible name.
           var sRow = el(
-            '<div class="day-row day-row--secondary' + (sSkipped ? ' is-rest' : '') + '">' +
+            '<button type="button" class="day-row day-row--secondary' + (sSkipped ? ' is-rest' : '') + '" aria-label="' + escapeHtml(sess.label) + (sSkipped ? ', skipped' : (sEntry && sEntry.completionType ? ', completed' : ', not logged')) + '">' +
               (sSkipped ? '<span class="day-status day-status--modified" title="Skipped">&ndash;</span>' :
                 (sEntry && sEntry.completionType ? '<span class="day-status day-status--done" title="Completed"><i class="ti ti-check"></i></span>' : '<span class="day-status day-status--upcoming" title="Not logged"></span>')) +
               '<div class="day-date"></div>' +
@@ -3347,7 +3473,7 @@
                 '<div class="day-plan">' + escapeHtml(sess.label) + '</div>' +
                 (sess.purpose ? '<div class="day-hint">' + escapeHtml(sess.purpose) + '</div>' : '') +
               '</div>' +
-            '</div>'
+            '</button>'
           );
           sRow.addEventListener('click', function () { renderSessionDetail(weekNum, di, sess.id); });
           dayList.appendChild(sRow);
@@ -3503,7 +3629,7 @@
           actionHtml = '<div class="coach-action">' +
             '<div style="margin-bottom:8px">' + confirm.text + '</div>' +
             '<button type="button" class="ob-btn" data-confirm-idx="' + idx + '" style="margin-bottom:6px">Confirm</button>' +
-            '<div class="ob-cancel" data-cancel-idx="' + idx + '">Cancel</div>' +
+            '<button type="button" class="ob-cancel" data-cancel-idx="' + idx + '">Cancel</button>' +
           '</div>';
         } else if (confirm) {
           actionHtml = '<div class="coach-action-status">' + confirm.text + '</div>';
@@ -3529,7 +3655,7 @@
           '<input class="ob-input" type="text" id="coachInput" placeholder="e.g. My back hurts a little">' +
           '<button type="button" class="ob-btn" id="coachSendBtn" style="margin-top:8px">Send</button>' +
         '</div>' +
-        '<div class="ob-cancel" id="coachBackBtn" style="margin-top:14px">Back to plan</div>' +
+        '<button type="button" class="ob-cancel" id="coachBackBtn" style="margin-top:14px">Back to plan</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -3825,14 +3951,14 @@
 
     var rpeChips = '';
     for (var i = 1; i <= 10; i++) {
-      rpeChips += '<button type="button" class="rpe-chip" data-rpe="' + i + '">' + i + '</button>';
+      rpeChips += '<button type="button" class="rpe-chip" data-rpe="' + i + '" aria-pressed="false">' + i + '</button>';
     }
 
     var completionSelected = entry.completionType || 'planned';
 
     var logHtml = loggable ? (
       '<div class="wd-log">' +
-        (GoogleHealth.isConnected ? '<div class="pain-toggle" id="ghImportBtn">Import from Google Health</div><div class="ai-why-result" id="ghImportResult" style="display:none"></div>' : '') +
+        (GoogleHealth.isConnected ? '<button type="button" class="pain-toggle" id="ghImportBtn">Import from Google Health</button><div class="ai-why-result" id="ghImportResult" style="display:none"></div>' : '') +
         '<div class="ob-label">Duration</div>' +
         '<input class="ob-input" type="text" id="wd_time" placeholder="e.g. 32:10 or 1:15:00" value="' + escapeHtml(entry.time || '') + '">' +
         '<div class="ob-label">Distance (' + unitLabel() + (dayData.runWalk ? ', optional' : '') + ')</div>' +
@@ -3851,7 +3977,7 @@
         '<div class="chip-grid" id="wd_eveningIntervals">' + chipsHtml('eveningIntervals', ['no', 'yes'], { no: 'No', yes: 'Yes' }, entry.eveningIntervals ? 'yes' : 'no', false) + '</div>' +
         '<div class="ob-label">Notes</div>' +
         '<textarea class="ob-input wd-notes" id="wd_notes" rows="3" placeholder="How did it feel?">' + escapeHtml(entry.notes || '') + '</textarea>' +
-        '<div class="pain-toggle" id="painToggle">' + (entry.pain ? 'Update pain report' : 'Report pain or discomfort') + '</div>' +
+        '<button type="button" class="pain-toggle" id="painToggle">' + (entry.pain ? 'Update pain report' : 'Report pain or discomfort') + '</button>' +
         '<div class="pain-form" id="painForm" style="display:' + (entry.pain ? 'block' : 'none') + '">' +
           '<div class="ob-label">Where?</div>' +
           '<div class="chip-grid" id="pain_location">' + chipsHtml('painLoc', PAIN_LOCATIONS, null, entry.pain ? entry.pain.location : null, false) + '</div>' +
@@ -3881,6 +4007,24 @@
       '</div>'
     ) : '';
 
+    // docs/COACHING_SPEC.md "Today screen actions" -- Postpone/Reschedule
+    // only for real running days (see applyMoveAdjustment's own scope note
+    // in coaching-rules.js); Shorten/Skip for any real, non-rest, non-race
+    // day. Never shown once the day is already a "moved away" rest day --
+    // there's nothing left on it to act on.
+    var isMoveable = ['easy', 'quality', 'long'].indexOf(dayData.type) !== -1;
+    var hasRealContent = race === false && dayData.type !== 'rest';
+    var existingAdj = state.dayAdjustments[key];
+    var isShortened = existingAdj && existingAdj.action === 'shortened';
+    var wdActionsHtml = hasRealContent ? (
+      '<div class="wd-actions">' +
+        (isMoveable ? '<button type="button" class="ob-btn ob-btn-secondary" id="postponeBtn">Postpone to tomorrow</button>' : '') +
+        (isMoveable ? '<button type="button" class="ob-btn ob-btn-secondary" id="rescheduleBtn">Reschedule&hellip;</button>' : '') +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="shortenBtn">' + (isShortened ? 'Undo shorten' : 'Shorten this workout') + '</button>' +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="skipBtn">Skip this workout</button>' +
+      '</div>'
+    ) : '';
+
     var wrap = el(
       '<div class="ob wd">' +
         '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
@@ -3889,10 +4033,11 @@
         crossSegmentsHtml +
         plannedVsActualHtml +
         (detail ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiWhyBtn">Ask AI: why this workout?</button><div class="ai-why-result" id="aiWhyResult" style="display:none"></div></div>' : '') +
-        ((dayData.type === 'easy' || dayData.type === 'cross') ? '<div class="pain-toggle" id="switchItUpBtn">Not feeling this run?</div>' : '') +
+        ((dayData.type === 'easy' || dayData.type === 'cross') ? '<button type="button" class="pain-toggle" id="switchItUpBtn">Not feeling this run?</button>' : '') +
+        wdActionsHtml +
         logHtml +
         (loggable ? '<button class="ob-btn" id="wdSaveBtn">Save</button>' : '') +
-        '<div class="ob-cancel" id="wdBackBtn">Back to plan</div>' +
+        '<button type="button" class="ob-cancel" id="wdBackBtn">Back to plan</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -3920,9 +4065,9 @@
         var listEl = document.getElementById('crossSegmentList');
         listEl.innerHTML = crossSegments.map(function (seg, i) {
           return '<div class="cross-segment-row">' +
-            '<select class="cross-select" data-seg-index="' + i + '">' + crossOptionsHtml(seg.activity) + '</select>' +
-            '<input class="ob-input cross-segment-minutes" type="number" min="0" step="1" placeholder="min" data-seg-index="' + i + '" value="' + (seg.minutes != null ? seg.minutes : '') + '">' +
-            (crossSegments.length > 1 ? '<span class="ob-cancel cross-segment-remove" data-seg-index="' + i + '">Remove</span>' : '') +
+            '<select class="cross-select" data-seg-index="' + i + '" aria-label="Activity ' + (i + 1) + '">' + crossOptionsHtml(seg.activity) + '</select>' +
+            '<input class="ob-input cross-segment-minutes" type="number" min="0" step="1" placeholder="min" data-seg-index="' + i + '" value="' + (seg.minutes != null ? seg.minutes : '') + '" aria-label="Activity ' + (i + 1) + ' duration in minutes">' +
+            (crossSegments.length > 1 ? '<button type="button" class="ob-cancel cross-segment-remove" data-seg-index="' + i + '">Remove</button>' : '') +
           '</div>';
         }).join('');
         listEl.querySelectorAll('.cross-select').forEach(function (sel) {
@@ -3961,6 +4106,38 @@
     var switchItUpBtn = document.getElementById('switchItUpBtn');
     if (switchItUpBtn) {
       switchItUpBtn.addEventListener('click', function () { renderSwitchItUp(weekNum, dayIdx); });
+    }
+
+    var skipBtn = document.getElementById('skipBtn');
+    if (skipBtn) {
+      skipBtn.addEventListener('click', function () {
+        if (!window.confirm('Skip this workout? It\'s tracked as a deliberate skip, not a missed session.')) return;
+        skipWorkout(key, dayData.type);
+        renderMain();
+      });
+    }
+    var shortenBtn = document.getElementById('shortenBtn');
+    if (shortenBtn) {
+      shortenBtn.addEventListener('click', function () {
+        if (isShortened) delete state.dayAdjustments[key];
+        else state.dayAdjustments[key] = { action: 'shortened', factor: 0.7 };
+        saveState(state);
+        renderWorkoutDetail(weekNum, dayIdx);
+      });
+    }
+    var postponeBtn = document.getElementById('postponeBtn');
+    if (postponeBtn) {
+      postponeBtn.addEventListener('click', function () {
+        var next = advanceDayKey(weekNum, dayIdx, 1, planLengthWeeks);
+        if (!next) { window.alert("There's no day after this one in your plan."); return; }
+        var targetKey = next.weekNum + '-' + next.dayIdx;
+        var targetDayData = result.weeks[next.weekNum - 1].days[next.dayIdx];
+        applyMoveWithConfirm(key, targetKey, targetDayData, weekNum, dayIdx, renderMain);
+      });
+    }
+    var rescheduleBtn = document.getElementById('rescheduleBtn');
+    if (rescheduleBtn) {
+      rescheduleBtn.addEventListener('click', function () { renderReschedulePicker(weekNum, dayIdx); });
     }
 
     if (detail) {
@@ -4049,7 +4226,7 @@
       var rpeWrap = document.getElementById('wd_rpe');
       function paintRpe() {
         rpeWrap.querySelectorAll('.rpe-chip').forEach(function (c) {
-          c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === effortSelected);
+          c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === effortSelected); c.setAttribute('aria-pressed', String(!!(parseInt(c.getAttribute('data-rpe'), 10) === effortSelected)));
         });
       }
       paintRpe();
@@ -4082,7 +4259,7 @@
         chip.addEventListener('click', function () {
           completionSelected = chip.getAttribute('data-value');
           completionWrap.querySelectorAll('.chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === completionSelected);
+            c.classList.toggle('selected', c.getAttribute('data-value') === completionSelected); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === completionSelected)));
           });
         });
       });
@@ -4093,7 +4270,7 @@
         chip.addEventListener('click', function () {
           eveningIntervalsSelected = chip.getAttribute('data-value') === 'yes';
           eveningIntervalsWrap.querySelectorAll('.chip').forEach(function (c) {
-            c.classList.toggle('selected', (c.getAttribute('data-value') === 'yes') === eveningIntervalsSelected);
+            c.classList.toggle('selected', (c.getAttribute('data-value') === 'yes') === eveningIntervalsSelected); c.setAttribute('aria-pressed', String(!!((c.getAttribute('data-value') === 'yes') === eveningIntervalsSelected)));
           });
         });
       });
@@ -4133,7 +4310,7 @@
       }
       updatePainGuidance();
       document.querySelectorAll('#pain_severity .rpe-chip').forEach(function (c) {
-        c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === painSeverity);
+        c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === painSeverity); c.setAttribute('aria-pressed', String(!!(parseInt(c.getAttribute('data-rpe'), 10) === painSeverity)));
       });
 
       document.querySelectorAll('#pain_location .chip').forEach(function (chip) {
@@ -4141,7 +4318,7 @@
           var v = chip.getAttribute('data-value');
           painLocation = painLocation === v ? null : v;
           document.querySelectorAll('#pain_location .chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === painLocation);
+            c.classList.toggle('selected', c.getAttribute('data-value') === painLocation); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === painLocation)));
           });
         });
       });
@@ -4150,7 +4327,7 @@
           var v = parseInt(chip.getAttribute('data-rpe'), 10);
           painSeverity = painSeverity === v ? null : v;
           document.querySelectorAll('#pain_severity .rpe-chip').forEach(function (c) {
-            c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === painSeverity);
+            c.classList.toggle('selected', parseInt(c.getAttribute('data-rpe'), 10) === painSeverity); c.setAttribute('aria-pressed', String(!!(parseInt(c.getAttribute('data-rpe'), 10) === painSeverity)));
           });
           updatePainGuidance();
         });
@@ -4163,7 +4340,7 @@
           chip.addEventListener('click', function () {
             setVal(chip.getAttribute('data-value') === 'yes');
             document.querySelectorAll('#' + containerId + ' .chip').forEach(function (c) {
-              c.classList.toggle('selected', c.getAttribute('data-value') === (getVal() ? 'yes' : 'no'));
+              c.classList.toggle('selected', c.getAttribute('data-value') === (getVal() ? 'yes' : 'no')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (getVal() ? 'yes' : 'no'))));
             });
             updatePainGuidance();
           });
@@ -4183,7 +4360,7 @@
         chip.addEventListener('click', function () {
           painOnsetDuringRun = chip.getAttribute('data-value') === 'during';
           document.querySelectorAll('#pain_onset .chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === (painOnsetDuringRun ? 'during' : 'after'));
+            c.classList.toggle('selected', c.getAttribute('data-value') === (painOnsetDuringRun ? 'during' : 'after')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (painOnsetDuringRun ? 'during' : 'after'))));
           });
           updatePainGuidance();
         });
@@ -4192,7 +4369,7 @@
         chip.addEventListener('click', function () {
           painSuddenOnset = chip.getAttribute('data-value') === 'sudden';
           document.querySelectorAll('#pain_sudden .chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === (painSuddenOnset ? 'sudden' : 'gradual'));
+            c.classList.toggle('selected', c.getAttribute('data-value') === (painSuddenOnset ? 'sudden' : 'gradual')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (painSuddenOnset ? 'sudden' : 'gradual'))));
           });
           updatePainGuidance();
         });
@@ -4254,7 +4431,7 @@
     var skipped = !!(override && override.skipped);
 
     var rpeChips = '';
-    for (var i = 1; i <= 10; i++) rpeChips += '<button type="button" class="rpe-chip' + (entry.effort === i ? ' selected' : '') + '" data-rpe="' + i + '">' + i + '</button>';
+    for (var i = 1; i <= 10; i++) rpeChips += '<button type="button" class="rpe-chip' + (entry.effort === i ? ' selected' : '') + '" data-rpe="' + i + '" aria-pressed="' + (entry.effort === i) + '">' + i + '</button>';
     var completionSelected = entry.completionType || 'planned';
 
     var wrap = el(
@@ -4281,7 +4458,7 @@
         '</div>' +
         '<button class="ob-btn" id="sdSaveBtn">Save</button>' +
         '<button class="ob-btn ob-btn-secondary" id="sdSkipBtn">' + (skipped ? 'Unmark skipped' : 'Skip this session') + '</button>' +
-        '<div class="ob-cancel" id="sdBackBtn">Back</div>' +
+        '<button type="button" class="ob-cancel" id="sdBackBtn">Back</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -4290,14 +4467,14 @@
     wrap.querySelectorAll('#sd_rpe .rpe-chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         effortSelected = parseInt(chip.getAttribute('data-rpe'), 10);
-        wrap.querySelectorAll('#sd_rpe .rpe-chip').forEach(function (c) { c.classList.toggle('selected', c === chip); });
+        wrap.querySelectorAll('#sd_rpe .rpe-chip').forEach(function (c) { c.classList.toggle('selected', c === chip); c.setAttribute('aria-pressed', String(!!(c === chip))); });
       });
     });
     var completionSel = completionSelected;
     wrap.querySelectorAll('#sd_completion .chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         completionSel = chip.getAttribute('data-value');
-        wrap.querySelectorAll('#sd_completion .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === completionSel); });
+        wrap.querySelectorAll('#sd_completion .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === completionSel); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === completionSel))); });
       });
     });
 
@@ -4313,6 +4490,64 @@
       renderMain();
     });
     document.getElementById('sdBackBtn').addEventListener('click', renderMain);
+  }
+
+  // docs/COACHING_SPEC.md "Today screen actions" -- Reschedule's day-picker.
+  // Deliberately bounded to the next 13 days (2-ish weeks): far enough to
+  // cover "later this week" or "next week instead," not so far that a move
+  // could land past a taper cutoff without the runner realizing how far
+  // they've pushed it. Each row shows what's already there and flags the
+  // same conflicts (long run / quality session) applyMoveWithConfirm warns
+  // about on confirm -- so the tradeoff is visible before tapping, not just
+  // after.
+  function renderReschedulePicker(sourceWeekNum, sourceDayIdx) {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
+    wireHeaderIcons();
+
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var raceDate = parseDate(state.raceGoal.raceDate);
+    var planLengthWeeks = state.planMeta.planLengthWeeks;
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var sourceKey = sourceWeekNum + '-' + sourceDayIdx;
+
+    var rows = [];
+    for (var offset = 1; offset <= 13; offset++) {
+      var next = advanceDayKey(sourceWeekNum, sourceDayIdx, offset, planLengthWeeks);
+      if (!next) break;
+      var d = dateForSlot(raceDate, planLengthWeeks, next.weekNum, next.dayIdx);
+      var targetDayData = result.weeks[next.weekNum - 1].days[next.dayIdx];
+      if (targetDayData.type === 'race') continue; // never offered as a target
+      var conflict = describeMoveConflict(targetDayData);
+      rows.push({ weekNum: next.weekNum, dayIdx: next.dayIdx, label: DOW_FULL[d.getDay()] + ' ' + MONTHS[d.getMonth()] + ' ' + d.getDate(), current: targetDayData.label, conflict: conflict });
+    }
+
+    var wrap = el(
+      '<div class="ob">' +
+        '<div class="ob-title">Reschedule to&hellip;</div>' +
+        '<div class="ob-sub">Choose a day &mdash; today\'s workout moves there, replacing whatever was already planned that day.</div>' +
+        '<div class="reschedule-list">' + rows.map(function (r, i) {
+          return '<button type="button" class="reschedule-row" data-idx="' + i + '">' +
+            '<span class="reschedule-date">' + r.label + '</span>' +
+            '<span class="reschedule-current">' + escapeHtml(r.current) + '</span>' +
+            (r.conflict ? '<span class="reschedule-warn">' + escapeHtml(r.conflict) + '</span>' : '') +
+          '</button>';
+        }).join('') + '</div>' +
+        '<button type="button" class="ob-cancel" id="rescheduleBackBtn">Cancel</button>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+
+    wrap.querySelectorAll('.reschedule-row').forEach(function (btn, i) {
+      btn.addEventListener('click', function () {
+        var r = rows[i];
+        var targetKey = r.weekNum + '-' + r.dayIdx;
+        var targetDayData = result.weeks[r.weekNum - 1].days[r.dayIdx];
+        applyMoveWithConfirm(sourceKey, targetKey, targetDayData, sourceWeekNum, sourceDayIdx, renderMain);
+      });
+    });
+    document.getElementById('rescheduleBackBtn').addEventListener('click', function () { renderWorkoutDetail(sourceWeekNum, sourceDayIdx); });
   }
 
   // ── Side Quests: "Not feeling this run?" flow (docs/Runner_SideQuest_Spec.md) ──
@@ -4342,13 +4577,13 @@
           '<div class="ob-sub">Why do you want to change today&rsquo;s workout?</div>' +
           '<div class="chip-grid">' + chipsHtml('switchReason', SIDE_QUEST_REASONS, SIDE_QUEST_REASON_LABEL, selectedReason, false) + '</div>' +
           '<button class="ob-btn" id="seeOptionsBtn"' + (selectedReason ? '' : ' disabled') + '>See options</button>' +
-          '<div class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</div>';
+          '<button type="button" class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</button>';
       } else if (selectedReason === 'pain') {
         body =
           '<div class="ob-title">Let&rsquo;s log that properly</div>' +
           '<div class="ob-sub">Pain and discomfort get a real pain report, not a Side Mission swap.</div>' +
           '<button class="ob-btn" id="goToPainBtn">Report pain or discomfort</button>' +
-          '<div class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</div>';
+          '<button type="button" class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</button>';
       } else {
         var quests = questsForReason(selectedReason, dayData.type);
         body =
@@ -4363,7 +4598,7 @@
               '<button type="button" class="ob-btn ob-btn-secondary quest-btn" data-quest-idx="' + i + '">Replace today&rsquo;s workout</button>' +
             '</div>';
           }).join('') : '<p class="recap-empty">No good options for that reason right now &mdash; keeping today as scheduled is the safest call.</p>') +
-          '<div class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</div>';
+          '<button type="button" class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</button>';
       }
 
       var wrap = el('<div class="ob">' + body + '</div>');
@@ -4535,7 +4770,7 @@
         '<div class="ob-label danger-label" style="margin-top:26px">Danger zone</div>' +
         '<button class="ob-btn ob-btn-secondary danger-btn" id="resetPlanBtn">Start a new plan</button>' +
         '<button class="ob-btn ob-btn-secondary danger-btn" id="deleteAllBtn">Delete all data</button>' +
-        '<div class="ob-cancel" id="settingsBackBtn">Back to plan</div>' +
+        '<button type="button" class="ob-cancel" id="settingsBackBtn">Back to plan</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -4563,7 +4798,7 @@
         state.units = chip.getAttribute('data-value');
         saveState(state);
         wrap.querySelectorAll('#set_units .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === state.units);
+          c.classList.toggle('selected', c.getAttribute('data-value') === state.units); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === state.units)));
         });
       });
     });
@@ -4573,7 +4808,7 @@
         state.flags.enableLongerDistances = chip.getAttribute('data-value') === 'on';
         saveState(state);
         wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off'));
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off'))));
         });
       });
     });
@@ -4583,7 +4818,7 @@
         state.flags.quietGamification = chip.getAttribute('data-value') === 'on';
         saveState(state);
         wrap.querySelectorAll('#set_quietGamification .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.quietGamification ? 'on' : 'off'));
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.quietGamification ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.flags.quietGamification ? 'on' : 'off'))));
         });
       });
     });
@@ -4593,7 +4828,7 @@
       chip.addEventListener('click', function () {
         toReason = chip.getAttribute('data-value');
         wrap.querySelectorAll('#set_toReason .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === toReason);
+          c.classList.toggle('selected', c.getAttribute('data-value') === toReason); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === toReason)));
         });
       });
     });
@@ -4617,7 +4852,7 @@
     wrap.querySelectorAll('#set_travelIndoor .chip').forEach(function (chip) {
       chip.addEventListener('click', function () {
         travelIndoor = chip.getAttribute('data-value');
-        wrap.querySelectorAll('#set_travelIndoor .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === travelIndoor); });
+        wrap.querySelectorAll('#set_travelIndoor .chip').forEach(function (c) { c.classList.toggle('selected', c.getAttribute('data-value') === travelIndoor); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === travelIndoor))); });
       });
     });
     document.getElementById('addTravelPeriodBtn').addEventListener('click', function () {
@@ -4650,7 +4885,7 @@
           var value = chip.getAttribute('data-value');
           onChange(value);
           wrap.querySelectorAll('#' + containerId + ' .chip').forEach(function (c) {
-            c.classList.toggle('selected', c.getAttribute('data-value') === value);
+            c.classList.toggle('selected', c.getAttribute('data-value') === value); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === value)));
           });
         });
       });
@@ -4856,6 +5091,7 @@
       state.crossType = {};
       state.sessionLogs = {};
       state.sessionOverrides = {};
+      state.dayAdjustments = {};
       saveState(state);
       didAutoScroll = false;
       renderMain();
@@ -4968,7 +5204,7 @@
     // renderWorkoutDetail (painToggle/painForm) -- no extra render() closure needed.
     var existingFeeling = currentWeekFeelingEntry();
     var feelingSummaryHtml = existingFeeling ?
-      '<p class="recap-empty" id="feelingSummary">This week: ' + escapeHtml(RUNNING_FEELING_LABEL[existingFeeling.feeling]) + ' &mdash; <span class="pain-toggle" id="changeFeelingBtn" style="display:inline">change</span></p>' : '';
+      '<p class="recap-empty" id="feelingSummary">This week: ' + escapeHtml(RUNNING_FEELING_LABEL[existingFeeling.feeling]) + ' &mdash; <button type="button" class="pain-toggle" id="changeFeelingBtn" style="display:inline">change</button></p>' : '';
     var feelingFormHtml =
       '<div id="feelingForm" style="display:' + (existingFeeling ? 'none' : 'block') + '">' +
         '<div class="ob-label">How are you feeling about running this week?</div>' +
@@ -4976,7 +5212,7 @@
         '<button type="button" class="ob-btn ob-btn-secondary" id="saveFeelingBtn" style="margin-top:8px">Save</button>' +
       '</div>';
     var varietyBannerHtml = varietyWeekSuggested() ?
-      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week – swap an easy Main Mission for a Side Mission, add strength carefully, and keep your long run and key workout as-is. <span class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Side Missions</span></span></div>' : '';
+      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week – swap an easy Main Mission for a Side Mission, add strength carefully, and keep your long run and key workout as-is. <button type="button" class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Side Missions</button></span></div>' : '';
 
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
@@ -5180,7 +5416,7 @@
       chip.addEventListener('click', function () {
         chosenFeeling = chip.getAttribute('data-value');
         wrap.querySelectorAll('#feelingChips .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === chosenFeeling);
+          c.classList.toggle('selected', c.getAttribute('data-value') === chosenFeeling); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === chosenFeeling)));
         });
       });
     });

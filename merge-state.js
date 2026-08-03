@@ -150,6 +150,9 @@
       // this reuses the exact same merge function rather than a new one.
       sessionLogs: mergeMap(local.sessionLogs, remote.sessionLogs),
       sessionOverrides: mergeMap(local.sessionOverrides, remote.sessionOverrides),
+      // docs/COACHING_SPEC.md "Today screen actions" -- same day-key shape
+      // and merge semantics as logs/overrides above.
+      dayAdjustments: mergeMap(local.dayAdjustments, remote.dayAdjustments),
       unavailable: Object.keys(unavailableMap).map(function (k) { return unavailableMap[k]; }),
       sideQuestLog: Object.keys(sideQuestMap).map(function (k) { return sideQuestMap[k]; }),
       runningFeelingLog: Object.keys(feelingMap).map(function (k) { return feelingMap[k]; }),

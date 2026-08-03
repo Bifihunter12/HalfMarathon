@@ -15,7 +15,7 @@ function baseState(overrides) {
     logs: {}, overrides: {}, crossType: {},
     unavailable: [], sideQuestLog: [], runningFeelingLog: [], recurringWorkouts: [],
     weightTrackingEnabled: false, weightUnits: 'lb', weightEntries: [],
-    sessionLogs: {}, sessionOverrides: {}
+    sessionLogs: {}, sessionOverrides: {}, dayAdjustments: {}
   }, overrides || {});
 }
 
@@ -271,4 +271,28 @@ test('legacy states missing sessionLogs/sessionOverrides entirely still merge to
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.deepEqual(merged.sessionLogs, {});
   assert.deepEqual(merged.sessionOverrides, {});
+});
+
+// docs/COACHING_SPEC.md "Today screen actions" -- dayAdjustments (shorten/
+// move) merges exactly like logs/overrides: per-key newer-device-wins,
+// union of untouched keys, safe empty default for legacy states.
+test('dayAdjustments made on different devices for different days both survive the merge', function () {
+  const local = baseState({ lastModified: 2000, dayAdjustments: { '3-2': { action: 'shortened', factor: 0.7 } } });
+  const remote = baseState({ lastModified: 1000, dayAdjustments: { '4-6': { action: 'moved', targetKey: '4-5' } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.dayAdjustments, { '3-2': { action: 'shortened', factor: 0.7 }, '4-6': { action: 'moved', targetKey: '4-5' } });
+});
+
+test('editing the same day\'s adjustment on the newer device wins, matching logs/overrides', function () {
+  const local = baseState({ lastModified: 2000, dayAdjustments: { '3-2': { action: 'shortened', factor: 0.7 } } });
+  const remote = baseState({ lastModified: 1000, dayAdjustments: { '3-2': { action: 'moved', targetKey: '3-3' } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.dayAdjustments['3-2'], { action: 'shortened', factor: 0.7 });
+});
+
+test('legacy states missing dayAdjustments entirely still merge to a safe empty object', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = { lastModified: 1000, units: 'mi' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.dayAdjustments, {});
 });

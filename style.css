@@ -16,6 +16,16 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* docs/COACHING_SPEC.md "Accessibility" -- a global fallback focus ring so
+   every interactive element gets a visible, keyboard-only focus indicator
+   by default, not just the handful of controls with their own explicit
+   :focus-visible rule below. More specific rules elsewhere in this file
+   still win where a tighter/differently-offset ring fits the control better. */
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 html, body {
   min-height: 100%;
   background: var(--bg);
@@ -74,7 +84,11 @@ body {
   font-size: 16px;
   padding: 13px 14px;
 }
-.ob-input:focus { outline: none; border-color: var(--accent); }
+/* docs/COACHING_SPEC.md "Accessibility" -- border-color alone is a subtle
+   focus signal; the box-shadow ring makes it clearly visible without
+   changing the input's box size (a real outline would need extra margin
+   to avoid clipping against adjacent fields). */
+.ob-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .ob-hint { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
 .ob-btn {
   margin-top: 10px;
@@ -92,6 +106,16 @@ body {
 }
 .ob-btn:hover { opacity: 0.92; }
 .ob-cancel {
+  /* docs/COACHING_SPEC.md "Accessibility" -- now a real <button> (was a
+     bare <div>/<span> with a click listener); reset button chrome back to
+     how the div/span used to look, full-width and centered by default so
+     the many callers that render this on its own line are unaffected. Any
+     caller using it inline (style="display:inline") overrides this as before. */
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: inherit;
   text-align: center;
   font-size: 12px;
   font-weight: 500;
@@ -99,8 +123,10 @@ body {
   color: var(--text-faint);
   cursor: pointer;
   margin-top: 4px;
+  padding: 6px;
 }
 .ob-cancel:hover { color: var(--text-dim); }
+.ob-cancel:focus-visible, .pain-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ob-btn:disabled { opacity: 0.4; cursor: default; }
 
 .quest-card {
@@ -375,15 +401,26 @@ body {
   color: var(--text-faint);
 }
 .hd-actions { display: flex; align-items: center; gap: 6px; flex: none; }
-.hd-gear, .hd-install {
+.hd-icon-btn {
   font-size: 20px;
   color: var(--text-dim);
   cursor: pointer;
   flex: none;
-  padding: 4px;
+  /* docs/COACHING_SPEC.md "Accessibility" -- a real <button>, reset to look
+     like the plain icon it replaces; padding widened slightly past the
+     glyph's own box so the tappable area clears the ~40px practical
+     minimum touch-target size on a 44px-tall header bar. */
+  background: none;
+  border: none;
+  font-family: inherit;
+  line-height: 1;
+  padding: 10px;
+  margin: -6px;
+  border-radius: 8px;
 }
-.hd-gear:hover, .hd-install:hover { color: var(--accent); }
-.hd-gear.active, .hd-install.active { color: var(--accent); }
+.hd-icon-btn:hover { color: var(--accent); }
+.hd-icon-btn.active { color: var(--accent); }
+.hd-icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .subnav { display: flex; justify-content: flex-end; margin-bottom: 18px; }
 
@@ -612,6 +649,11 @@ body {
 .day-date {
   flex: none;
   width: 42px;
+  /* docs/COACHING_SPEC.md "Accessibility" -- now a real <button>; reset its
+     default chrome back to how the plain div used to look. */
+  background: none;
+  border: none;
+  font-family: inherit;
   text-align: center;
   line-height: 1.1;
   cursor: pointer;
@@ -620,6 +662,19 @@ body {
   transition: background 0.12s;
 }
 .day-date:hover { background: rgba(255, 255, 255, 0.05); }
+.day-date:focus-visible, .day-row--secondary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* docs/COACHING_SPEC.md "Accessibility" -- day-row--secondary is a real
+   <button> too (see app.js); reset it back to the same look .day-row (a
+   div, for the primary row) already has. */
+button.day-row--secondary {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
 .day-dow {
   display: block;
   font-size: 10px;
@@ -638,16 +693,26 @@ body {
 
 .day-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .day-plan {
+  /* docs/COACHING_SPEC.md "Accessibility" -- now a real <button>; reset
+     its box/background/font back to how the plain div used to look, then
+     re-apply just the bottom-border hint the div had. */
+  display: block;
+  background: none;
+  border: none;
+  border-bottom: 1px dashed transparent;
+  font-family: inherit;
+  text-align: left;
+  padding: 0;
   font-size: 14.5px;
   font-weight: 500;
   letter-spacing: -0.1px;
   color: var(--text);
   cursor: pointer;
   width: fit-content;
-  border-bottom: 1px dashed transparent;
   transition: border-color 0.12s;
 }
 .day-plan:hover { border-bottom-color: var(--text-faint); }
+.day-plan:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .day-row.is-race .day-plan { color: var(--accent); font-weight: 700; }
 .day-row.is-rest .day-plan { font-style: italic; color: var(--text-dim); }
 .day-hint { font-size: 12px; line-height: 1.4; color: var(--text-faint); }
@@ -662,7 +727,7 @@ body {
   font-size: 14.5px;
   padding: 6px 8px;
 }
-.day-plan-edit:focus { outline: none; }
+.day-plan-edit:focus { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .cross-select {
   align-self: flex-start;
@@ -679,13 +744,22 @@ body {
   cursor: pointer;
 }
 .cross-select.chosen { border-style: solid; border-color: var(--accent); color: var(--accent); }
-.cross-select:focus { outline: none; border-color: var(--accent); }
+.cross-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* ── Multi-activity cross-training builder (Workout Detail) ─────────────── */
 .cross-segment-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .cross-segment-row .cross-select { flex: 1; min-width: 0; }
 .cross-segment-minutes { width: 60px !important; flex: none; margin-top: 0 !important; padding: 8px 10px !important; font-size: 14px !important; }
-.cross-segment-remove { margin-top: 0; white-space: nowrap; }
+.cross-segment-remove {
+  /* Overrides .ob-cancel's block/100%-width default (meant for a
+     stand-alone "Back"-style line) -- this one sits inline in a flex row
+     next to the activity/minutes inputs. */
+  display: inline;
+  width: auto;
+  flex: none;
+  margin-top: 0;
+  white-space: nowrap;
+}
 
 
 /* ── Weekly-row status glyph -- replaces the old plain checkbox ────────── */
@@ -707,6 +781,7 @@ body {
 .day-status--done { background: var(--accent); color: #fff; }
 .day-status--done i { font-size: 12px; }
 .day-status--modified { border: 1.5px solid var(--accent); color: var(--accent); }
+.day-status--skipped { border: 1.5px solid var(--text-faint); color: var(--text-faint); }
 
 .day-target, .day-completed { font-size: 12px; line-height: 1.4; color: var(--text-faint); }
 .day-completed { color: var(--text-dim); font-weight: 600; }
@@ -808,7 +883,47 @@ dl.wd-info dd {
 .rpe-chip:hover { border-color: var(--border-active); color: var(--text); }
 .rpe-chip.selected { border-color: var(--accent); color: var(--accent); background: rgba(217, 119, 66, 0.10); }
 
+/* docs/COACHING_SPEC.md "Today screen actions" -- a compact row, not four
+   stacked full-width buttons; these are secondary to Save/Log. */
+.wd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.wd-actions .ob-btn-secondary {
+  width: auto;
+  margin-top: 0;
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.reschedule-list { display: flex; flex-direction: column; gap: 1px; margin-top: 14px; background: var(--border); border-radius: 8px; overflow: hidden; }
+.reschedule-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: var(--surface);
+  border: none;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font);
+  width: 100%;
+}
+.reschedule-row:hover { background: var(--surface-hover, var(--border)); }
+.reschedule-date { font-size: 12px; font-weight: 700; letter-spacing: 0.03em; color: var(--text-faint); }
+.reschedule-current { font-size: 14.5px; color: var(--text); }
+.reschedule-warn { font-size: 12.5px; color: var(--warn, #d9a441); }
+
 .pain-toggle {
+  /* docs/COACHING_SPEC.md "Accessibility" -- now a real <button> (was a
+     bare <div>/<span> with a click listener); reset chrome back to how it
+     used to look. */
+  display: block;
+  background: none;
+  font-family: inherit;
   margin-top: 16px;
   font-size: 12.5px;
   font-weight: 600;
@@ -816,7 +931,9 @@ dl.wd-info dd {
   color: var(--text-faint);
   cursor: pointer;
   width: fit-content;
+  border: none;
   border-bottom: 1px dashed var(--text-faint);
+  padding: 2px 0;
 }
 .pain-toggle:hover { color: var(--text-dim); }
 .pain-form { margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
