@@ -106,6 +106,29 @@
     // fragility the old scalar-xp merge (still shown further down) had to
     // work around: two devices earning XP offline can no longer silently
     // lose one side's events, since both sides' events survive the union.
+    // docs/COACHING_SPEC.md "Subscription / premium features" -- unlike
+    // every other scalar field above (plain prefer-newer), a subscription
+    // record protects something the runner actually paid for, so it must
+    // never silently downgrade a paying user just because the OTHER device
+    // happens to have a newer lastModified for unrelated reasons. If either
+    // side currently shows an active entitlement, keep it outright; only
+    // fall back to newer-record-wins when neither side (or both) are active.
+    // (Deliberately a self-contained re-check, not a require of
+    // subscription.js's own hasActiveEntitlement -- no UMD module in this
+    // project cross-depends on another, keeping load order/tests simple.)
+    function isSubActive(sub) {
+      if (!sub || sub.tier !== 'premium') return false;
+      if (!sub.expiresAtIso) return true;
+      return sub.expiresAtIso > new Date().toISOString();
+    }
+    function mergeSubscription(localSub, remoteSub) {
+      var l = localSub || { tier: 'free' }, r = remoteSub || { tier: 'free' };
+      var lActive = isSubActive(l), rActive = isSubActive(r);
+      if (lActive && !rActive) return l;
+      if (rActive && !lActive) return r;
+      return (r.lastVerifiedIso || '') > (l.lastVerifiedIso || '') ? r : l;
+    }
+
     var xpEventMap = {};
     (remote.xpEvents || []).concat(local.xpEvents || []).forEach(function (e) {
       if (!e || !e.idempotencyKey) return;
@@ -164,6 +187,7 @@
       // changing their mind about a conflict resolution should behave).
       scheduleChoices: mergeMap(local.scheduleChoices, remote.scheduleChoices),
       weightEntries: Object.keys(weightEntriesMap).map(function (k) { return weightEntriesMap[k]; }),
+      subscription: mergeSubscription(local.subscription, remote.subscription),
       lastModified: Math.max(local.lastModified || 0, remote.lastModified || 0)
     };
   }
