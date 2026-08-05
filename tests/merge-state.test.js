@@ -71,6 +71,37 @@ test('badges union by value with no duplicates', function () {
   assert.deepEqual(merged.badges.slice().sort(), ['a', 'b', 'c']);
 });
 
+// docs/COACHING_ENGINE_SPEC.md -- coachingHistory unions like sideQuestLog
+// (append-only, a delivered cue stays delivered on both devices), and
+// coachingPreferences is a simple settings object that follows the same
+// wholesale-prefer-newer pattern as workoutAudio/notifications.
+test('coachingHistory unions by natural key (workoutId|cueId|deliveredAt) without duplication, sorted and capped', function () {
+  const local = baseState({ lastModified: 2000, coachingHistory: [{ cueId: 'safety_general', category: 'safety', deliveredAt: 100, workoutId: 'w1' }] });
+  const remote = baseState({ lastModified: 1000, coachingHistory: [{ cueId: 'intro_easy', category: 'introduction', deliveredAt: 50, workoutId: 'w1' }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.coachingHistory.length, 2, 'both devices\' delivered cues must survive the union');
+  assert.deepEqual(merged.coachingHistory.map((h) => h.cueId), ['intro_easy', 'safety_general'], 'sorted chronologically by deliveredAt');
+});
+
+test('coachingHistory is capped to the most recent 200 entries after merging', function () {
+  const many = [];
+  for (let i = 0; i < 150; i++) many.push({ cueId: 'x' + i, category: 'encouragement', deliveredAt: i, workoutId: 'w1' });
+  const local = baseState({ lastModified: 2000, coachingHistory: many });
+  const moreMany = [];
+  for (let i = 150; i < 300; i++) moreMany.push({ cueId: 'x' + i, category: 'encouragement', deliveredAt: i, workoutId: 'w1' });
+  const remote = baseState({ lastModified: 1000, coachingHistory: moreMany });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.coachingHistory.length, 200, 'a merge combining 300 entries across two devices must still cap at 200');
+  assert.equal(merged.coachingHistory[merged.coachingHistory.length - 1].cueId, 'x299', 'the cap keeps the most RECENT entries, not the first 200');
+});
+
+test('coachingPreferences prefers the newer device wholesale, like workoutAudio/notifications', function () {
+  const local = baseState({ lastModified: 2000, coachingPreferences: { frequency: 'minimal', technique: false, encouragement: true, paceFeedback: true, heartRateFeedback: true } });
+  const remote = baseState({ lastModified: 1000, coachingPreferences: { frequency: 'detailed', technique: true, encouragement: true, paceFeedback: true, heartRateFeedback: true } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.coachingPreferences.frequency, 'minimal');
+});
+
 test('logs/overrides/crossType merge per-key, newer device wins only for keys both sides touched', function () {
   const local = baseState({ lastModified: 2000, logs: { '1-1': { distance: 5 } }, crossType: { '1-2': 'Bike' } });
   const remote = baseState({ lastModified: 1000, logs: { '1-1': { distance: 4 }, '1-3': { distance: 3 } }, crossType: { '1-2': 'Row' } });
@@ -119,6 +150,24 @@ test('scalar fields (raceGoal/profile/planMeta) prefer the newer device wholesal
   assert.equal(merged.raceGoal.event, '10k');
   assert.equal(merged.profile.p, 1);
   assert.equal(merged.planMeta.m, 1);
+});
+
+// docs/WORKOUT_RUNNER_SPEC.md -- an in-progress workout session is
+// single-device scratch state. Unlike every other field, it must ALWAYS
+// come from local, never remote, regardless of which side is newer --
+// otherwise an active workout could be silently dropped (if local is
+// older) or resurrect a stale/foreign in-progress session (if remote is
+// newer) purely from a routine cloud sync.
+test('activeWorkoutSession always comes from local, never remote, regardless of which device is newer', function () {
+  const localWithSession = baseState({ lastModified: 1000, activeWorkoutSession: { key: '1-2', segmentIndex: 3 } });
+  const remoteNewerNoSession = baseState({ lastModified: 5000, activeWorkoutSession: null });
+  const merged1 = mergeState.mergeRunnerState(localWithSession, remoteNewerNoSession);
+  assert.deepEqual(merged1.activeWorkoutSession, { key: '1-2', segmentIndex: 3 }, 'local session must survive even when remote is newer and has none');
+
+  const localNoSession = baseState({ lastModified: 5000, activeWorkoutSession: null });
+  const remoteWithSession = baseState({ lastModified: 1000, activeWorkoutSession: { key: '2-4', segmentIndex: 1 } });
+  const merged2 = mergeState.mergeRunnerState(localNoSession, remoteWithSession);
+  assert.equal(merged2.activeWorkoutSession, null, "remote's session must never resurrect on local, even as the older side");
 });
 
 test('flags (beta feature toggles) prefer the newer device wholesale, defaulting safely when absent', function () {

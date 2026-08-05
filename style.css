@@ -1096,3 +1096,57 @@ dl.wd-info dd {
   .hd-title { font-size: 26px; }
   .wd-review { flex-direction: column; gap: 14px; }
 }
+
+/* ── Workout Runner (docs/WORKOUT_RUNNER_SPEC.md) ─────────────────────── */
+/* Pre-run summary on the workout detail screen -- Start Workout is the
+   primary action here, so it gets the same prominent .ob-btn treatment as
+   every other primary action in the app, not a secondary/muted style. */
+.wd-runner-start { margin: 18px 0; }
+.wd-runner-structure { font-size: 13.5px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.5; }
+.wd-coaching-focus { font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+.wd-start-btn { width: 100%; font-size: 17px; padding: 16px; }
+
+/* Active-workout screen -- large text and touch targets throughout (usable
+   while moving, one-handed, without needing to read small print), high
+   contrast against the existing dark surface (no new colors invented --
+   reuses --accent/--text/--text-dim/--border already defined at the top of
+   this file). */
+.runner-screen { text-align: center; padding-top: 8px; }
+.runner-title { font-size: 15px; color: var(--text-dim); margin-bottom: 6px; }
+.runner-phase {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 10px 0 4px;
+  min-height: 1.3em;
+}
+.runner-countdown {
+  font-size: 64px;
+  font-weight: 800;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  margin: 8px 0;
+  font-variant-numeric: tabular-nums;
+}
+.runner-next { font-size: 14px; color: var(--text-faint); margin-bottom: 6px; }
+.runner-progress { font-size: 12px; color: var(--text-faint); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+.runner-manual-note { max-width: 320px; margin: 8px auto 4px; }
+.runner-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 20px;
+}
+/* Every control is a full-width, tall tap target -- deliberately not a
+   compact row of small buttons, since these need to be usable at a glance
+   or by touch alone (pocketed phone, mid-stride). */
+.runner-controls .ob-btn, .runner-skip-btn, .runner-end-btn {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+.runner-btn-primary { font-weight: 700; }
+/* End Workout is destructive (confirmed via window.confirm, matching this
+   app's existing danger-action pattern) -- visually separated below the
+   normal controls, same .danger-btn treatment as resetPlanBtn/deleteAllBtn. */
+.runner-end-btn { margin-top: 18px; }

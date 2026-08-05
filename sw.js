@@ -1,4 +1,4 @@
-const APP_VERSION = "2026.08.05.5";
+const APP_VERSION = "2026.08.06.2";
 const CACHE_NAME = `runner-${APP_VERSION}`;
 const APP_FILES = [
   "/",
@@ -10,6 +10,10 @@ const APP_FILES = [
   `/merge-state.js?v=${APP_VERSION}`,
   `/coaching-rules.js?v=${APP_VERSION}`,
   `/progress-stats.js?v=${APP_VERSION}`,
+  `/workout-runner.js?v=${APP_VERSION}`,
+  `/audio-cues.js?v=${APP_VERSION}`,
+  `/coaching-context.js?v=${APP_VERSION}`,
+  `/coaching-cues.js?v=${APP_VERSION}`,
   `/app.js?v=${APP_VERSION}`,
   `/app-version.json?v=${APP_VERSION}`,
   "/sw.js",

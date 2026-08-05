@@ -77,6 +77,17 @@
       sideQuestMap[r.date + '|' + r.key + '|' + r.id] = r;
     });
 
+    // docs/COACHING_ENGINE_SPEC.md -- coachingHistory is append-only (a cue
+    // once delivered stays delivered), same union-by-natural-key treatment
+    // as sideQuestLog above. Capped to the most recent 200 after merging,
+    // matching app.js's own recordCoachingCue cap, so merging two devices'
+    // histories can't produce an unbounded array.
+    var coachingHistoryMap = {};
+    (remote.coachingHistory || []).concat(local.coachingHistory || []).forEach(function (r) {
+      if (!r) return;
+      coachingHistoryMap[r.workoutId + '|' + r.cueId + '|' + r.deliveredAt] = r;
+    });
+
     // Unlike unavailable/sideQuestLog (append-only), a week's feeling can be
     // overwritten via "Change" -- so this needs real last-write-wins per
     // week key, not just "whichever side happened to list it," hence
@@ -168,6 +179,26 @@
     return {
       userName: prefer.userName,
       units: prefer.units,
+      // docs/WORKOUT_RUNNER_SPEC.md -- an in-progress guided workout is
+      // inherently single-device scratch state, never something to
+      // reconcile across two devices. Always LOCAL's own value, regardless
+      // of which side is newer -- unlike every other field above, remote's
+      // value is never even considered. This also protects an active
+      // session from being silently dropped by a same-device cloud sync
+      // pull (CloudSync.pull() replaces the whole `state` object with this
+      // merge's return value); using local.X here instead of only listing
+      // fields explicitly known to app.js's callers is exactly what keeps
+      // that safe.
+      activeWorkoutSession: local.activeWorkoutSession !== undefined ? local.activeWorkoutSession : null,
+      workoutAudio: prefer.workoutAudio || { enabled: true, volume: 1 },
+      // Preferences: a simple settings object, same wholesale-prefer-newer
+      // pattern as workoutAudio/notifications above (no per-field merge
+      // makes sense for "what kind of coaching do you want").
+      coachingPreferences: prefer.coachingPreferences || null,
+      // History: append-only union (see coachingHistoryMap above), capped.
+      coachingHistory: Object.keys(coachingHistoryMap).map(function (k) { return coachingHistoryMap[k]; })
+        .sort(function (a, b) { return (a.deliveredAt || 0) - (b.deliveredAt || 0); })
+        .slice(-200),
       notifications: prefer.notifications || { enabled: false },
       flags: prefer.flags || { enableLongerDistances: false },
       weightTrackingEnabled: prefer.weightTrackingEnabled || false,

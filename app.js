@@ -7,6 +7,10 @@
   var MergeStateDomain = window.RACRMergeState || {};
   var CoachingRulesDomain = window.RACRCoachingRules || {};
   var ProgressStatsDomain = window.RACRProgressStats || {};
+  var WorkoutRunnerDomain = window.RACRWorkoutRunner || {};
+  var AudioCuesDomain = window.RACRAudioCues || {};
+  var CoachingContextDomain = window.RACRCoachingContext || {};
+  var CoachingCuesDomain = window.RACRCoachingCues || {};
   // docs/COACHING_SPEC.md "Achievements" -- XP/generic player levels were
   // removed from V1 (RACRXp / xp-system.js no longer exist); this app
   // never rewards points, only real, verifiable running progress.
@@ -885,6 +889,31 @@
     // same identifier as state.logs/overrides). Applied as the final step
     // of CoachingRulesDomain.generatePlan (see applyDayAdjustments).
     if (!s.dayAdjustments) s.dayAdjustments = {};
+    // docs/WORKOUT_RUNNER_SPEC.md -- device-local scratch state for an
+    // in-progress guided workout (workout-runner.js's state machine
+    // snapshot). Deliberately excluded from cross-device merge
+    // (merge-state.js always keeps the LOCAL device's value) -- an active
+    // session is inherently single-device; on a different device this is
+    // correctly just null. Unlike almost everything else in this app, this
+    // is NOT audio-cue-dependent to interpret: workoutAudio only controls
+    // whether cues play, never workout timing/completion (audio failure
+    // must never affect the workout record).
+    if (s.activeWorkoutSession === undefined) s.activeWorkoutSession = null; // { key, normalized, snapshot }
+    if (!s.workoutAudio) s.workoutAudio = { enabled: true, volume: 1 }; // on by default -- this is the feature's whole point, unlike opt-in notifications below
+    // docs/COACHING_ENGINE_SPEC.md -- user-facing coaching preferences
+    // (frequency mode + category toggles), separate from workoutAudio
+    // above (that's the audio channel itself; this is what the coach is
+    // allowed to say). Safe default matches coaching-cues.js's own
+    // defaultCoachingPreferences() -- kept in sync intentionally, not
+    // re-derived, so there's exactly one place that defines "Coach" mode.
+    if (!s.coachingPreferences) s.coachingPreferences = (CoachingCuesDomain.defaultCoachingPreferences && CoachingCuesDomain.defaultCoachingPreferences()) || { frequency: 'coach', technique: true, encouragement: true, paceFeedback: true, heartRateFeedback: true };
+    // Bounded, device-synced-like-everything-else cue history (NOT a new
+    // cloud-storage system -- it's just another field on `state`, saved
+    // and synced exactly like logs/overrides already are, per the task's
+    // "do not introduce cloud storage merely for cue history"). Capped to
+    // the most recent 200 entries on every write (see recordCoachingCue)
+    // so it can never grow unbounded across a runner's lifetime of workouts.
+    if (!s.coachingHistory) s.coachingHistory = []; // [{ cueId, category, topic, deliveredAt, workoutId }]
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
@@ -3991,6 +4020,524 @@
     document.getElementById('glossaryBackBtn').addEventListener('click', function () { goBack(renderMain); });
   }
 
+  // ── Workout Runner (docs/WORKOUT_RUNNER_SPEC.md) ────────────────────────
+  // UI glue only -- all timing/transition/cue-dedup correctness lives in
+  // workout-runner.js's pure, independently-tested state machine. This
+  // section's job is: build the DOM, forward user taps into the machine,
+  // and reflect whatever the machine says back out (never the reverse).
+  //
+  // _activeMachine is the one live state-machine instance for whichever
+  // workout is currently running, if any -- module-level like `state`
+  // itself, so navigating away and back (including via the browser back
+  // button, see _recordScreen/goBack) reconnects to the SAME running
+  // machine instead of losing or duplicating it. _activeTicker is a
+  // setInterval used only to refresh the on-screen countdown/drain cues
+  // regularly -- it is NOT the source of timing truth (that's the
+  // timestamp-based reconcile() call it makes every tick); if it's ever
+  // delayed, throttled, or misses ticks entirely (backgrounded tab), the
+  // very next reconcile() call still produces the correct result.
+  var _activeMachine = null;
+  var _activeWorkoutKey = null;
+  var _activeTicker = null;
+  var _cueService = null;
+
+  function getCueService() {
+    if (!_cueService && AudioCuesDomain.createCueService) {
+      _cueService = AudioCuesDomain.createCueService({ enabled: state.workoutAudio.enabled, volume: state.workoutAudio.volume });
+    }
+    return _cueService;
+  }
+
+  // Cue text -> haptic pattern, so every cue gets its own short vibration
+  // alongside speech (or as the sole channel when audio is off/unavailable).
+  function hapticFor(cueType) {
+    return (AudioCuesDomain.HAPTIC_PATTERNS && AudioCuesDomain.HAPTIC_PATTERNS[cueType]) || null;
+  }
+
+  function fmtCountdown(ms) {
+    if (ms == null) return '';
+    var totalSec = Math.max(0, Math.round(ms / 1000));
+    var m = Math.floor(totalSec / 60), sec = totalSec % 60;
+    return m + ':' + String(sec).padStart(2, '0');
+  }
+
+  // Compact, honest pre-start structure summary -- never claims a total
+  // time for a guided_manual/continuous_open workout (part or all of it is
+  // unmeasured by design), matching normalizeWorkout's own manualDistanceNote.
+  function buildWorkoutStructureSummary(normalized) {
+    if (normalized.mode === 'continuous_open') {
+      return 'Open-ended — go at your own pace' + (normalized.distanceMiles ? ', roughly ' + toUnit(normalized.distanceMiles) + ' ' + unitLabel() : '') + '. You end it when you\'re done.';
+    }
+    var parts = [];
+    normalized.segments.forEach(function (seg) {
+      if (seg.kind === 'warmup') parts.push('Warm-up ' + Math.round(seg.durationSec / 60) + ' min');
+      else if (seg.kind === 'cooldown') parts.push('Cool-down ' + Math.round(seg.durationSec / 60) + ' min');
+      else if (seg.kind === 'manual_rep' && seg.intervalNumber === 1) parts.push(seg.totalIntervals + ' manual repetitions');
+      else if ((seg.kind === 'work' || seg.kind === 'continuous') && seg.intervalNumber === 1 && seg.totalIntervals > 1) {
+        var recovery = normalized.segments.filter(function (s) { return s.kind === 'recovery'; })[0];
+        parts.push(seg.totalIntervals + ' x (' + fmtMinSecShort(seg.durationSec) + ' work' + (recovery ? ' / ' + fmtMinSecShort(recovery.durationSec) + ' recovery' : '') + ')');
+      } else if ((seg.kind === 'work' || seg.kind === 'continuous') && seg.totalIntervals === 1) {
+        parts.push(fmtMinSecShort(seg.durationSec) + ' continuous');
+      }
+    });
+    var summary = parts.join(' → ');
+    if (normalized.totalPrescribedSec) summary += ' · ~' + Math.round(normalized.totalPrescribedSec / 60) + ' min total';
+    return summary;
+  }
+  function fmtMinSecShort(sec) {
+    if (sec % 60 === 0) return (sec / 60) + ' min';
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+
+  var CUE_LABELS = {
+    warmup: 'Begin warm-up', cooldown: 'Begin cooldown',
+    manual_rep: null, // built dynamically per-rep in renderActiveWorkout
+    continuous: 'Start running'
+  };
+
+  function segmentDisplayLabel(seg, mode) {
+    if (!seg) return '';
+    if (seg.kind === 'warmup') return 'Warm-up';
+    if (seg.kind === 'cooldown') return 'Cool-down';
+    if (seg.kind === 'recovery') return (mode === 'guided_manual' ? 'Recovery' : 'Walk');
+    if (seg.kind === 'manual_rep') return 'Repetition ' + seg.intervalNumber + ' of ' + seg.totalIntervals + ' — mark done when finished';
+    if (seg.kind === 'work') return seg.totalIntervals > 1 ? 'Interval ' + seg.intervalNumber + ' of ' + seg.totalIntervals : 'Run';
+    if (seg.kind === 'continuous') return seg.totalIntervals && seg.totalIntervals > 1 ? 'Interval ' + seg.intervalNumber + ' of ' + seg.totalIntervals : 'Run';
+    return '';
+  }
+
+  // Persists the active session frequently enough that a killed app/tab
+  // loses at most a few seconds of progress, not the whole workout (task
+  // requirement) -- called on every phase transition and on a ~15s timer
+  // while ticking, not on every single UI refresh.
+  function persistActiveSession(normalized) {
+    if (!_activeMachine || !_activeWorkoutKey) return;
+    state.activeWorkoutSession = { key: _activeWorkoutKey, title: normalized.title, snapshot: _activeMachine.snapshot() };
+    saveState(state);
+  }
+
+  function clearActiveSession() {
+    state.activeWorkoutSession = null;
+    saveState(state);
+  }
+
+  function stopTicking() {
+    if (_activeTicker) { clearInterval(_activeTicker); _activeTicker = null; }
+    if (_cueService) _cueService.stopAll();
+    document.removeEventListener('visibilitychange', _onVisibilityReconcile);
+  }
+
+  function _onVisibilityReconcile() {
+    if (document.visibilityState === 'visible' && _activeMachine) _activeMachine.reconcile();
+  }
+
+  // ── Coaching engine wiring (docs/COACHING_ENGINE_SPEC.md) ───────────────
+  // app.js's ONLY job here is assembling verified inputs and forwarding the
+  // engine's single decision to audio-cues.js -- all selection logic lives
+  // in coaching-cues.js, all context normalization in coaching-context.js.
+  // sensorSnapshot is always {} (no fields at all): this app has no GPS, no
+  // heart-rate capability anywhere (see docs/COACHING_ENGINE_SPEC.md's
+  // audit) -- coaching-context.js's own defaults already resolve an empty
+  // snapshot to every sensor field being null/'unavailable', so passing {}
+  // here is the honest, correct input, not a placeholder to fill in later.
+  function currentCoachingPrescription(dayData, workoutType, label) {
+    var rpe = null;
+    if (RPE_TARGET[dayData.type]) rpe = Math.round((RPE_TARGET[dayData.type][0] + RPE_TARGET[dayData.type][1]) / 2);
+    var paceMin = null, paceMax = null;
+    if (workoutType === 'easy' || workoutType === 'long') {
+      var easyRange = computeEasyPaceRange(state.profile);
+      if (easyRange) { paceMin = easyRange.loSecPerMi; paceMax = easyRange.hiSecPerMi; }
+    } else if (workoutType === 'tempo' || workoutType === 'intervals_time' || workoutType === 'intervals_manual') {
+      var qualityRange = computeQualityPaceRange(state.profile, label);
+      if (qualityRange) { paceMin = qualityRange.loSecPerMi; paceMax = qualityRange.hiSecPerMi; }
+    }
+    return { rpe: rpe, paceMinSecPerMi: paceMin, paceMaxSecPerMi: paceMax, hrZone: null }; // hrZone always null -- no HR prescription model exists anywhere in this app
+  }
+
+  function recordCoachingCue(selected) {
+    state.coachingHistory.push({ cueId: selected.cueId, category: selected.category, topic: selected.topic, deliveredAt: Date.now(), workoutId: _activeWorkoutKey });
+    // Capped so a runner's cue history can never grow unbounded across a
+    // lifetime of workouts (task: "limit the history to a reasonable size").
+    if (state.coachingHistory.length > 200) state.coachingHistory = state.coachingHistory.slice(-200);
+    saveState(state);
+  }
+
+  // Returns true iff a cue was actually selected and spoken -- callers use
+  // this to know whether it's worth trying again for a second, different
+  // essential cue at the very start of a workout (see
+  // fireStartupCoachingSequence below).
+  function processCoachingTick(dayData, normalized, workoutType, terrainHint, triggerEvent, extra) {
+    if (!_activeMachine || !CoachingContextDomain.buildCoachingContext || !CoachingCuesDomain.selectCoachingCue) return false;
+    var seg = _activeMachine.segAt(_activeMachine.state.segmentIndex);
+    var now = Date.now();
+    var refNow = _activeMachine.state.phase === 'paused' ? _activeMachine.state.pauseStartedAt : now;
+    var elapsedSegMs = _activeMachine.state.segmentStartedAt != null ? Math.max(0, refNow - _activeMachine.state.segmentStartedAt) : null;
+    var remainingMs = _activeMachine.remainingSegmentMs();
+    var label = state.overrides[_activeWorkoutKey] || dayData.label;
+
+    var context = CoachingContextDomain.buildCoachingContext(Object.assign({
+      currentTime: now,
+      workoutType: workoutType,
+      phase: _activeMachine.state.phase,
+      segment: seg,
+      segmentIndex: _activeMachine.state.segmentIndex,
+      segmentCount: normalized.segments.length,
+      segmentElapsedSec: elapsedSegMs != null ? elapsedSegMs / 1000 : null,
+      segmentRemainingSec: remainingMs != null ? remainingMs / 1000 : null,
+      workoutElapsedSec: _activeMachine.elapsedActiveMs() / 1000,
+      workoutRemainingSec: normalized.totalPrescribedSec != null ? Math.max(0, normalized.totalPrescribedSec - _activeMachine.elapsedActiveMs() / 1000) : null,
+      prescription: currentCoachingPrescription(dayData, workoutType, label),
+      runnerExperience: state.planMeta.level,
+      units: state.units,
+      sensorSnapshot: {}, // always empty -- see header comment
+      cueHistory: state.coachingHistory,
+      coachingPreferences: state.coachingPreferences,
+      terrainHint: terrainHint,
+      triggerEvent: triggerEvent
+    }, extra || {}));
+
+    var selected = CoachingCuesDomain.selectCoachingCue(context);
+    if (!selected) return false;
+    var svc = getCueService();
+    if (svc) svc.playCue(selected.text, hapticFor(selected.category));
+    recordCoachingCue(selected);
+    return true;
+  }
+
+  // Safety and the workout introduction are the only two cues that can
+  // legitimately queue back-to-back at the very start of a workout (each
+  // fires at most once ever/once per workout, and both are gated to the
+  // synthetic 'workout_start' moment or unconstrained) -- called once,
+  // right after machine.start(), before the ordinary per-tick flow begins.
+  // Capped at 2 attempts: exactly enough for safety-then-intro, never an
+  // open-ended loop.
+  function fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint) {
+    for (var i = 0; i < 2; i++) {
+      if (!processCoachingTick(dayData, normalized, workoutType, terrainHint, 'workout_start')) break;
+    }
+  }
+
+  // Drains workout-runner.js's own transition/warning/halfway/final/pause/
+  // resume/complete events and asks the coaching engine to decide what (if
+  // anything) to actually say for the highest-priority one this tick, then
+  // -- if nothing essential happened -- gives the engine one voluntary
+  // opportunity to offer optional coaching. At most one processCoachingTick
+  // call (and therefore at most one spoken cue) per tick, matching "never
+  // speak two full cues simultaneously."
+  var TRIGGER_EVENT_PRIORITY = ['segment_start', 'warning_10s', 'halfway', 'final_interval', 'paused', 'resumed', 'complete'];
+  function playDueCues(dayData, normalized, workoutType, terrainHint) {
+    if (!_activeMachine) return;
+    var drained = _activeMachine.drainCues();
+    var chosen = null;
+    TRIGGER_EVENT_PRIORITY.forEach(function (t) { if (!chosen && drained.some(function (c) { return c.type === t; })) chosen = t; });
+    var extra = chosen === 'complete' ? { completedIntervalCount: countWorkIntervals(normalized) } : null;
+    processCoachingTick(dayData, normalized, workoutType, terrainHint, chosen, extra);
+  }
+
+  // Only meaningful for interval-style workouts -- the completion cue's
+  // "you completed all N intervals" line. null (omitted from speech) for
+  // continuous/single-block workouts, never a fabricated count.
+  function countWorkIntervals(normalized) {
+    var workSegs = normalized.segments.filter(function (s) { return (s.kind === 'work' || s.kind === 'manual_rep') && s.totalIntervals > 1; });
+    return workSegs.length ? workSegs[0].totalIntervals : null;
+  }
+
+  function renderActiveWorkout(weekNum, dayIdx) {
+    _recordScreen(function () { renderActiveWorkout(weekNum, dayIdx); });
+    var key = weekNum + '-' + dayIdx;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var dayData = result.weeks[weekNum - 1].days[dayIdx];
+    var label = state.overrides[key] || dayData.label;
+    var normalized = WorkoutRunnerDomain.normalizeWorkout ? WorkoutRunnerDomain.normalizeWorkout(dayData, { label: label }) : null;
+    if (!normalized) { renderWorkoutDetail(weekNum, dayIdx); return; } // not an executable workout type -- safe fallback, never a blank/broken screen
+    var workoutType = CoachingCuesDomain.classifyWorkoutForCoaching ? CoachingCuesDomain.classifyWorkoutForCoaching(dayData, normalized) : null;
+    var terrainHint = CoachingCuesDomain.detectTerrainHint ? CoachingCuesDomain.detectTerrainHint(label) : null;
+
+    // Reconnect to an already-running machine for this exact workout
+    // (navigated away and back); otherwise this is a fresh start.
+    var isFreshStart = !(_activeMachine && _activeWorkoutKey === key);
+    if (isFreshStart) {
+      _activeMachine = WorkoutRunnerDomain.createRunnerStateMachine(normalized, { workoutId: key });
+      _activeWorkoutKey = key;
+      _activeMachine.start();
+      persistActiveSession(normalized);
+      fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint);
+    }
+    var machine = _activeMachine;
+
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+
+    function currentSeg() { return machine.segAt(machine.state.segmentIndex); }
+    function nextSeg() { return machine.segAt(machine.state.segmentIndex + 1); }
+
+    var wrap = el(
+      '<div class="ob runner-screen" role="region" aria-label="Active workout">' +
+        '<div class="runner-title">' + escapeHtml(normalized.title) + '</div>' +
+        '<div class="runner-phase" id="runnerPhaseLabel" aria-live="polite"></div>' +
+        '<div class="runner-countdown mono" id="runnerCountdown" aria-hidden="true"></div>' +
+        '<div class="runner-next" id="runnerNext"></div>' +
+        '<div class="runner-progress" id="runnerProgress" aria-hidden="true"></div>' +
+        (normalized.manualDistanceNote ? '<p class="ob-hint runner-manual-note">' + escapeHtml(normalized.manualDistanceNote) + '</p>' : '') +
+        '<div class="runner-controls">' +
+          '<button type="button" class="ob-btn runner-btn-primary" id="runnerPrimaryBtn"></button>' +
+          '<button type="button" class="ob-btn ob-btn-secondary" id="runnerPauseBtn">Pause</button>' +
+          '<button type="button" class="ob-btn ob-btn-secondary" id="runnerAudioBtn"></button>' +
+        '</div>' +
+        '<button type="button" class="ob-btn ob-btn-secondary danger-btn runner-end-btn" id="runnerEndBtn">End workout</button>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+
+    var phaseEl = document.getElementById('runnerPhaseLabel');
+    var countdownEl = document.getElementById('runnerCountdown');
+    var nextEl = document.getElementById('runnerNext');
+    var progressEl = document.getElementById('runnerProgress');
+    var primaryBtn = document.getElementById('runnerPrimaryBtn');
+    var pauseBtn = document.getElementById('runnerPauseBtn');
+    var audioBtn = document.getElementById('runnerAudioBtn');
+
+    function refreshAudioBtn() {
+      var svc = getCueService();
+      var on = svc ? svc.enabled : false;
+      audioBtn.textContent = on ? 'Audio: On' : 'Audio: Off';
+      audioBtn.setAttribute('aria-pressed', String(on));
+    }
+
+    function refreshDisplay() {
+      var seg = currentSeg();
+      var phase = machine.state.phase;
+      if (phase === 'completed' || phase === 'ended_early') { onWorkoutEnded(phase); return; }
+
+      var phaseText = phase === 'paused' ? 'Paused — ' + segmentDisplayLabel(machine.segAt(machine.state.segmentIndex), normalized.mode) : segmentDisplayLabel(seg, normalized.mode);
+      phaseEl.textContent = phaseText;
+
+      var remaining = machine.remainingSegmentMs();
+      countdownEl.textContent = remaining != null ? fmtCountdown(remaining) : '';
+      countdownEl.style.display = remaining != null ? '' : 'none';
+
+      var nxt = nextSeg();
+      nextEl.textContent = nxt ? 'Next: ' + segmentDisplayLabel(nxt, normalized.mode) : (normalized.mode !== 'continuous_open' && seg && seg.kind !== 'continuous' ? 'Next: finish' : '');
+
+      var total = normalized.segments.length;
+      progressEl.textContent = 'Step ' + (machine.state.segmentIndex + 1) + ' of ' + total;
+
+      if (phase === 'paused') {
+        primaryBtn.style.display = 'none';
+        pauseBtn.textContent = 'Resume';
+      } else if (phase === 'manual_rep') {
+        primaryBtn.style.display = '';
+        primaryBtn.textContent = 'Mark repetition done';
+        pauseBtn.textContent = 'Pause';
+      } else if (phase === 'continuous') {
+        primaryBtn.style.display = '';
+        primaryBtn.textContent = 'Finish this segment';
+        pauseBtn.textContent = 'Pause';
+      } else {
+        primaryBtn.style.display = 'none';
+        pauseBtn.textContent = 'Pause';
+      }
+      pauseBtn.setAttribute('aria-pressed', String(phase === 'paused'));
+      refreshAudioBtn();
+    }
+
+    function tick() {
+      machine.reconcile();
+      playDueCues(dayData, normalized, workoutType, terrainHint);
+      refreshDisplay();
+    }
+
+    // Not guardOnce -- this button is reused across every repetition/
+    // segment of the whole workout, not a one-shot action. Double-tap
+    // protection instead comes from the state machine itself:
+    // markRepComplete/markContinuousDone are no-ops outside their matching
+    // phase (same guard pattern as start()/pause()/etc), so a rapid double
+    // click's second event lands after the phase has already changed and
+    // is safely ignored -- see workout-runner.js.
+    primaryBtn.addEventListener('click', function () {
+      if (machine.state.phase === 'manual_rep') machine.markRepComplete();
+      else if (machine.state.phase === 'continuous') machine.markContinuousDone();
+      persistActiveSession(normalized);
+      tick();
+    });
+
+    pauseBtn.addEventListener('click', function () {
+      if (machine.state.phase === 'paused') machine.resume(); else machine.pause();
+      persistActiveSession(normalized);
+      tick();
+    });
+
+    audioBtn.addEventListener('click', function () {
+      var svc = getCueService();
+      if (!svc) return;
+      svc.setEnabled(!svc.enabled);
+      state.workoutAudio.enabled = svc.enabled;
+      saveState(state);
+      refreshAudioBtn();
+    });
+
+    var skipBtn = el('<button type="button" class="ob-btn ob-btn-secondary runner-skip-btn" id="runnerSkipBtn">Skip this segment</button>');
+    wrap.querySelector('.runner-controls').appendChild(skipBtn);
+    skipBtn.addEventListener('click', function () {
+      machine.skip();
+      persistActiveSession(normalized);
+      tick();
+    });
+
+    // Ending is a real, destructive action (discards remaining structure) --
+    // requires confirmation, same pattern as this app's other irreversible
+    // actions (resetPlanBtn/deleteAllBtn use window.confirm identically).
+    document.getElementById('runnerEndBtn').addEventListener('click', function () {
+      if (machine.state.phase !== 'completed' && !window.confirm('End this workout now? You\'ll be asked whether to save what you completed.')) return;
+      machine.endEarly();
+      persistActiveSession(normalized);
+      tick();
+    });
+
+    stopTicking(); // clear any previous screen's ticker before starting a new one
+    _activeTicker = setInterval(tick, 500);
+    document.addEventListener('visibilitychange', _onVisibilityReconcile);
+    tick(); // immediate reconcile + render, don't wait for the first interval
+  }
+
+  // Called once the machine reaches a terminal phase -- writes the result
+  // into the SAME logging schema manual logging already uses (setLog/
+  // setSessionLog, completionType enum), so nothing downstream (progress
+  // stats, Path, badges) needs to know a guided run happened vs. a manually
+  // logged one. Runs exactly once per workout (machine.complete()/endEarly()
+  // are themselves idempotent, and this function is only ever called from
+  // refreshDisplay()'s phase check, which stops ticking immediately after).
+  function onWorkoutEnded(phase) {
+    stopTicking();
+    var machine = _activeMachine;
+    var key = _activeWorkoutKey;
+    var activeMs = machine.elapsedActiveMs();
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+
+    if (phase === 'completed') {
+      finalizeWorkoutLog(key, activeMs, 'planned');
+      clearActiveSession();
+      _activeMachine = null; _activeWorkoutKey = null;
+      var doneWrap = el(
+        '<div class="ob runner-screen">' +
+          '<div class="ob-title">Workout complete</div>' +
+          '<p class="ob-hint">Nice work. Logged automatically -- you can adjust the details on the workout screen if anything needs correcting.</p>' +
+          '<button type="button" class="ob-btn" id="runnerDoneBtn">Done</button>' +
+        '</div>'
+      );
+      app.appendChild(doneWrap);
+      document.getElementById('runnerDoneBtn').addEventListener('click', function () { renderMain(); });
+      return;
+    }
+
+    // Ended early -- ask save-as-partial vs. discard, per the approved
+    // requirement. Never marks full completion, never awards full credit
+    // (finalizeWorkoutLog's completionType is 'stopped_early', which the
+    // existing badge/progress logic already treats differently from
+    // 'planned' -- see COMPLETION_TYPES). No shaming language.
+    var mins = Math.floor(activeMs / 60000), secs = Math.floor((activeMs % 60000) / 1000);
+    var endWrap = el(
+      '<div class="ob runner-screen">' +
+        '<div class="ob-title">Workout ended early</div>' +
+        '<p class="ob-hint">You were active for about ' + mins + ':' + String(secs).padStart(2, '0') + '. Save what you completed, or discard it?</p>' +
+        '<button type="button" class="ob-btn" id="runnerSavePartialBtn">Save as partial</button>' +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="runnerDiscardBtn">Discard</button>' +
+      '</div>'
+    );
+    app.appendChild(endWrap);
+    guardOnce(document.getElementById('runnerSavePartialBtn'), function () {
+      finalizeWorkoutLog(key, activeMs, 'stopped_early');
+      clearActiveSession();
+      _activeMachine = null; _activeWorkoutKey = null;
+      renderMain();
+    });
+    guardOnce(document.getElementById('runnerDiscardBtn'), function () {
+      clearActiveSession();
+      _activeMachine = null; _activeWorkoutKey = null;
+      renderMain();
+    });
+  }
+
+  // Writes elapsed active time into state.logs[key] via the existing
+  // setLog path -- reuses the exact same schema/tombstone/save behavior
+  // manual logging already has, nothing new invented. `time` is formatted
+  // to match parseDurationToSeconds's own mm:ss/h:mm:ss expectation.
+  function finalizeWorkoutLog(key, activeMs, completionType) {
+    var totalSec = Math.round(activeMs / 1000);
+    var h = Math.floor(totalSec / 3600), m = Math.floor((totalSec % 3600) / 60), s = totalSec % 60;
+    var time = (h > 0 ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0');
+    setLog(key, { time: time, completionType: completionType });
+    logTelemetryEvent('workout_runner_' + completionType, key);
+  }
+
+  // On app load, offers to resume/save-partial/discard a session left
+  // active from a previous visit (task requirement: never silently
+  // fabricate completion, never silently resume a stale/incredible
+  // session). Credible = same calendar day and under a generous multiple
+  // of the workout's own prescribed length; anything else is treated as
+  // stale and only offered as save-partial-or-discard, never auto-resumed.
+  function checkForRecoverableWorkout() {
+    var sess = state.activeWorkoutSession;
+    if (!sess || !sess.snapshot) return null;
+    var startedAt = sess.snapshot.startedAt;
+    if (!startedAt) return null;
+    var ageMs = Date.now() - startedAt;
+    var sameDay = new Date(startedAt).toDateString() === new Date().toDateString();
+    var credible = sameDay && ageMs < 6 * 60 * 60 * 1000; // 6h ceiling regardless of workout length -- nobody's mid-workout that long
+    return { session: sess, credible: credible, ageMs: ageMs };
+  }
+
+  function renderWorkoutRecoveryPrompt(recovery) {
+    _recordScreen(function () { renderWorkoutRecoveryPrompt(recovery); });
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    var parts = (recovery.session.key || '').split('-');
+    var weekNum = parseInt(parts[0], 10), dayIdx = parseInt(parts[1], 10);
+    var wrap = el(
+      '<div class="ob runner-screen">' +
+        '<div class="ob-title">Unfinished workout</div>' +
+        '<p class="ob-hint">' + escapeHtml(recovery.session.title || 'A workout') + (recovery.credible ? ' was still in progress.' : ' was left in progress a while ago and may no longer be current.') + '</p>' +
+        (recovery.credible ? '<button type="button" class="ob-btn" id="recResumeBtn">Resume</button>' : '') +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="recSaveBtn">Save what was completed</button>' +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="recDiscardBtn">Discard</button>' +
+      '</div>'
+    );
+    app.appendChild(wrap);
+    if (recovery.credible) {
+      document.getElementById('recResumeBtn').addEventListener('click', function () {
+        var normalized = _recoveryNormalizedFor(weekNum, dayIdx);
+        if (!normalized) { clearActiveSession(); renderMain(); return; }
+        _activeMachine = WorkoutRunnerDomain.restoreRunnerStateMachine(normalized, recovery.session.snapshot, {});
+        _activeWorkoutKey = recovery.session.key;
+        renderActiveWorkout(weekNum, dayIdx);
+      });
+    }
+    guardOnce(document.getElementById('recSaveBtn'), function () {
+      var elapsedMs = Date.now() - (recovery.session.snapshot.startedAt || Date.now()) - (recovery.session.snapshot.pausedMs || 0);
+      finalizeWorkoutLog(recovery.session.key, Math.max(0, elapsedMs), 'stopped_early');
+      clearActiveSession();
+      renderMain();
+    });
+    guardOnce(document.getElementById('recDiscardBtn'), function () {
+      clearActiveSession();
+      renderMain();
+    });
+  }
+
+  function _recoveryNormalizedFor(weekNum, dayIdx) {
+    if (!state.raceGoal || !state.profile || !state.planMeta) return null;
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var wk = result.weeks[weekNum - 1];
+    var dayData = wk && wk.days[dayIdx];
+    if (!dayData) return null;
+    var key = weekNum + '-' + dayIdx;
+    var label = state.overrides[key] || dayData.label;
+    return WorkoutRunnerDomain.normalizeWorkout ? WorkoutRunnerDomain.normalizeWorkout(dayData, { label: label }) : null;
+  }
+
   function renderWorkoutDetail(weekNum, dayIdx) {
     _recordScreen(function () { renderWorkoutDetail(weekNum, dayIdx); });
     var app = document.getElementById('app');
@@ -4120,6 +4667,33 @@
       '</dl>'
     ) : '';
 
+    // ── Workout Runner entry point (docs/WORKOUT_RUNNER_SPEC.md) ──
+    // Placed immediately after the what/why/how-hard summary and before
+    // every secondary action (postpone/reschedule/AI-why/manual log), per
+    // the approved pre-run clarity hierarchy -- Start Workout must never be
+    // visually overpowered by secondary systems. Absent entirely for
+    // workout types this runner doesn't execute (rest/race -- see
+    // normalizeWorkout), so no dead button ever appears for those.
+    var runnerPreview = (!race && WorkoutRunnerDomain.normalizeWorkout) ? WorkoutRunnerDomain.normalizeWorkout(dayData, { label: label }) : null;
+    // docs/COACHING_ENGINE_SPEC.md "Pre-workout preview" -- shown only when
+    // the coaching engine is actually wired up and there's a real topic to
+    // show; computed the same deterministic way the in-workout engine will
+    // pick it (buildCoachingFocus over state.coachingHistory), never a
+    // separate/different guess.
+    var coachingFocusHtml = '';
+    if (runnerPreview && CoachingCuesDomain.buildCoachingFocus) {
+      var focusTopic = CoachingCuesDomain.buildCoachingFocus(state.coachingHistory, key);
+      var focusLabel = focusTopic && CoachingCuesDomain.TOPIC_LABEL ? CoachingCuesDomain.TOPIC_LABEL[focusTopic] : null;
+      if (focusLabel) coachingFocusHtml = '<p class="wd-coaching-focus">Today’s focus: ' + escapeHtml(focusLabel) + '.</p>';
+    }
+    var startWorkoutHtml = runnerPreview ? (
+      '<div class="wd-runner-start">' +
+        '<p class="wd-runner-structure">' + escapeHtml(buildWorkoutStructureSummary(runnerPreview)) + '</p>' +
+        coachingFocusHtml +
+        '<button type="button" class="ob-btn wd-start-btn" id="startWorkoutBtn">Start Workout</button>' +
+      '</div>'
+    ) : '';
+
     // ── Multi-activity cross-training builder ──
     // Lets the user break a cross day into several activities with their own
     // minutes (e.g. "20 min Bike, 25 min Row") instead of the weekly row's
@@ -4210,6 +4784,7 @@
         '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
         '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
         detailHtml +
+        startWorkoutHtml +
         crossSegmentsHtml +
         plannedVsActualHtml +
         (detail ? '<div class="ai-why"><button type="button" class="ai-why-btn" id="aiWhyBtn">Ask AI: why this workout?</button><div class="ai-why-result" id="aiWhyResult" style="display:none"></div></div>' : '') +
@@ -4221,6 +4796,12 @@
       '</div>'
     );
     app.appendChild(wrap);
+
+    if (runnerPreview) {
+      document.getElementById('startWorkoutBtn').addEventListener('click', function () {
+        renderActiveWorkout(weekNum, dayIdx);
+      });
+    }
 
     if (hasCross(label)) {
       var crossSegments = normalizeCrossSegments(state.crossType[key]);
@@ -4939,6 +5520,15 @@
             '<p class="recap-empty">Get a nudge for today\'s workout, a missed-session check-in, race countdown, and plan updates. Fully optional and rule-based &mdash; never AI &mdash; and only fires while Runner is open or running in the background.</p>' +
             '<button class="ob-btn ob-btn-secondary" id="notifEnableBtn">Enable notifications</button>'
         ) + '</div>' +
+        '<div class="ob-label" style="margin-top:26px">Coach</div>' +
+        '<p class="recap-empty">How much the audio coach says during a workout. Transitions, warnings, and safety always play regardless of this setting.</p>' +
+        '<div class="chip-grid" id="set_coachFrequency">' + chipsHtml('coachFrequency', ['minimal', 'coach', 'detailed'], { minimal: 'Minimal', coach: 'Coach', detailed: 'Detailed' }, state.coachingPreferences.frequency, false) + '</div>' +
+        '<div class="ob-label" style="margin-top:14px">Technique &amp; effort coaching</div>' +
+        '<div class="chip-grid" id="set_coachTechnique">' + chipsHtml('coachTechnique', ['on', 'off'], { on: 'On', off: 'Off' }, state.coachingPreferences.technique ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:14px">Encouragement</div>' +
+        '<div class="chip-grid" id="set_coachEncouragement">' + chipsHtml('coachEncouragement', ['on', 'off'], { on: 'On', off: 'Off' }, state.coachingPreferences.encouragement ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:14px">Audio cues</div>' +
+        '<div class="chip-grid" id="set_workoutAudio">' + chipsHtml('workoutAudioEnabled', ['on', 'off'], { on: 'On', off: 'Off' }, state.workoutAudio.enabled ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
         '<p class="recap-empty">Experimental toggles from RACR\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
@@ -4990,6 +5580,46 @@
         saveState(state);
         wrap.querySelectorAll('#set_longerDistances .chip').forEach(function (c) {
           c.classList.toggle('selected', c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.flags.enableLongerDistances ? 'on' : 'off'))));
+        });
+      });
+    });
+
+    // docs/COACHING_ENGINE_SPEC.md "User controls" -- same wire-a-chip-
+    // group pattern as set_longerDistances above, one per preference field.
+    wrap.querySelectorAll('#set_coachFrequency .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.coachingPreferences.frequency = chip.getAttribute('data-value');
+        saveState(state);
+        wrap.querySelectorAll('#set_coachFrequency .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === state.coachingPreferences.frequency); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === state.coachingPreferences.frequency)));
+        });
+      });
+    });
+    wrap.querySelectorAll('#set_coachTechnique .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.coachingPreferences.technique = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        wrap.querySelectorAll('#set_coachTechnique .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.coachingPreferences.technique ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.coachingPreferences.technique ? 'on' : 'off'))));
+        });
+      });
+    });
+    wrap.querySelectorAll('#set_coachEncouragement .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.coachingPreferences.encouragement = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        wrap.querySelectorAll('#set_coachEncouragement .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.coachingPreferences.encouragement ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.coachingPreferences.encouragement ? 'on' : 'off'))));
+        });
+      });
+    });
+    wrap.querySelectorAll('#set_workoutAudio .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.workoutAudio.enabled = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        if (_cueService) _cueService.setEnabled(state.workoutAudio.enabled); // keep any already-running workout's live cue service in sync
+        wrap.querySelectorAll('#set_workoutAudio .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.workoutAudio.enabled ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.workoutAudio.enabled ? 'on' : 'off'))));
         });
       });
     });
@@ -5690,7 +6320,14 @@
     });
   }
 
-  renderMain();
+  // docs/WORKOUT_RUNNER_SPEC.md -- on cold boot, check for a workout left
+  // active from a previous visit before rendering the normal Today screen.
+  // Never silently resumes (only offered when credible) and never silently
+  // fabricates completion -- see checkForRecoverableWorkout/
+  // renderWorkoutRecoveryPrompt.
+  var _bootRecovery = checkForRecoverableWorkout();
+  if (_bootRecovery) renderWorkoutRecoveryPrompt(_bootRecovery);
+  else renderMain();
   CloudSync.init();
   GoogleHealth.handleOAuthRedirect().then(function () {
     if (document.getElementById('googleHealthSection')) renderSettings();

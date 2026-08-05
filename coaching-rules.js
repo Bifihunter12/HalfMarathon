@@ -157,33 +157,59 @@
     '5k': {
       entry: [{ label: 'Easy + 4-6 x 20 sec strides', estimatedMinutes: 30 }],
       trained: [
-        { label: '6 x 400m @ 5K pace', estimatedMinutes: 10 + 6 * (2 + 2) + 10 },
-        { label: '5 x 3 min @ 5K effort', estimatedMinutes: 10 + 5 * (3 + 3) + 10 },
-        { label: '4 x 5 min @ 10K effort', estimatedMinutes: 10 + 4 * (5 + 3) + 10 },
-        { label: 'Fartlek: 8 x 1 min hard / 1 min easy', estimatedMinutes: 10 + 8 * (1 + 1) + 10 }
+        // manualReps: the work itself (400m at a real pace) can't be timed
+        // without inventing a pace, but the recovery between reps IS
+        // legitimately time-prescribed regardless of how fast the interval
+        // was run (a standard real-world prescription: "400m hard, then 2
+        // min easy jog" -- the jog is timed on the clock either way). The
+        // runner announces each rep, lets the runner mark it done manually,
+        // then times the recovery automatically -- see
+        // docs/WORKOUT_RUNNER_SPEC.md's approved guided-manual-advance mode.
+        // recoverySec/warmupSec/cooldownSec mirror this entry's own
+        // estimatedMinutes formula -- no new numbers invented.
+        { label: '6 x 400m @ 5K pace', estimatedMinutes: 10 + 6 * (2 + 2) + 10, manualReps: { warmupSec: 600, cooldownSec: 600, reps: 6, recoverySec: 120 } },
+        // segments: workout-runner.js's normalizer consumes this to run the
+        // session automatically (docs/WORKOUT_RUNNER_SPEC.md Phase 1) -- only
+        // added to entries whose reps are already stated in TIME. Distance-
+        // based entries (400m/800m/1000m/1mi reps, above/below) deliberately
+        // have no segments field: turning them into timed intervals would
+        // require inventing a pace, which this app has always refused to do
+        // (see QUALITY_DEFAULT_PACE_MIN_PER_MI's own comment) -- they get
+        // manualReps instead (see above). warmupSec/cooldownSec/reps/
+        // workSec/recoverySec mirror the exact numbers already baked into
+        // this entry's own estimatedMinutes formula -- no new numbers invented.
+        { label: '5 x 3 min @ 5K effort', estimatedMinutes: 10 + 5 * (3 + 3) + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 5, workSec: 180, recoverySec: 180 } },
+        { label: '4 x 5 min @ 10K effort', estimatedMinutes: 10 + 4 * (5 + 3) + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 4, workSec: 300, recoverySec: 180 } },
+        { label: 'Fartlek: 8 x 1 min hard / 1 min easy', estimatedMinutes: 10 + 8 * (1 + 1) + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 8, workSec: 60, recoverySec: 60 } }
       ]
     },
     '10k': {
       entry: [
         { label: 'Easy + strides', estimatedMinutes: 30 },
-        { label: '20 min tempo, comfortably hard', estimatedMinutes: 10 + 20 + 10 }
+        // A single continuous work block is modeled as reps:1, recoverySec:0
+        // -- the normalizer treats reps===1 as one continuous segment (no
+        // "interval N of M" cue), not a 1-rep interval set.
+        { label: '20 min tempo, comfortably hard', estimatedMinutes: 10 + 20 + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 1, workSec: 1200, recoverySec: 0 } }
       ],
       trained: [
-        { label: 'Tempo: 25-30 min @ threshold', estimatedMinutes: 10 + 28 + 10 },
-        { label: '5 x 1000m @ 10K pace', estimatedMinutes: 10 + 5 * (4 + 2) + 10 },
-        { label: '6 x 800m @ 10K pace', estimatedMinutes: 10 + 6 * (3 + 2) + 10 },
-        { label: 'Hills: 6 x 2 min uphill', estimatedMinutes: 10 + 6 * (2 + 2) + 10 }
+        { label: 'Tempo: 25-30 min @ threshold', estimatedMinutes: 10 + 28 + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 1, workSec: 1680, recoverySec: 0 } },
+        { label: '5 x 1000m @ 10K pace', estimatedMinutes: 10 + 5 * (4 + 2) + 10, manualReps: { warmupSec: 600, cooldownSec: 600, reps: 5, recoverySec: 120 } },
+        { label: '6 x 800m @ 10K pace', estimatedMinutes: 10 + 6 * (3 + 2) + 10, manualReps: { warmupSec: 600, cooldownSec: 600, reps: 6, recoverySec: 120 } },
+        { label: 'Hills: 6 x 2 min uphill', estimatedMinutes: 10 + 6 * (2 + 2) + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 6, workSec: 120, recoverySec: 120 } }
       ]
     },
     half: {
       entry: [
         { label: 'Easy + strides', estimatedMinutes: 30 },
-        { label: '15-20 min tempo', estimatedMinutes: 10 + 18 + 10 }
+        { label: '15-20 min tempo', estimatedMinutes: 10 + 18 + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 1, workSec: 1080, recoverySec: 0 } }
       ],
       trained: [
-        { label: 'Tempo: 3 x 10 min @ threshold', estimatedMinutes: 10 + 3 * 10 + 2 * 3 + 10 },
+        { label: 'Tempo: 3 x 10 min @ threshold', estimatedMinutes: 10 + 3 * 10 + 2 * 3 + 10, segments: { warmupSec: 600, cooldownSec: 600, reps: 3, workSec: 600, recoverySec: 120 } },
+        // "4-6 mi @ half-marathon pace" is one continuous distance block, not
+        // discrete reps -- no manualReps (guided single-block, same as a
+        // continuous easy/long run), unlike the genuinely rep-based entries.
         { label: '4-6 mi @ half-marathon pace', estimatedMinutes: 10 + 5 * 8 + 10 },
-        { label: '5 x 1 mi @ 10K pace', estimatedMinutes: 10 + 5 * (7 + 2) + 10 }
+        { label: '5 x 1 mi @ 10K pace', estimatedMinutes: 10 + 5 * (7 + 2) + 10, manualReps: { warmupSec: 600, cooldownSec: 600, reps: 5, recoverySec: 120 } }
       ]
     },
     marathon: {
@@ -1699,6 +1725,13 @@
             // two independently-computed guesses.
             day.miles = qualityMiles;
             day.label = qualityMiles > 0 ? qualityEntry.label + ' (~' + toUnit(qualityMiles, units) + ' ' + unitLabel(units) + ' total, incl. warm-up/cool-down)' : qualityEntry.label;
+            // workout-runner.js's normalizer reads these directly instead of
+            // re-parsing `day.label` text -- see QUALITY_POOL's own comments
+            // on `segments`/`manualReps` above. undefined (not present) for
+            // every entry that has neither, which the normalizer treats as
+            // a single guided open block, never a silent auto-timed guess.
+            if (qualityEntry.segments) day.qualitySegments = qualityEntry.segments;
+            if (qualityEntry.manualReps) day.qualityManualReps = qualityEntry.manualReps;
           }
         } else if (tok === 'easy') {
           day.type = 'easy';
