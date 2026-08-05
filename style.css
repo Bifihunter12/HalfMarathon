@@ -1150,3 +1150,8 @@ dl.wd-info dd {
    app's existing danger-action pattern) -- visually separated below the
    normal controls, same .danger-btn treatment as resetPlanBtn/deleteAllBtn. */
 .runner-end-btn { margin-top: 18px; }
+
+/* Settings footer version number -- lets a user/tester tell whether an
+   installed PWA is actually running the build they expect instead of a
+   silently stale service-worker cache (see docs/COACHING_REAL_DEVICE_QA.md). */
+.settings-version { font-size: 11px; color: var(--text-faint); text-align: center; margin-top: 18px; }

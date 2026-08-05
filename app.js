@@ -2,6 +2,16 @@
   'use strict';
 
   var STORAGE_KEY = 'training_plan_v1';
+  // Kept in sync by hand with app-version.json/sw.js/index.html's own
+  // cache-busting version string (same manual-bump discipline already used
+  // across those three) -- shown in Settings so a user/tester can tell
+  // whether an installed PWA is actually running the build they think it
+  // is, instead of a silently stale service-worker cache. Deliberately a
+  // plain baked-in constant, not fetched at runtime: if app.js itself is
+  // stale-cached, this constant is stale right along with it, which is
+  // exactly the signal that matters -- an old app.js showing an old
+  // version number here is the diagnostic, not a bug.
+  var APP_VERSION = '2026.08.06.5';
   var SideQuestDomain = window.RACRSideQuests || {};
   var PathDomain = window.RACRPath || {};
   var MergeStateDomain = window.RACRMergeState || {};
@@ -5584,6 +5594,7 @@
         '<button class="ob-btn ob-btn-secondary danger-btn" id="resetPlanBtn">Start a new plan</button>' +
         '<button class="ob-btn ob-btn-secondary danger-btn" id="deleteAllBtn">Delete all data</button>' +
         '<button type="button" class="ob-cancel" id="settingsBackBtn">Back to plan</button>' +
+        '<p class="settings-version">Version ' + escapeHtml(APP_VERSION) + '</p>' +
       '</div>'
     );
     app.appendChild(wrap);
