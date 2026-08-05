@@ -900,6 +900,11 @@
     // must never affect the workout record).
     if (s.activeWorkoutSession === undefined) s.activeWorkoutSession = null; // { key, normalized, snapshot }
     if (!s.workoutAudio) s.workoutAudio = { enabled: true, volume: 1 }; // on by default -- this is the feature's whole point, unlike opt-in notifications below
+    // Added after workoutAudio itself already shipped -- existing installs
+    // have the object but not this field, so it needs its own migration
+    // check, not just the `if (!s.workoutAudio)` guard above. null means
+    // "platform default voice," exactly the same as before this existed.
+    if (s.workoutAudio.voiceURI === undefined) s.workoutAudio.voiceURI = null;
     // docs/COACHING_ENGINE_SPEC.md -- user-facing coaching preferences
     // (frequency mode + category toggles), separate from workoutAudio
     // above (that's the audio channel itself; this is what the coach is
@@ -4058,9 +4063,27 @@
 
   function getCueService() {
     if (!_cueService && AudioCuesDomain.createCueService) {
-      _cueService = AudioCuesDomain.createCueService({ enabled: state.workoutAudio.enabled, volume: state.workoutAudio.volume });
+      _cueService = AudioCuesDomain.createCueService({ enabled: state.workoutAudio.enabled, volume: state.workoutAudio.volume, voiceURI: state.workoutAudio.voiceURI });
     }
     return _cueService;
+  }
+
+  // English voices first (most relevant given this app's copy is
+  // English-only), everything else after -- never hidden, since some
+  // devices only expose one or two voices total and hiding them would
+  // leave the picker looking broken. "Device default" always exists so
+  // there's a way back to platform-default behavior (same as before this
+  // feature existed) without needing to know which voice that actually is.
+  function voiceOptionsHtml(selectedURI) {
+    var svc = getCueService();
+    var voices = svc ? svc.getVoices() : [];
+    var english = voices.filter(function (v) { return /^en/i.test(v.lang || ''); });
+    var rest = voices.filter(function (v) { return !/^en/i.test(v.lang || ''); });
+    var html = '<option value=""' + (!selectedURI ? ' selected' : '') + '>Device default</option>';
+    english.concat(rest).forEach(function (v) {
+      html += '<option value="' + escapeHtml(v.voiceURI) + '"' + (selectedURI === v.voiceURI ? ' selected' : '') + '>' + escapeHtml(v.name) + ' (' + escapeHtml(v.lang) + ')</option>';
+    });
+    return html;
   }
 
   // Cue text -> haptic pattern, so every cue gets its own short vibration
@@ -5544,6 +5567,10 @@
         '<div class="chip-grid" id="set_coachEncouragement">' + chipsHtml('coachEncouragement', ['on', 'off'], { on: 'On', off: 'Off' }, state.coachingPreferences.encouragement ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:14px">Audio cues</div>' +
         '<div class="chip-grid" id="set_workoutAudio">' + chipsHtml('workoutAudioEnabled', ['on', 'off'], { on: 'On', off: 'Off' }, state.workoutAudio.enabled ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:14px">Coach voice</div>' +
+        '<p class="recap-empty">Uses your device\'s own text-to-speech voices -- quality depends on what\'s installed. If the list looks short, check your device\'s text-to-speech settings for higher-quality voices.</p>' +
+        '<select class="ob-input" id="set_coachVoiceSelect">' + voiceOptionsHtml(state.workoutAudio.voiceURI) + '</select>' +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="previewVoiceBtn" style="margin-top:8px">Preview voice</button>' +
         '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
         '<p class="recap-empty">Experimental toggles from RACR\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
@@ -5637,6 +5664,34 @@
           c.classList.toggle('selected', c.getAttribute('data-value') === (state.workoutAudio.enabled ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.workoutAudio.enabled ? 'on' : 'off'))));
         });
       });
+    });
+
+    var coachVoiceSelect = document.getElementById('set_coachVoiceSelect');
+    coachVoiceSelect.addEventListener('change', function () {
+      state.workoutAudio.voiceURI = coachVoiceSelect.value || null;
+      saveState(state);
+      var svc = getCueService();
+      if (svc) svc.setVoice(state.workoutAudio.voiceURI);
+    });
+    // Android/Chrome commonly loads its voice roster asynchronously --
+    // getVoices() can return empty on first call, then 'voiceschanged'
+    // fires once the real list is ready. Refresh the dropdown in place if
+    // that happens while this screen is still showing; { once: true } so
+    // it self-removes and repeated Settings visits can't stack up listeners
+    // that never fire.
+    if (typeof window !== 'undefined' && window.speechSynthesis && typeof window.speechSynthesis.addEventListener === 'function') {
+      window.speechSynthesis.addEventListener('voiceschanged', function () {
+        var current = coachVoiceSelect.value;
+        coachVoiceSelect.innerHTML = voiceOptionsHtml(current || state.workoutAudio.voiceURI);
+      }, { once: true });
+    }
+    document.getElementById('previewVoiceBtn').addEventListener('click', function () {
+      var svc = getCueService();
+      if (!svc) return;
+      // Preview whatever's currently picked in the dropdown, even if not
+      // saved yet, so the runner can compare voices before committing.
+      svc.setVoice(coachVoiceSelect.value || null);
+      svc.playCue('This is what your coach sounds like.', null);
     });
 
     var toReason = 'illness';

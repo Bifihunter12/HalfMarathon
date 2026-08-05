@@ -33,12 +33,36 @@
     var speechAvailable = !!(speechApi && UtteranceCtor);
     var enabled = opts.enabled !== false; // default ON -- audio cues are the whole point of this feature, unlike the app's other opt-in notifications
     var volume = opts.volume != null ? Math.max(0, Math.min(1, opts.volume)) : 1;
+    // voiceURI identifies a specific installed voice (matched against
+    // speechSynthesis.getVoices()' own .voiceURI at speak time, not cached
+    // -- the voice list can arrive asynchronously after the engine loads,
+    // so re-resolving on every utterance is deliberate, not wasteful).
+    // null means "let the platform pick its own default," same as before
+    // this feature existed -- never a hard requirement to have a voice
+    // selected.
+    var voiceURI = opts.voiceURI || null;
 
     var queue = [];      // sequential speak queue -- overlapping cues never clobber each other
     var speaking = false;
 
     function setEnabled(v) { enabled = !!v; if (!enabled) stopAll(); }
     function setVolume(v) { volume = Math.max(0, Math.min(1, v)); }
+    function setVoice(uri) { voiceURI = uri || null; }
+    // Delegates straight to the engine -- deliberately not cached here,
+    // since Chrome/Android commonly returns an empty list until the async
+    // 'voiceschanged' event fires once after the engine finishes loading
+    // its voice roster. Callers needing to react to that should listen for
+    // 'voiceschanged' on the injected speechApi themselves (app.js does,
+    // for the Settings voice picker).
+    function getVoices() { return (speechApi && typeof speechApi.getVoices === 'function') ? speechApi.getVoices() : []; }
+    // Resolves the currently-selected voiceURI to a real voice object, or
+    // null if unset/not found (e.g. not loaded yet, or the device no
+    // longer has it) -- callers never need to handle "found but stale."
+    function resolveVoice() {
+      if (!voiceURI) return null;
+      var match = getVoices().filter(function (v) { return v.voiceURI === voiceURI; });
+      return match[0] || null;
+    }
 
     function vibrate(pattern) {
       if (!vibrateFn || !pattern) return false;
@@ -53,6 +77,11 @@
       try {
         var utt = new UtteranceCtor(text);
         utt.volume = volume;
+        // A voice that isn't found (unset, not loaded yet, or removed from
+        // the device) just falls through to the platform's own default --
+        // never an error, never blocks speech.
+        var resolvedVoice = resolveVoice();
+        if (resolvedVoice) utt.voice = resolvedVoice;
         utt.onend = function () { speaking = false; speakNext(); };
         // A speech engine error must never hang the queue or block the
         // workout -- move on exactly as if it had spoken successfully.
@@ -86,8 +115,10 @@
     return {
       get enabled() { return enabled; },
       get volume() { return volume; },
+      get voiceURI() { return voiceURI; },
       get speechAvailable() { return speechAvailable; },
-      setEnabled: setEnabled, setVolume: setVolume, playCue: playCue, vibrate: vibrate, stopAll: stopAll
+      setEnabled: setEnabled, setVolume: setVolume, setVoice: setVoice, getVoices: getVoices,
+      playCue: playCue, vibrate: vibrate, stopAll: stopAll
     };
   }
 
