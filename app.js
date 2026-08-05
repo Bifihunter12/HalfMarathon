@@ -271,8 +271,13 @@
   }
 
   function applySideQuest(key, quest, baseLabel) {
-    if (quest.name === baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
+    if (quest.name === baseLabel) clearOverride(key); else setOverride(key, quest.name);
     state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: quest.category });
+    // Must save explicitly, not rely on refreshPathProgress()'s save -- that
+    // one is conditional on path/pathNodes/badges changing, which this
+    // override/sideQuestLog mutation doesn't necessarily trigger (audit
+    // finding: a swap could silently fail to persist despite the success toast).
+    saveState(state);
     refreshPathProgress();
   }
 
@@ -332,7 +337,7 @@
     if (!active || !active.scheduledMissionKeys) return;
     Object.keys(active.scheduledMissionKeys).forEach(function (key) {
       if (state.sideQuestCalendar && state.sideQuestCalendar[key] === active.scheduledMissionKeys[key]) {
-        delete state.sideQuestCalendar[key];
+        clearSideQuestCalendarEntry(key);
       }
     });
   }
@@ -385,7 +390,7 @@
         category: mission ? mission.category : domainTrack.category,
         relationship: mission ? mission.relationshipLabel : 'Supports your Main Quest'
       });
-      if (key && state.sideQuestCalendar[key] === missionId) delete state.sideQuestCalendar[key];
+      if (key && state.sideQuestCalendar[key] === missionId) clearSideQuestCalendarEntry(key);
       if (active.completedSessions >= domainTotal) {
         state.completedQuestTracks.push({ trackId: domainTrack.id, date: dateToISO(new Date()), badgeId: 'strong_runner' });
         if (state.badges.indexOf('Strong Runner') === -1) state.badges.push('Strong Runner');
@@ -427,7 +432,7 @@
     });
     var newBadge = mission.badgeId && state.badges.indexOf(mission.badgeId) === -1;
     if (newBadge) state.badges.push(mission.badgeId);
-    if (key && state.sideQuestCalendar[key] === mission.id) delete state.sideQuestCalendar[key];
+    if (key && state.sideQuestCalendar[key] === mission.id) clearSideQuestCalendarEntry(key);
     saveState(state);
     refreshPathProgress();
     logTelemetryEvent('side_mission_completed', mission.id);
@@ -502,7 +507,7 @@
     var conflict = SideQuestDomain.detectCalendarConflict ? SideQuestDomain.detectCalendarConflict(mission, found.dayIdx, found.week.days) : { ok: true };
     if (classInfo.classification === 'protected' && subValue === 'full_replacement') return { ok: false, reason: 'protected' };
     if (!conflict.ok) return conflict;
-    state.sideQuestCalendar[key] = mission.id;
+    setSideQuestCalendarEntry(key, mission.id);
     saveState(state);
     return { ok: true, reason: null };
   }
@@ -527,7 +532,7 @@
         if (!conflict.ok) return;
         var key = week.weekNum + '-' + di;
         if (state.sideQuestCalendar[key]) return;
-        state.sideQuestCalendar[key] = mission.id;
+        setSideQuestCalendarEntry(key, mission.id);
         state.activeQuestTrack.scheduledMissionKeys[key] = mission.id;
         missionIdx++;
         placedThisWeek++;
@@ -855,6 +860,17 @@
     if (!s.profile) s.profile = null;
     if (!s.planMeta) s.planMeta = null; // { level, weeksAvailable, planLengthWeeks, unsafe, warnings }
     if (!s.logs) s.logs = {};
+    // Tombstones for keys explicitly deleted from the ten dict/id-map-shaped
+    // fields below (see setLog/setOverride/setCrossType/setSessionLog/
+    // setSessionOverride/setDayAdjustment/setScheduleChoice/
+    // setSideQuestCalendarEntry/addRecurringWorkout+removeRecurringWorkoutAt/
+    // addTravelPeriod+removeTravelPeriodAt) so a cross-device merge can tell
+    // "deleted on this device" apart from "never synced here" and stop a
+    // stale device's copy from winning the key back (merge-state.js mergeMapT).
+    if (!s.deletedKeys) s.deletedKeys = {};
+    ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments', 'scheduleChoices', 'sideQuestCalendar', 'recurringWorkouts', 'travelPeriods'].forEach(function (f) {
+      if (!s.deletedKeys[f]) s.deletedKeys[f] = {};
+    });
     if (!s.overrides) s.overrides = {};
     if (!s.crossType) s.crossType = {};
     // docs/COACHING_SPEC.md "Session-level architecture" -- independent
@@ -949,9 +965,46 @@
   function setLog(key, patch) {
     var next = Object.assign({}, getLog(key), patch);
     var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType || next.eveningIntervals);
-    if (hasContent) state.logs[key] = next;
-    else delete state.logs[key];
+    if (hasContent) { state.logs[key] = next; delete state.deletedKeys.logs[key]; }
+    else { delete state.logs[key]; state.deletedKeys.logs[key] = true; }
     saveState(state);
+  }
+
+  // Small paired set/clear helpers for the other dict-shaped fields a user
+  // can explicitly delete a key from (audit follow-up to the setLog tombstone
+  // fix above) -- each pair replaces a bare `state.X[key] = v` / `delete
+  // state.X[key]` at its call sites with one that also keeps
+  // state.deletedKeys.X in sync, so merge-state.js's mergeMapT can tell a
+  // real deletion apart from a key this device never synced. None of these
+  // call saveState themselves -- same as the raw assignments they replace,
+  // callers still save afterward exactly as before.
+  function setOverride(key, value) { state.overrides[key] = value; delete state.deletedKeys.overrides[key]; }
+  function clearOverride(key) { delete state.overrides[key]; state.deletedKeys.overrides[key] = true; }
+  function setCrossType(key, value) { state.crossType[key] = value; delete state.deletedKeys.crossType[key]; }
+  function clearCrossType(key) { delete state.crossType[key]; state.deletedKeys.crossType[key] = true; }
+  function setDayAdjustment(key, value) { state.dayAdjustments[key] = value; delete state.deletedKeys.dayAdjustments[key]; }
+  function clearDayAdjustment(key) { delete state.dayAdjustments[key]; state.deletedKeys.dayAdjustments[key] = true; }
+  function setScheduleChoice(key, value) { state.scheduleChoices[key] = value; delete state.deletedKeys.scheduleChoices[key]; }
+  function clearScheduleChoice(key) { delete state.scheduleChoices[key]; state.deletedKeys.scheduleChoices[key] = true; }
+  function setSideQuestCalendarEntry(key, value) { state.sideQuestCalendar[key] = value; delete state.deletedKeys.sideQuestCalendar[key]; }
+  function clearSideQuestCalendarEntry(key) { delete state.sideQuestCalendar[key]; state.deletedKeys.sideQuestCalendar[key] = true; }
+  // recurringWorkouts/travelPeriods are id-keyed like the dict fields above,
+  // just stored as arrays (upserted/removed by id, see merge-state.js
+  // toIdMap) instead of plain objects -- same tombstone reasoning, index-
+  // based splice/push at the call site, id-based bookkeeping here.
+  function addRecurringWorkout(workout) { state.recurringWorkouts.push(workout); delete state.deletedKeys.recurringWorkouts[workout.id]; }
+  function removeRecurringWorkoutAt(idx) {
+    var removed = state.recurringWorkouts[idx];
+    state.recurringWorkouts.splice(idx, 1);
+    if (removed) state.deletedKeys.recurringWorkouts[removed.id] = true;
+    return removed;
+  }
+  function addTravelPeriod(period) { state.travelPeriods.push(period); delete state.deletedKeys.travelPeriods[period.id]; }
+  function removeTravelPeriodAt(idx) {
+    var removed = state.travelPeriods[idx];
+    state.travelPeriods.splice(idx, 1);
+    if (removed) state.deletedKeys.travelPeriods[removed.id] = true;
+    return removed;
   }
 
   // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary same-
@@ -967,24 +1020,25 @@
   function setSessionLog(sessionId, patch) {
     var next = Object.assign({}, getSessionLog(sessionId), patch);
     var hasContent = !!(next.time || next.distance || next.effort || next.notes || next.pain || next.completionType);
-    if (hasContent) state.sessionLogs[sessionId] = next;
-    else delete state.sessionLogs[sessionId];
+    if (hasContent) { state.sessionLogs[sessionId] = next; delete state.deletedKeys.sessionLogs[sessionId]; }
+    else { delete state.sessionLogs[sessionId]; state.deletedKeys.sessionLogs[sessionId] = true; }
     saveState(state);
   }
   // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary
   // session can be replaced or skipped independently of the primary one;
   // stored the same way state.overrides stores a day-level label override,
-  // just keyed by session id instead of day key. Skipping/removing a
-  // session is modeled as WRITING a tombstone override ({skipped:true}),
-  // never as deleting the key outright -- so a sync merge can't silently
-  // resurrect a session the runner deliberately removed on another device
-  // (mergeMap's per-key newer-wins logic already handles a present tombstone
-  // correctly; it only mishandles an outright-absent key, which this design
-  // never produces for a deliberate skip).
+  // just keyed by session id instead of day key. The comment here used to
+  // claim a skip is "never" modeled as an outright key deletion, but the
+  // patch===null branch below did exactly that -- audit finding: un-skipping
+  // a session (patch:null) deleted the key, so a stale device that still had
+  // the old {skipped:true} tombstone could resurrect it on merge. Now tracked
+  // via state.deletedKeys.sessionOverrides like every other field, same as
+  // setLog/setSessionLog above, instead of relying on never hitting this path.
   function getSessionOverride(sessionId) { return state.sessionOverrides[sessionId] || null; }
   function setSessionOverride(sessionId, patch) {
-    if (patch === null) { delete state.sessionOverrides[sessionId]; saveState(state); return; }
+    if (patch === null) { delete state.sessionOverrides[sessionId]; state.deletedKeys.sessionOverrides[sessionId] = true; saveState(state); return; }
     state.sessionOverrides[sessionId] = Object.assign({}, getSessionOverride(sessionId), patch);
+    delete state.deletedKeys.sessionOverrides[sessionId];
     saveState(state);
   }
 
@@ -1936,7 +1990,7 @@
     var conflict = describeMoveConflict(targetDayData);
     var confirmText = 'Move this workout there' + (conflict ? ' — ' + conflict : '') + '?';
     if (!window.confirm(confirmText)) return;
-    state.dayAdjustments[sourceKey] = { action: 'moved', targetKey: targetKey };
+    setDayAdjustment(sourceKey, { action: 'moved', targetKey: targetKey });
     saveState(state);
     onDone();
   }
@@ -3350,7 +3404,7 @@
       app.appendChild(conflictCard);
       conflictCard.querySelectorAll('button[data-choice]').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          state.scheduleChoices[unresolvedConflict.workoutId] = btn.getAttribute('data-choice');
+          setScheduleChoice(unresolvedConflict.workoutId, btn.getAttribute('data-choice'));
           saveState(state);
           renderMain();
         });
@@ -3524,10 +3578,10 @@
           var selectEl = row.querySelector('.cross-select');
           selectEl.addEventListener('change', function () {
             if (selectEl.value) {
-              state.crossType[key] = selectEl.value;
+              setCrossType(key, selectEl.value);
               selectEl.classList.add('chosen');
             } else {
-              delete state.crossType[key];
+              clearCrossType(key);
               selectEl.classList.remove('chosen');
             }
             saveState(state);
@@ -3550,8 +3604,8 @@
             if (committed) return;
             committed = true;
             var val = inputEl.value.trim();
-            if (!val || val === baseLabel) delete state.overrides[key];
-            else state.overrides[key] = val;
+            if (!val || val === baseLabel) clearOverride(key);
+            else setOverride(key, val);
             saveState(state);
             renderMain();
           }
@@ -3661,7 +3715,7 @@
     function applyMarkRest(key, note) {
       var day = daysByKey[key];
       var label = 'Rest' + (note ? ' — ' + note : '');
-      if (day && label === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = label;
+      if (day && label === day.baseLabel) clearOverride(key); else setOverride(key, label);
       saveState(state);
     }
     function applySubstitute(key, newType) {
@@ -3669,7 +3723,7 @@
       var sourceKey = findSourceKey(key, newType);
       if (!sourceKey) return false;
       var newLabel = daysByKey[sourceKey].effectiveLabel;
-      if (newLabel === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = newLabel;
+      if (newLabel === day.baseLabel) clearOverride(key); else setOverride(key, newLabel);
       saveState(state);
       return true;
     }
@@ -3682,7 +3736,7 @@
       var newMiles = round1(day.miles * factor);
       var terrainNote = terrainNoteFrom(state.profile.terrains);
       var newLabel = day.type === 'long' ? formatLongRunLabel(newMiles, terrainNote) : formatEasyRunLabel(newMiles);
-      if (newLabel === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = newLabel;
+      if (newLabel === day.baseLabel) clearOverride(key); else setOverride(key, newLabel);
       saveState(state);
       return true;
     }
@@ -3693,8 +3747,11 @@
       var quest = missionById(sideQuestId);
       var replaces = quest && (quest.replaces || quest.canReplaceWorkoutTypes || []);
       if (!day || !quest || replaces.indexOf(day.type) === -1) return false;
-      if (quest.name === day.baseLabel) delete state.overrides[key]; else state.overrides[key] = quest.name;
+      if (quest.name === day.baseLabel) clearOverride(key); else setOverride(key, quest.name);
       state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), relationship: quest.relationshipLabel || 'Can replace an easy Main Mission' });
+      // Same fix as applySideQuest -- must save explicitly, not rely on
+      // refreshPathProgress()'s conditional save (see that function's comment).
+      saveState(state);
       refreshPathProgress();
       return true;
     }
@@ -4172,9 +4229,9 @@
       var persistCrossSegments = function () {
         var cleaned = crossSegments.filter(function (seg) { return seg.activity; });
         if (cleaned.length) {
-          state.crossType[key] = (cleaned.length === 1 && cleaned[0].minutes == null) ? cleaned[0].activity : cleaned;
+          setCrossType(key, (cleaned.length === 1 && cleaned[0].minutes == null) ? cleaned[0].activity : cleaned);
         } else {
-          delete state.crossType[key];
+          clearCrossType(key);
         }
         saveState(state);
         var titleEl = document.querySelector('.wd-title');
@@ -4242,8 +4299,8 @@
     var shortenBtn = document.getElementById('shortenBtn');
     if (shortenBtn) {
       shortenBtn.addEventListener('click', function () {
-        if (isShortened) delete state.dayAdjustments[key];
-        else state.dayAdjustments[key] = { action: 'shortened', factor: 0.7 };
+        if (isShortened) clearDayAdjustment(key);
+        else setDayAdjustment(key, { action: 'shortened', factor: 0.7 });
         saveState(state);
         renderWorkoutDetail(weekNum, dayIdx);
       });
@@ -4980,7 +5037,7 @@
       if (!startVal || !endVal || startVal > endVal) { window.alert('Pick a valid start and end date.'); return; }
       var minDur = parseInt(document.getElementById('set_travelMinDuration').value, 10) || 30;
       addTravelPeriodBtn.disabled = true;
-      state.travelPeriods.push({
+      addTravelPeriod({
         id: 'tp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
         start: startVal, end: endVal, mode: 'travel',
         indoorOnly: travelIndoor === 'yes',
@@ -4992,7 +5049,7 @@
     });
     wrap.querySelectorAll('.travel-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        state.travelPeriods.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
+        removeTravelPeriodAt(parseInt(btn.getAttribute('data-idx'), 10));
         saveState(state);
         renderSettings();
       });
@@ -5019,7 +5076,7 @@
       var duration = parseInt(document.getElementById('set_rwDuration').value || '0', 10);
       if (!duration || duration <= 0) { document.getElementById('set_rwDuration').focus(); return; }
       addRecurringWorkoutBtn.disabled = true;
-      state.recurringWorkouts.push({
+      addRecurringWorkout({
         id: 'rw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
         activityType: rwActivity,
         customName: document.getElementById('set_rwCustomName').value.trim(),
@@ -5033,9 +5090,8 @@
     });
     wrap.querySelectorAll('.recurring-workout-remove').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var removed = state.recurringWorkouts[parseInt(btn.getAttribute('data-idx'), 10)];
-        state.recurringWorkouts.splice(parseInt(btn.getAttribute('data-idx'), 10), 1);
-        if (removed) delete state.scheduleChoices[removed.id];
+        var removed = removeRecurringWorkoutAt(parseInt(btn.getAttribute('data-idx'), 10));
+        if (removed) clearScheduleChoice(removed.id);
         saveState(state);
         renderSettings();
       });
@@ -5043,7 +5099,7 @@
     wrap.querySelectorAll('.schedule-choice-reset').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var w = state.recurringWorkouts[parseInt(btn.getAttribute('data-idx'), 10)];
-        if (w) delete state.scheduleChoices[w.id];
+        if (w) clearScheduleChoice(w.id);
         saveState(state);
         renderSettings();
       });
@@ -5215,6 +5271,15 @@
       state.sessionLogs = {};
       state.sessionOverrides = {};
       state.dayAdjustments = {};
+      // Bypasses setLog/setOverride/etc.'s per-key tombstone bookkeeping (a
+      // bulk reset, not a per-key delete), so clear their deletedKeys too --
+      // otherwise they'd just linger unbounded across every future plan.
+      // Note this reset itself still isn't tombstoned key-by-key, so it
+      // doesn't get mergeMapT's resurrection protection against a stale
+      // second device that hasn't synced the reset yet -- a materially
+      // different, larger fix (marking every pre-reset key deleted) than
+      // this audit's per-key-delete scope covered.
+      ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments'].forEach(function (f) { state.deletedKeys[f] = {}; });
       saveState(state);
       didAutoScroll = false;
       renderMain();

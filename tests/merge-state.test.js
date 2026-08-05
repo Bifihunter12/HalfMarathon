@@ -88,6 +88,30 @@ test('a week\'s runningFeelingLog entry can be overwritten, not just unioned, by
   assert.equal(merged.runningFeelingLog[0].feeling, 'bored', 'newer device\'s answer for the same week replaces the older one');
 });
 
+// Regression for the audit's second landmine: `path` used to fall through
+// to a stale device's path object whenever the newer device's own path was
+// falsy, instead of respecting an explicit null like its sibling fields.
+test('path prefers the newer device wholesale, including an explicit null (no stale fallback)', function () {
+  const local = baseState({ lastModified: 2000, path: null });
+  const remote = baseState({ lastModified: 1000, path: { id: 'p1', currentNodeId: 'old-node' } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.path, null, 'the newer device\'s explicit null must win, not the stale device\'s path');
+});
+
+test('path still falls back correctly when the newer device genuinely has no path field at all', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = baseState({ lastModified: 1000, path: { id: 'p1', currentNodeId: 'old-node' } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.path, null, 'a legacy state with no path key at all safely defaults to null, not undefined');
+});
+
+test('path from the newer device survives when it has a real value', function () {
+  const local = baseState({ lastModified: 2000, path: { id: 'p2', currentNodeId: 'new-node' } });
+  const remote = baseState({ lastModified: 1000, path: { id: 'p1', currentNodeId: 'old-node' } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.path.id, 'p2');
+});
+
 test('scalar fields (raceGoal/profile/planMeta) prefer the newer device wholesale', function () {
   const local = baseState({ lastModified: 2000, raceGoal: { event: '10k' }, profile: { p: 1 }, planMeta: { m: 1 } });
   const remote = baseState({ lastModified: 1000, raceGoal: { event: 'half' }, profile: { p: 2 }, planMeta: { m: 2 } });
@@ -123,6 +147,107 @@ test('editing the same recurringWorkout id on the newer device replaces it, not 
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.recurringWorkouts.length, 1, 'editing the same workout must not create a duplicate entry');
   assert.equal(merged.recurringWorkouts[0].durationMinutes, 60, 'the newer device\'s edit wins');
+});
+
+// Regression: recurringWorkouts/travelPeriods used to merge by plain
+// mergeMap (id-keyed), same resurrection gap as logs/overrides -- a workout
+// removed on the newer device (app.js's recurring-workout-remove handler)
+// could reappear from a stale device that still had it. Now wired through
+// mergeMapT + deletedKeys.recurringWorkouts/travelPeriods like every other
+// field this audit fixed.
+test('a recurringWorkout removed on the newer device is NOT resurrected by a stale device that still has it', function () {
+  const local = baseState({ lastModified: 3000, recurringWorkouts: [], deletedKeys: { recurringWorkouts: { rw1: true } } });
+  const remote = baseState({ lastModified: 1000, recurringWorkouts: [{ id: 'rw1', activityType: 'cycling', day: 1, durationMinutes: 45, intensity: 'high', fixed: true }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.ok(!merged.recurringWorkouts.some((w) => w.id === 'rw1'), 'the removal on the newer device must win, not the stale device\'s copy');
+  assert.equal(merged.deletedKeys.recurringWorkouts.rw1, true, 'the tombstone survives for a later third-device sync');
+});
+
+test('a travelPeriod removed on the newer device is NOT resurrected by a stale device that still has it', function () {
+  const local = baseState({ lastModified: 3000, travelPeriods: [], deletedKeys: { travelPeriods: { tp1: true } } });
+  const remote = baseState({ lastModified: 1000, travelPeriods: [{ id: 'tp1', start: '2026-08-25', end: '2026-09-08', mode: 'travel', indoorOnly: true }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.ok(!merged.travelPeriods.some((t) => t.id === 'tp1'), 'the removal on the newer device must win, not the stale device\'s copy');
+  assert.equal(merged.deletedKeys.travelPeriods.tp1, true, 'the tombstone survives for a later third-device sync');
+});
+
+// Regression for the resurrection bug found in the launch audit: mergeMap
+// merged `logs` purely by key presence, so a log deleted on the newer
+// device (key simply absent) was indistinguishable from "this device never
+// saw that key" -- a stale device that still had the entry would win it
+// back. mergeMapT + deletedKeys.logs fixes this; these tests prove it.
+test('a log deleted on the newer device is NOT resurrected by a stale device that still has it', function () {
+  const local = baseState({ lastModified: 3000, logs: {}, deletedKeys: { logs: { '2-3': true } } });
+  const remote = baseState({ lastModified: 1000, logs: { '2-3': { distance: 6.2, completionType: 'as_planned' } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.logs['2-3'], undefined, 'the deletion on the newer device must win, not the stale device\'s copy');
+  assert.equal(merged.deletedKeys.logs['2-3'], true, 'the tombstone itself must survive this merge for a later third-device sync');
+});
+
+test('a log deleted on the OLDER device does not clobber a real edit made later on the newer device', function () {
+  const local = baseState({ lastModified: 3000, logs: { '2-3': { distance: 7, completionType: 'as_planned' } } });
+  const remote = baseState({ lastModified: 1000, logs: {}, deletedKeys: { logs: { '2-3': true } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.logs['2-3'].distance, 7, 'the newer device\'s real entry wins over an older device\'s stale deletion');
+});
+
+test('a log key untouched by one device still passes through from the other (plain union still works)', function () {
+  const local = baseState({ lastModified: 2000, logs: { '1-1': { distance: 5 } } });
+  const remote = baseState({ lastModified: 1000, logs: { '1-2': { distance: 3 } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.logs['1-1'].distance, 5);
+  assert.equal(merged.logs['1-2'].distance, 3, 'a key the newer device never touched at all -- no tombstone, no value -- must still survive');
+});
+
+// The same tombstone fix, wired identically for the other seven dict-shaped
+// fields (see app.js setOverride/setCrossType/setSessionLog/
+// setSessionOverride/setDayAdjustment/setScheduleChoice/
+// setSideQuestCalendar) -- one compact resurrection-proof test per field
+// rather than repeating all three logs-style variations for each.
+[
+  { field: 'overrides', key: '3-1', staleValue: 'Bike', newValue: 'Rest day' },
+  { field: 'crossType', key: '3-1', staleValue: 'Row', newValue: 'Swim' },
+  { field: 'sessionLogs', key: 'sess_1_0_secondary_spin1', staleValue: { time: '45' }, newValue: { time: '50' } },
+  { field: 'sessionOverrides', key: 'sess_1_4_secondary_tabataFriAlt', staleValue: { skipped: true }, newValue: { skipped: false } },
+  { field: 'dayAdjustments', key: '3-2', staleValue: { action: 'shortened', factor: 0.7 }, newValue: { action: 'moved', targetKey: '3-3' } },
+  { field: 'scheduleChoices', key: 'tabataFriAlt', staleValue: 'move_long_run', newValue: 'keep_long_easy' },
+  { field: 'sideQuestCalendar', key: '2026-08-10', staleValue: 'mission_1', newValue: 'mission_2' }
+].forEach(function (c) {
+  test('a deleted ' + c.field + ' key on the newer device is NOT resurrected by a stale device that still has it', function () {
+    const localOverrides = { lastModified: 3000, deletedKeys: {} };
+    localOverrides[c.field] = {};
+    localOverrides.deletedKeys[c.field] = {};
+    localOverrides.deletedKeys[c.field][c.key] = true;
+    const remoteOverrides = { lastModified: 1000 };
+    remoteOverrides[c.field] = {};
+    remoteOverrides[c.field][c.key] = c.staleValue;
+    const merged = mergeState.mergeRunnerState(baseState(localOverrides), baseState(remoteOverrides));
+    assert.equal(merged[c.field][c.key], undefined, 'the deletion on the newer device must win, not the stale device\'s copy');
+    assert.equal(merged.deletedKeys[c.field][c.key], true, 'the tombstone survives for a later third-device sync');
+  });
+
+  test(c.field + ' still merges a real edit on the newer device over an older, untouched value (existing behavior preserved)', function () {
+    const localOverrides = { lastModified: 2000 };
+    localOverrides[c.field] = {};
+    localOverrides[c.field][c.key] = c.newValue;
+    const remoteOverrides = { lastModified: 1000 };
+    remoteOverrides[c.field] = {};
+    remoteOverrides[c.field][c.key] = c.staleValue;
+    const merged = mergeState.mergeRunnerState(baseState(localOverrides), baseState(remoteOverrides));
+    assert.deepEqual(merged[c.field][c.key], c.newValue, 'the newer device\'s real value still wins, same as before this fix');
+  });
+});
+
+test('legacy states missing deletedKeys entirely still merge logs correctly (no tombstone tracking, old behavior)', function () {
+  const local = { lastModified: 2000, units: 'mi', logs: { '1-1': { distance: 5 } } };
+  const remote = { lastModified: 1000, units: 'mi', logs: {} };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.logs['1-1'].distance, 5);
+  assert.deepEqual(merged.deletedKeys, {
+    logs: {}, overrides: {}, crossType: {}, sessionLogs: {}, sessionOverrides: {},
+    dayAdjustments: {}, scheduleChoices: {}, sideQuestCalendar: {},
+    recurringWorkouts: {}, travelPeriods: {}
+  });
 });
 
 test('lastModified in the merged result is always the max of both sides', function () {
