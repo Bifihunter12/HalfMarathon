@@ -3698,8 +3698,23 @@
   }
 
   // ── AI coach chat -- a real multi-turn conversation, not a single ask-and-forget box ──
+  // renderCoachChat() is the navigation entry point -- it records exactly
+  // ONE screen on the nav stack, no matter how many times the thread
+  // re-renders afterward (sending a message, confirming/cancelling an
+  // action, or the AI's response arriving all re-render in place via
+  // renderCoachChatScreen(), which must NOT call _recordScreen itself --
+  // otherwise every one of those re-renders would push its own history
+  // entry, and "Back to plan" would need to be clicked once per re-render
+  // instead of once, since it'd just be popping back through past chat
+  // states rather than actually leaving the screen. Bug found live: this
+  // used to call _recordScreen from inside the render body itself, so it
+  // ran on every recursive re-render too. Same fix as renderWizard's
+  // outer/renderStep split just above.
   function renderCoachChat() {
     _recordScreen(function () { renderCoachChat(); });
+    renderCoachChatScreen();
+  }
+  function renderCoachChatScreen() {
     var app = document.getElementById('app');
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -3880,13 +3895,13 @@
         else if (turn.action.type === 'reduce_intensity') ok = applyReduceIntensity(turn.action.key, turn.action.factor);
         else if (turn.action.type === 'substitute_side_quest') ok = applySideQuestChat(turn.action.key, turn.action.sideQuestId);
         turn.resolved = ok ? 'confirmed' : 'failed';
-        renderCoachChat();
+        renderCoachChatScreen();
       });
     });
     wrap.querySelectorAll('[data-cancel-idx]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         coachHistory[parseInt(btn.getAttribute('data-cancel-idx'), 10)].resolved = 'cancelled';
-        renderCoachChat();
+        renderCoachChatScreen();
       });
     });
 
@@ -3905,7 +3920,7 @@
 
       coachHistory.push({ role: 'user', text: req });
       coachWaiting = true;
-      renderCoachChat();
+      renderCoachChatScreen();
 
       fetch('/.netlify/functions/coach', {
         method: 'POST',
@@ -3954,7 +3969,7 @@
         coachHistory.push({ role: 'coach', text: "Couldn't reach the AI coach right now.", action: null, resolved: null });
       }).finally(function () {
         coachWaiting = false;
-        renderCoachChat();
+        renderCoachChatScreen();
       });
     }
 
