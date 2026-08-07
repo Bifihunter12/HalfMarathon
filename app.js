@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.06.5';
+  var APP_VERSION = '2026.08.06.6';
   var SideQuestDomain = window.RACRSideQuests || {};
   var PathDomain = window.RACRPath || {};
   var MergeStateDomain = window.RACRMergeState || {};
@@ -915,6 +915,14 @@
     // check, not just the `if (!s.workoutAudio)` guard above. null means
     // "platform default voice," exactly the same as before this existed.
     if (s.workoutAudio.voiceURI === undefined) s.workoutAudio.voiceURI = null;
+    // Neural TTS (OpenAI, via netlify/functions/tts.js) -- OFF by default
+    // deliberately: this is a real per-character cost on the app owner's
+    // OpenAI key with no spending cap today, so it must be an explicit
+    // opt-in, never something an existing or new install silently starts
+    // using. ttsVoice defaults to the same 'nova' the proxy itself falls
+    // back to, so the Settings picker always has a sensible starting value.
+    if (s.workoutAudio.neuralEnabled === undefined) s.workoutAudio.neuralEnabled = false;
+    if (s.workoutAudio.ttsVoice === undefined) s.workoutAudio.ttsVoice = 'nova';
     // docs/COACHING_ENGINE_SPEC.md -- user-facing coaching preferences
     // (frequency mode + category toggles), separate from workoutAudio
     // above (that's the audio channel itself; this is what the coach is
@@ -4071,9 +4079,39 @@
   var _activeTicker = null;
   var _cueService = null;
 
+  // Wraps the real Cache Storage API for audio-cues.js's neural-TTS cache
+  // (audioCache: {get(key)->Promise<Blob|null>, put(key,blob)->Promise}).
+  // A synthetic never-navigable path is used as the cache key since Cache
+  // Storage requires a Request/URL, not an arbitrary string. Returns null
+  // on a browser with no Cache Storage support -- audio-cues.js treats a
+  // null audioCache as "no caching," which still works correctly, it just
+  // never gets the free-after-first-time benefit.
+  function createBrowserAudioCache() {
+    if (typeof caches === 'undefined') return null;
+    var CACHE_NAME = 'racr-tts-audio-v1';
+    function keyUrl(key) { return '/tts-cache/' + encodeURIComponent(key); }
+    return {
+      get: function (key) {
+        return caches.open(CACHE_NAME).then(function (cache) { return cache.match(keyUrl(key)); })
+          .then(function (res) { return res ? res.blob() : null; })
+          .catch(function () { return null; });
+      },
+      put: function (key, blob) {
+        return caches.open(CACHE_NAME).then(function (cache) {
+          return cache.put(keyUrl(key), new Response(blob, { headers: { 'Content-Type': (blob && blob.type) || 'audio/mpeg' } }));
+        }).catch(function () { /* caching is best-effort */ });
+      }
+    };
+  }
+  var _browserAudioCache = null;
+
   function getCueService() {
     if (!_cueService && AudioCuesDomain.createCueService) {
-      _cueService = AudioCuesDomain.createCueService({ enabled: state.workoutAudio.enabled, volume: state.workoutAudio.volume, voiceURI: state.workoutAudio.voiceURI });
+      if (!_browserAudioCache) _browserAudioCache = createBrowserAudioCache();
+      _cueService = AudioCuesDomain.createCueService({
+        enabled: state.workoutAudio.enabled, volume: state.workoutAudio.volume, voiceURI: state.workoutAudio.voiceURI,
+        neuralEnabled: state.workoutAudio.neuralEnabled, ttsVoice: state.workoutAudio.ttsVoice, audioCache: _browserAudioCache
+      });
     }
     return _cueService;
   }
@@ -4094,6 +4132,15 @@
       html += '<option value="' + escapeHtml(v.voiceURI) + '"' + (selectedURI === v.voiceURI ? ' selected' : '') + '>' + escapeHtml(v.name) + ' (' + escapeHtml(v.lang) + ')</option>';
     });
     return html;
+  }
+
+  // OpenAI's fixed voice list (mirrored in audio-cues.js/tts.js) -- no
+  // async loading needed, unlike the device Web Speech voices above.
+  function neuralVoiceOptionsHtml(selected) {
+    var voices = AudioCuesDomain.NEURAL_VOICES || [];
+    return voices.map(function (v) {
+      return '<option value="' + escapeHtml(v) + '"' + (selected === v ? ' selected' : '') + '>' + escapeHtml(v.charAt(0).toUpperCase() + v.slice(1)) + '</option>';
+    }).join('');
   }
 
   // Cue text -> haptic pattern, so every cue gets its own short vibration
@@ -5581,6 +5628,12 @@
         '<p class="recap-empty">Uses your device\'s own text-to-speech voices -- quality depends on what\'s installed. If the list looks short, check your device\'s text-to-speech settings for higher-quality voices.</p>' +
         '<select class="ob-input" id="set_coachVoiceSelect">' + voiceOptionsHtml(state.workoutAudio.voiceURI) + '</select>' +
         '<button type="button" class="ob-btn ob-btn-secondary" id="previewVoiceBtn" style="margin-top:8px">Preview voice</button>' +
+        '<div class="ob-label" style="margin-top:26px">Neural voice (beta)</div>' +
+        '<p class="recap-empty">A higher-quality AI voice instead of your device\'s built-in one. Uses a paid service and needs a network connection &mdash; falls back to your device voice automatically if it\'s slow, fails, or you\'re offline. Off by default.</p>' +
+        '<div class="chip-grid" id="set_neuralEnabled">' + chipsHtml('neuralEnabled', ['off', 'on'], { off: 'Off', on: 'On' }, state.workoutAudio.neuralEnabled ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:14px">Neural voice</div>' +
+        '<select class="ob-input" id="set_neuralVoiceSelect">' + neuralVoiceOptionsHtml(state.workoutAudio.ttsVoice) + '</select>' +
+        '<button type="button" class="ob-btn ob-btn-secondary" id="previewNeuralVoiceBtn" style="margin-top:8px">Preview neural voice</button>' +
         '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
         '<p class="recap-empty">Experimental toggles from RACR\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
@@ -5703,6 +5756,40 @@
       // saved yet, so the runner can compare voices before committing.
       svc.setVoice(coachVoiceSelect.value || null);
       svc.playCue('This is what your coach sounds like.', null);
+    });
+
+    wrap.querySelectorAll('#set_neuralEnabled .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.workoutAudio.neuralEnabled = chip.getAttribute('data-value') === 'on';
+        saveState(state);
+        var svc = getCueService();
+        if (svc) svc.setNeuralEnabled(state.workoutAudio.neuralEnabled);
+        wrap.querySelectorAll('#set_neuralEnabled .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === (state.workoutAudio.neuralEnabled ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.workoutAudio.neuralEnabled ? 'on' : 'off'))));
+        });
+      });
+    });
+    var neuralVoiceSelect = document.getElementById('set_neuralVoiceSelect');
+    neuralVoiceSelect.addEventListener('change', function () {
+      state.workoutAudio.ttsVoice = neuralVoiceSelect.value || 'nova';
+      saveState(state);
+      var svc = getCueService();
+      if (svc) svc.setTtsVoice(state.workoutAudio.ttsVoice);
+    });
+    document.getElementById('previewNeuralVoiceBtn').addEventListener('click', function () {
+      var svc = getCueService();
+      if (!svc) return;
+      // Force this one preview through the neural path even if the "Neural
+      // voice" toggle above is currently off (and revert right after) --
+      // otherwise there'd be no way to hear it before deciding to enable it
+      // for real. The revert happens on the next tick, after speakNext()'s
+      // own synchronous neuralAvailable() check has already captured this
+      // preview's forced-on state -- see audio-cues.js.
+      var wasEnabled = svc.neuralEnabled, wasVoice = svc.ttsVoice;
+      svc.setTtsVoice(neuralVoiceSelect.value);
+      svc.setNeuralEnabled(true);
+      svc.playCue('This is what your coach sounds like.', null);
+      setTimeout(function () { svc.setNeuralEnabled(wasEnabled); svc.setTtsVoice(wasVoice); }, 0);
     });
 
     var toReason = 'illness';

@@ -186,3 +186,179 @@ test('voiceURI getter reflects the current selection', function () {
   t.svc.setVoice(null);
   assert.equal(t.svc.voiceURI, null);
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Neural TTS (docs/COACHING_ENGINE_SPEC.md follow-up)
+// ═══════════════════════════════════════════════════════════════════════
+
+function fakeAudioEl() {
+  return {
+    volume: 1, onended: null, onerror: null, paused: false,
+    play: function () { return Promise.resolve(); },
+    pause: function () { this.paused = true; }
+  };
+}
+function fakeAudioCtor(created) {
+  return function (url) {
+    var el = fakeAudioEl();
+    el.src = url;
+    created.push(el);
+    return el;
+  };
+}
+function fakeCache() {
+  var store = {};
+  return {
+    store: store,
+    get: function (key) { return Promise.resolve(Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null); },
+    put: function (key, blob) { store[key] = blob; return Promise.resolve(); }
+  };
+}
+function fakeBlob(id) { return { id: id || 'blob' }; }
+
+function makeNeuralService(overrides) {
+  var speechApi = fakeSpeechApi();
+  var UtteranceCtor = fakeUtteranceCtor();
+  var created = [];
+  var vibrated = [];
+  var fetchCalls = [];
+  var opts = Object.assign({
+    speechApi: speechApi, SpeechSynthesisUtterance: UtteranceCtor,
+    vibrate: function (p) { vibrated.push(p); },
+    neuralEnabled: true,
+    AudioCtor: fakeAudioCtor(created),
+    createObjectURL: function (blob) { return 'blob://' + blob.id; },
+    fetchFn: function (url, reqOpts) {
+      fetchCalls.push({ url: url, body: JSON.parse(reqOpts.body) });
+      return Promise.resolve({ ok: true, blob: function () { return Promise.resolve(fakeBlob('fetched')); } });
+    },
+    audioCache: fakeCache()
+  }, overrides || {});
+  var svc = AudioCues.createCueService(opts);
+  return { svc: svc, speechApi: speechApi, created: created, vibrated: vibrated, fetchCalls: fetchCalls, cache: opts.audioCache };
+}
+
+test('neural TTS: a cache hit plays immediately without calling fetch', async function () {
+  var t = makeNeuralService();
+  t.cache.store['nova::Start running'] = fakeBlob('cached');
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.fetchCalls.length, 0, 'a cached phrase must never hit the network');
+  assert.equal(t.created.length, 1, 'exactly one audio element played');
+  assert.equal(t.created[0].src, 'blob://cached');
+});
+
+test('neural TTS: a cache miss fetches, plays, and stores the result for next time', async function () {
+  var t = makeNeuralService();
+  t.svc.playCue('Begin your warm-up', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.fetchCalls.length, 1);
+  assert.equal(t.fetchCalls[0].body.text, 'Begin your warm-up');
+  assert.equal(t.fetchCalls[0].body.voice, 'nova');
+  assert.equal(t.created[0].src, 'blob://fetched');
+  assert.deepEqual(t.cache.store['nova::Begin your warm-up'], fakeBlob('fetched'), 'must be cached for future workouts');
+});
+
+test('neural TTS: a network failure falls back to Web Speech for that cue, never silence', async function () {
+  var t = makeNeuralService({ fetchFn: function () { return Promise.reject(new Error('offline')); } });
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.created.length, 0, 'no neural audio should have played');
+  assert.deepEqual(t.speechApi.spoken, ['Start running'], 'must fall back to Web Speech instead of going silent');
+});
+
+test('neural TTS: a slow response past the timeout falls back to Web Speech instead of waiting indefinitely', async function () {
+  var t = makeNeuralService({
+    ttsTimeoutMs: 15,
+    fetchFn: function () { return new Promise(function (resolve) { setTimeout(function () { resolve({ ok: true, blob: function () { return Promise.resolve(fakeBlob('late')); } }); }, 500); }); }
+  });
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 40); });
+  assert.deepEqual(t.speechApi.spoken, ['Start running'], 'must fall back once the timeout elapses, not wait for the slow response');
+});
+
+test('neural TTS: an upstream error response (ok:false) falls back to Web Speech', async function () {
+  var t = makeNeuralService({ fetchFn: function () { return Promise.resolve({ ok: false }); } });
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.deepEqual(t.speechApi.spoken, ['Start running']);
+});
+
+test('neural TTS: an audio playback error falls back to Web Speech', async function () {
+  var created = [];
+  var AudioCtorWithError = function (url) {
+    var el = fakeAudioEl();
+    el.src = url;
+    created.push(el);
+    setTimeout(function () { if (el.onerror) el.onerror(); }, 5);
+    return el;
+  };
+  var t = makeNeuralService({ AudioCtor: AudioCtorWithError });
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 20); });
+  assert.deepEqual(t.speechApi.spoken, ['Start running'], 'a playback error must still fall back, not go silent');
+});
+
+test('neural TTS: cues are still sequential -- the second cue does not start until the first finishes', async function () {
+  var t = makeNeuralService();
+  t.svc.playCue('one', null);
+  t.svc.playCue('two', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.created.length, 1, 'only the first cue should have started playing so far');
+  t.created[0].onended();
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.created.length, 2);
+});
+
+test('neural TTS: stopAll pauses in-flight playback and prevents a late-arriving fetch from playing', async function () {
+  var resolveFetch;
+  var t = makeNeuralService({
+    fetchFn: function () { return new Promise(function (resolve) { resolveFetch = resolve; }); }
+  });
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 5); }); // fetch is now in flight, nothing played yet
+  t.svc.stopAll();
+  resolveFetch({ ok: true, blob: function () { return Promise.resolve(fakeBlob('late-after-stop')); } });
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.created.length, 0, 'a fetch that resolves after stopAll() must never start playing');
+  assert.deepEqual(t.speechApi.spoken, [], 'must not fall back to Web Speech either -- the workout already ended');
+});
+
+test('neural TTS: different tts voices use different cache entries for the same text', async function () {
+  var t = makeNeuralService();
+  t.cache.store['nova::Start running'] = fakeBlob('nova-cached');
+  t.svc.setTtsVoice('shimmer');
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.fetchCalls.length, 1, 'a different voice must not reuse another voice\'s cached audio');
+  assert.equal(t.fetchCalls[0].body.voice, 'shimmer');
+});
+
+test('neural TTS: neuralEnabled false uses Web Speech even when fetch/Audio are available', async function () {
+  var t = makeNeuralService({ neuralEnabled: false });
+  t.svc.playCue('Start running', null);
+  await new Promise(function (r) { setTimeout(r, 10); });
+  assert.equal(t.fetchCalls.length, 0);
+  assert.deepEqual(t.speechApi.spoken, ['Start running']);
+});
+
+test('neural TTS: neuralAvailable is false when required dependencies are missing, even if enabled', function () {
+  var t = makeNeuralService({ fetchFn: null });
+  assert.equal(t.svc.neuralAvailable, false);
+});
+
+test('neural TTS: vibration still fires alongside a neural cue', async function () {
+  var t = makeNeuralService();
+  t.svc.playCue('Start running', [80]);
+  assert.deepEqual(t.vibrated, [[80]]);
+});
+
+test('neural TTS: setNeuralEnabled/setTtsVoice getters reflect current state', function () {
+  var t = makeNeuralService({ neuralEnabled: false });
+  assert.equal(t.svc.neuralEnabled, false);
+  t.svc.setNeuralEnabled(true);
+  assert.equal(t.svc.neuralEnabled, true);
+  assert.equal(t.svc.ttsVoice, 'nova');
+  t.svc.setTtsVoice('shimmer');
+  assert.equal(t.svc.ttsVoice, 'shimmer');
+});
