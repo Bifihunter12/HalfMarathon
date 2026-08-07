@@ -1,4 +1,4 @@
-# RACR Side Quests — Adaptive Substitution System
+# Zaera Side Quests — Adaptive Substitution System
 
 > Build it as a **Side Quest system inside the running plan**, not as a separate library of random workouts.
 

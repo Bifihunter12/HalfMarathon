@@ -1,17 +1,17 @@
-# RACR Leveling System — XP, RACR Level, Badges, PRs
+# Zaera Leveling System — XP, Zaera Level, Badges, PRs
 
-> **Superseded (2026-08-03):** XP and the generic RACR Level were removed from V1 — see `docs/COACHING_SPEC.md` "Achievements." Kept for historical context only.
+> **Superseded (2026-08-03):** XP and the generic Zaera Level were removed from V1 — see `docs/COACHING_SPEC.md` "Achievements." Kept for historical context only.
 
-Saved verbatim/condensed (2026-07-22). **Superseded the same day by `docs/RACR_Reward_System_Master_Prompt.md`** — a fuller engineering-grade version of this same material (adds quality bonuses, the XP event system, full data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Kept here for history; build from the newer doc, not this one. Original framing: this completes the reward architecture the RACR Master Prompt only partially specified — it answers *why XP matters, what leveling up means, what a level unlocks,* and *how small wins feel rewarding between major milestones.* **Spec only — no code changes made from either doc yet.**
+Saved verbatim/condensed (2026-07-22). **Superseded the same day by `docs/Zaera_Reward_System_Master_Prompt.md`** — a fuller engineering-grade version of this same material (adds quality bonuses, the XP event system, full data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Kept here for history; build from the newer doc, not this one. Original framing: this completes the reward architecture the Zaera Master Prompt only partially specified — it answers *why XP matters, what leveling up means, what a level unlocks,* and *how small wins feel rewarding between major milestones.* **Spec only — no code changes made from either doc yet.**
 
 ## Four distinct progression systems (each answers a different question)
 
 1. **Main Quest Path** — "How close am I to my race?" Season-specific: completed weeks, current phase, long-run progression, key workouts, race prep, race day. Resets each new season; completed season archives.
-2. **XP + RACR Level** — "How much experience have I built as a runner?" Permanent, carries across seasons. Reflects running, plan adherence, appropriate effort, recovery, strength, mobility, returning after disruption, race completion.
+2. **XP + Zaera Level** — "How much experience have I built as a runner?" Permanent, carries across seasons. Reflects running, plan adherence, appropriate effort, recovery, strength, mobility, returning after disruption, race completion.
 3. **Badges** — "What specific things have I accomplished?" Named achievements (first long run, five controlled easy runs, first interval session, new distance, strength progression completed, returned after illness, race completed). Award bonus XP, but the achievement itself is the primary value.
 4. **Personal Records & Milestones** — "What can I do now that I couldn't before?" (longest run, fastest mile/5K, first continuous 30-min run, best controlled tempo, most consistent intervals, heaviest technically-sound split squat, longest mobility-consistency streak). Not all become badges — some stay PRs/accomplishments; only the most meaningful graduate to permanent badges.
 
-**Critical, repeated throughout the source spec: never combine these four.** Race Readiness (prep for *this* race) must stay separate from RACR Level (permanent identity) — a high-level user can have low current readiness after a break; a brand-new low-level user can arrive race-ready with existing fitness.
+**Critical, repeated throughout the source spec: never combine these four.** Race Readiness (prep for *this* race) must stay separate from Zaera Level (permanent identity) — a high-level user can have low current readiness after a break; a brand-new low-level user can arrive race-ready with existing fitness.
 
 ## What XP is for (three jobs) / what XP is NOT
 
@@ -59,18 +59,18 @@ Speed Session (first interval/hill session) · Controlled Speed (prescribed reps
 **Mobility**: Mobility Started → Post-Run Reset → Ankles Unlocked → Hips in Motion → Move Better. Rewards consistency/progression — never claims to objectively measure "flexibility" absent a real assessment.
 
 ### Badge XP bonus table
-Small milestone 50 · Standard behavior 100 · Mastery 175 · Side Mission progression 100 · Main Quest phase 250 · Major distance 200 · Comeback/recovery 150 · Race Ready 300 · RACR Finisher 500 · Goal time achieved: +250 additional. Badge XP must not dominate the economy — months of training should collectively outweigh the one race-day award.
+Small milestone 50 · Standard behavior 100 · Mastery 175 · Side Mission progression 100 · Main Quest phase 250 · Major distance 200 · Comeback/recovery 150 · Race Ready 300 · Zaera Finisher 500 · Goal time achieved: +250 additional. Badge XP must not dominate the economy — months of training should collectively outweigh the one race-day award.
 
 ## Weekly Side Mission XP cap
 
 Side Mission XP capped at **30% of that week's available Main Quest XP**. User may still do extra strength/mobility when safe, it just doesn't accelerate leveling — prevents farming 5-minute mobility sessions, excessive strength volume, or treating Side Missions as the "real game." No cap on meaningful accomplishment records — only repeatable XP is controlled.
 
-## RACR Level (permanent, cross-season)
+## Zaera Level (permanent, cross-season)
 
 Represents training experience, consistency, running mastery, recovery intelligence, supporting strength/mobility, completed race journeys. **Does not mean**: faster than others, ready for a marathon, medically fit, or advanced enough for any workout. A Level 25 recreational runner may be slower than a Level 3 former collegiate runner.
 
 ### 50-level structure with periodic titles
-1–4 In Motion (began acting) · 5–9 Building (consistency/capacity developing) · 10–14 Grounded (repeatable training system built) · 15–19 Enduring (long-run capacity/resilience developing) · 20–24 Advancing (broader running mastery) · 25–29 Racecraft (pacing/prep/execution improving) · 30–39 Seasoned (substantial training experience) · 40–49 Proven (durable training behavior demonstrated) · 50 RACR (top long-term identity milestone). Avoid ranks like "Elite" absent actual elite performance — the level is behavioral, not a physiological classification.
+1–4 In Motion (began acting) · 5–9 Building (consistency/capacity developing) · 10–14 Grounded (repeatable training system built) · 15–19 Enduring (long-run capacity/resilience developing) · 20–24 Advancing (broader running mastery) · 25–29 Racecraft (pacing/prep/execution improving) · 30–39 Seasoned (substantial training experience) · 40–49 Proven (durable training behavior demonstrated) · 50 Zaera (top long-term identity milestone). Avoid ranks like "Elite" absent actual elite performance — the level is behavioral, not a physiological classification.
 
 ### Pacing (fast early reinforcement, slower long-term, no post-one-season inflation)
 Level 2 ≈ after ~2 workouts · Level 3 ≈ first training week · Level 5 ≈ weeks 2–3 · Level 10 ≈ after a meaningful training block · Level 20 ≈ after 1+ full seasons · Level 50 ≈ long-term multi-season achievement.
@@ -81,7 +81,7 @@ L1: 0 · L2: 200 · L3: 500 · L4: 850 · L5: 1,250 · L10: 4,500 · L15: 9,000 
 ### What leveling up unlocks
 **Early levels**: profile title, first badge frame, additional Path accent, preferred celebration style, choose a Side Mission focus.
 **Middle levels**: more Side Mission variations, advanced history views, custom Season Card formats, additional path environments, custom milestone display, advanced benchmark comparisons, additional profile titles.
-**Higher levels**: multi-season trophy cabinet, legacy badge frames, advanced Path themes, lifetime running timeline, custom RACR crest, season comparison, personalized "year in running," optional advanced challenges.
+**Higher levels**: multi-season trophy cabinet, legacy badge frames, advanced Path themes, lifetime running timeline, custom Zaera crest, season comparison, personalized "year in running," optional advanced challenges.
 
 **Never level-gated** (available to every user regardless of level): manual run logging, pace calculation, injury modification, recovery options, training-plan explanations, essential progress data, basic strength/mobility, safety warnings, ability to reschedule, core coaching.
 

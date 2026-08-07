@@ -1,4 +1,4 @@
-# RACR — Android/Mobile Test Plan
+# Zaera — Android/Mobile Test Plan
 
 Companion to `RELEASE_READINESS_AUDIT.md`. Since there is no Android app to install today, this plan is split into what's testable **right now** (the PWA, in a real Android Chrome browser and installed-to-home-screen) and what becomes testable **once a TWA wrapper exists** (see `GOOGLE_PLAY_CHECKLIST.md`).
 

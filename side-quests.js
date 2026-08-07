@@ -1,6 +1,6 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.RACRSideQuests = factory();
+  else root.ZaeraSideQuests = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
@@ -175,7 +175,7 @@
     }
   ];
 
-  // ── Bodyweight Challenge Library (docs/RACR_SideMission_Expansion.md) ──
+  // ── Bodyweight Challenge Library (docs/Zaera_SideMission_Expansion.md) ──
   // Distinct from MISSION_CATALOG (single-session, complete/not-complete) and
   // from QUEST_TRACKS (session-count progress) -- a challenge accumulates a
   // numeric quantity (reps or seconds) toward a target across multiple

@@ -1,6 +1,6 @@
-# RACR Side-Mission Expansion — Bodyweight Challenges, Equipment Personalization, Flexible Strength Support
+# Zaera Side-Mission Expansion — Bodyweight Challenges, Equipment Personalization, Flexible Strength Support
 
-Saved verbatim/condensed (2026-07-22). Expands `docs/RACR_Master_Prompt.md`'s Side Mission section with a full equipment-personalization model, a named bodyweight-challenge library, mission substitution/recommendation logic, and Side-Mission-specific XP/badge rules. **No explicit build instruction attached — spec only, matching how every other large drop this session (Side Quest spec, Quests Tab spec, RACR master prompts) was saved first and scoped via its own Plan Mode pass only when asked.**
+Saved verbatim/condensed (2026-07-22). Expands `docs/Zaera_MainQuest_Master_Prompt.md`'s Side Mission section with a full equipment-personalization model, a named bodyweight-challenge library, mission substitution/recommendation logic, and Side-Mission-specific XP/badge rules. **No explicit build instruction attached — spec only, matching how every other large drop this session (Side Quest spec, Quests Tab spec, Zaera master prompts) was saved first and scoped via its own Plan Mode pass only when asked.**
 
 **Important connection to prior work**: the run-logging correction's plan (2026-07-22, earlier today) flagged a deferred item — "the Side Mission catalog re-scope (demoting hike/cycling/rowing out of the primary Side Mission browsing experience)" — as a distinct correction not yet done. **This spec effectively resolves that ambiguity**: its entire MVP library (bodyweight/dumbbells/kettlebells/bands/mobility, listed below) contains zero hike/cross/cycling entries. Whenever this gets built, it should be read as the concrete version of that earlier deferred re-scope, not a separate additional pass.
 
@@ -14,20 +14,20 @@ Saved verbatim/condensed (2026-07-22). Expands `docs/RACR_Master_Prompt.md`'s Si
 
 ## Core scope boundary
 
-Side Missions give runners: an alternative to another run, short satisfying wins, basic supporting strength, mobility/movement quality, variety, equipment-appropriate options, home/outdoor/gym flexibility. **RACR must not become**: a bodybuilding/powerlifting app, a 1RM tracker, a detailed exercise-library product, or a replacement for real strength coaching. Main Quest stays running; Side Missions only support it.
+Side Missions give runners: an alternative to another run, short satisfying wins, basic supporting strength, mobility/movement quality, variety, equipment-appropriate options, home/outdoor/gym flexibility. **Zaera must not become**: a bodybuilding/powerlifting app, a 1RM tracker, a detailed exercise-library product, or a replacement for real strength coaching. Main Quest stays running; Side Missions only support it.
 
 ## Equipment onboarding (4 questions, editable later)
 
 1. **Equipment** (multi-select): bodyweight only, exercise mat, resistance bands, mini bands, dumbbells, kettlebells, bench/sturdy box, step/stairs, pull-up bar, suspension trainer/TRX, barbell+plates, cable machines, full gym, other, not sure yet.
 2. **Where you train**: home / outside / gym / a mix.
 3. **Preferred Side Mission duration**: 5-10 / 10-20 / 20-30 / up to 45 min.
-4. **What Side Missions should help with**: stronger legs, stronger upper body, core, mobility, calf/ankle durability, general fitness, variety/fun, injury-resistant habits, "let RACR choose".
+4. **What Side Missions should help with**: stronger legs, stronger upper body, core, mobility, calf/ankle durability, general fitness, variety/fun, injury-resistant habits, "let Zaera choose".
 
 Never force a detailed gym assessment; all four answers editable later.
 
 ## Equipment-adaptive missions (one movement, several equipment-scaled versions)
 
-Worked examples given for squat/hinge/push/pull missions, each with bodyweight → dumbbell → kettlebell → full-gym versions (e.g. Squat: bodyweight squat → goblet/two-dumbbell squat → kettlebell goblet squat → goblet/front squat/leg press). User can always pick a different equivalent variation; RACR may recommend one but never lock it.
+Worked examples given for squat/hinge/push/pull missions, each with bodyweight → dumbbell → kettlebell → full-gym versions (e.g. Squat: bodyweight squat → goblet/two-dumbbell squat → kettlebell goblet squat → goblet/front squat/leg press). User can always pick a different equivalent variation; Zaera may recommend one but never lock it.
 
 ## Bodyweight challenge library (12 named challenges — the spec's centerpiece)
 
@@ -102,4 +102,4 @@ Equipment selectable + editable later; bodyweight-only/dumbbell/kettlebell/full-
 
 ## Final product rule
 
-Main Quest builds the runner; Side Missions build the support system around the runner. No-equipment users need meaningful options; dumbbell/kettlebell users need useful variations; full-gym users should be able to use their gym without RACR becoming a gym-programming app. The system must stay simple enough to start, flexible enough to personalize, challenging enough to feel rewarding, safe enough to support the running plan, and focused enough to remain unmistakably RACR.
+Main Quest builds the runner; Side Missions build the support system around the runner. No-equipment users need meaningful options; dumbbell/kettlebell users need useful variations; full-gym users should be able to use their gym without Zaera becoming a gym-programming app. The system must stay simple enough to start, flexible enough to personalize, challenging enough to feel rewarding, safe enough to support the running plan, and focused enough to remain unmistakably Zaera.

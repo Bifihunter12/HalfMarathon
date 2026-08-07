@@ -1,4 +1,4 @@
-# RACR — Release Readiness Audit
+# Zaera — Release Readiness Audit
 
 **Date:** 2026-07-22
 **Scope:** `C:\Users\carol\OneDrive\HalfMarathon` (repo remote: `Bifihunter12/HalfMarathon.git`, branch `main`, live at `https://tubular-mochi-1a8ae6.netlify.app/`)

@@ -1,10 +1,10 @@
-# RACR — Safety & Escalation Policy
+# Zaera — Safety & Escalation Policy
 
 **Version:** 1.0 (2026-07-29) · **Status:** Internally documented, describing behavior already implemented in code. Not yet reviewed by a qualified clinical or sports-medicine professional. **This document does not constitute that review**, and nothing in it should be treated as production-approved safety guidance until a qualified reviewer signs off.
 
 Companion to `docs/COACHING_SPEC.md` (training-progression rules) — this document covers the other half of the Zaera Labs Running master prompt's governance model: symptom routing, escalation, and the boundaries around what the app is and isn't allowed to do with a runner's reported pain, illness, or distress.
 
-RACR is a general training-guidance product. It does not diagnose injury or illness, does not prescribe treatment, and does not override a runner's own medical care. Everything below describes how the app currently behaves when a runner reports something concerning — not what it should eventually become.
+Zaera is a general training-guidance product. It does not diagnose injury or illness, does not prescribe treatment, and does not override a runner's own medical care. Everything below describes how the app currently behaves when a runner reports something concerning — not what it should eventually become.
 
 ## AI-coach red-flag routing — documented
 
@@ -24,7 +24,7 @@ Every other action type the model can propose (`reduce_intensity`, `substitute_w
 
 **Distinct from the onboarding injury-status question (added 2026-07-29, see `docs/COACHING_SPEC.md` "Runner classification"):** `profile.injuryStatus` is a standing intake attribute collected once, answered from memory about the runner's general current state, and used only to constrain plan generation (classification cap, plus an advisory warning — see below). `painGuidance()` is a transient, per-workout symptom check, answered fresh each time about one specific run. The two never read or write each other's data, and neither is a substitute for the other — a runner could report `resolved` at onboarding and still trigger an `urgent` `painGuidance()` result on a specific run.
 
-**Injury-status warnings, deliberately advisory only (fixed 2026-08-02):** an explicit product decision this pass: RACR does not gate or block plan generation based on injury status, for either `unable_to_run` or `medically_restricted` — no acknowledgment checkbox, no holding screen. The reasoning: a runner knows their own situation better than this app does, and a hard block risks pushing someone to just pick a different, inaccurate status to get a plan at all, which would be *worse* (zero adjustment instead of a cautious, capped one). Both statuses still cap plan generation at `beginner` level (unchanged from 2026-07-29) and now both carry a clear advisory warning in the plan's warnings banner — previously `unable_to_run` had no warning at all, only the silent level cap.
+**Injury-status warnings, deliberately advisory only (fixed 2026-08-02):** an explicit product decision this pass: Zaera does not gate or block plan generation based on injury status, for either `unable_to_run` or `medically_restricted` — no acknowledgment checkbox, no holding screen. The reasoning: a runner knows their own situation better than this app does, and a hard block risks pushing someone to just pick a different, inaccurate status to get a plan at all, which would be *worse* (zero adjustment instead of a cautious, capped one). Both statuses still cap plan generation at `beginner` level (unchanged from 2026-07-29) and now both carry a clear advisory warning in the plan's warnings banner — previously `unable_to_run` had no warning at all, only the silent level cap.
 
 ## Illness & interruption handling — documented, ramp-back added 2026-08-02
 
@@ -40,4 +40,4 @@ Every other action type the model can propose (`reduce_intensity`, `substitute_w
 
 ## Non-negotiable, restated
 
-Safety behavior in this document is **not** approved production truth. It is what the code currently does, made inspectable and versioned so a qualified clinical or sports-medicine professional can review it — per the release gates in the master prompt, RACR should not expand public reach or add new distance families (beyond the current 5K/10K launch scope, see `docs/COACHING_SPEC.md`) until that review has actually happened.
+Safety behavior in this document is **not** approved production truth. It is what the code currently does, made inspectable and versioned so a qualified clinical or sports-medicine professional can review it — per the release gates in the master prompt, Zaera should not expand public reach or add new distance families (beyond the current 5K/10K launch scope, see `docs/COACHING_SPEC.md`) until that review has actually happened.

@@ -1,4 +1,4 @@
-# RACR — Coaching Engine Real-Device QA
+# Zaera — Coaching Engine Real-Device QA
 
 Companion to `docs/COACHING_ENGINE_SPEC.md` and `docs/WORKOUT_RUNNER_SPEC.md`. Everything in those two docs was verified either by automated test (424 tests) or a single browser session with the real Web Speech API intercepted — **neither is a substitute for hearing the coach on a real phone, in your ear, while moving.** This doc is that pass: three real workouts, on a real Android device, with a concrete recording template so findings become evidence, not vibes.
 

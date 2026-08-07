@@ -1,4 +1,4 @@
-# RACR — Workout Runner V1: Audit + Implementation Plan
+# Zaera — Workout Runner V1: Audit + Implementation Plan
 
 Status: **Implemented (2026-08-06), phases 1-7 of §6 below.** This document was written as a plan before implementation began; the sections below are left as originally written except where explicitly marked "As built" with what changed. See the final report delivered in-conversation for the complete verification breakdown (automated vs. manually browser-tested vs. still requiring a real Android device).
 
@@ -17,7 +17,7 @@ Status: **Implemented (2026-08-06), phases 1-7 of §6 below.** This document was
 ### 1.1 Architecture (verified, not assumed)
 
 - Confirmed vanilla JS PWA. `package.json` has zero dependencies and no build step (`"test": "node --test"` only). No bundler, no framework, no TypeScript.
-- Single-page app: `index.html` loads `app.js` (5,800+ lines, one IIFE) plus sibling modules `coaching-rules.js`, `merge-state.js`, `side-quests.js`, `path-system.js`, `progress-stats.js` — each a self-contained UMD module (`window.RACR*`), require()-able from Node tests without a DOM. This is the established pattern for testable logic in this codebase, and the one the runner's state machine must follow.
+- Single-page app: `index.html` loads `app.js` (5,800+ lines, one IIFE) plus sibling modules `coaching-rules.js`, `merge-state.js`, `side-quests.js`, `path-system.js`, `progress-stats.js` — each a self-contained UMD module (`window.Zaera*`), require()-able from Node tests without a DOM. This is the established pattern for testable logic in this codebase, and the one the runner's state machine must follow.
 - `netlify/functions/*.js` — small serverless functions, only used for AI calls (coach chat, celebrate, why-workout, weekly-recap) and a minimal telemetry endpoint. Not relevant to the runner except optionally for telemetry events.
 - **No Android/iOS/Capacitor/Cordova/TWA/native-shell configuration exists anywhere in the repo.** Confirmed via search for `android/`, `capacitor.config.*`, `*.gradle`, `AndroidManifest.xml`, `twa-manifest.json` — zero matches.
 - Service worker (`sw.js`): network-first fetch strategy, cache-busting via a shared `APP_VERSION` string that must be bumped in `app-version.json` + `index.html` + `sw.js` together (established, proven pattern from this session's earlier fixes).

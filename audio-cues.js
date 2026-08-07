@@ -1,6 +1,6 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.RACRAudioCues = factory();
+  else root.ZaeraAudioCues = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 

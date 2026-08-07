@@ -1,4 +1,4 @@
-# RACR — Release Blockers
+# Zaera — Release Blockers
 
 Companion to `RELEASE_READINESS_AUDIT.md`. Only BLOCKER and CRITICAL items — see `FIX_ROADMAP.md` for HIGH/MEDIUM/LOW and sequencing.
 

@@ -1,6 +1,6 @@
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.RACRCoachingRules = factory();
+  else root.ZaeraCoachingRules = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
@@ -1396,7 +1396,7 @@
     var startRunDays = startRunDaysFor(profile.runDaysPerWeek, targetRunDays);
     var wantCross = !(profile.crossOptions && profile.crossOptions.length === 1 && profile.crossOptions[0] === 'None');
     var qualityPool = QUALITY_POOL[event];
-    var longRunSafetyCap = Math.max(profile.longestRun * 1.15, 2);
+    var longRunSafetyCap = Math.max((profile.longestRun || 0) * 1.15, 2);
     var terrainNote = terrainNoteFrom(profile.terrains);
 
     // docs/COACHING_SPEC.md "Run-walk programming" -- only when the runner

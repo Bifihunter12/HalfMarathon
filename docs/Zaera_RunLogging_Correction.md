@@ -1,10 +1,10 @@
-# RACR PRODUCT CORRECTION — Run Logging, Performance Progression and Side-Mission Scope
+# Zaera PRODUCT CORRECTION — Run Logging, Performance Progression and Side-Mission Scope
 
-Saved verbatim (2026-07-22). This is a correction to the standing RACR spec (`RACR_Master_Prompt.md`), not a replacement — it targets a specific gap: the weekly plan screen is currently a checklist with no way to record actual distance/duration/pace/effort against the plan, and no performance-progression tracking. It also narrows Side Missions' scope back to strength/core/mobility (cross-training belongs to the Main Quest plan or an AI-approved alternative, not the primary Side Mission catalog).
+Saved verbatim (2026-07-22). This is a correction to the standing Zaera spec (`Zaera_MainQuest_Master_Prompt.md`), not a replacement — it targets a specific gap: the weekly plan screen is currently a checklist with no way to record actual distance/duration/pace/effort against the plan, and no performance-progression tracking. It also narrows Side Missions' scope back to strength/core/mobility (cross-training belongs to the Main Quest plan or an AI-approved alternative, not the primary Side Mission catalog).
 
 ## Core problem
 
-RACR currently shows scheduled workouts as checklist items. The user cannot record actual distance, duration, pace, effort, or performance, and cannot see progress over time. RACR is a race-training system (run farther, run faster, build endurance, improve skill/pacing, get stronger/more mobile via Side Missions) — not a checklist.
+Zaera currently shows scheduled workouts as checklist items. The user cannot record actual distance, duration, pace, effort, or performance, and cannot see progress over time. Zaera is a race-training system (run farther, run faster, build endurance, improve skill/pacing, get stronger/more mobile via Side Missions) — not a checklist.
 
 ## Product hierarchy
 
@@ -90,9 +90,9 @@ Main Quest badges based on measurable running development: Distance Unlocked (ne
 
 Side Mission badges based on strength/mobility: Stronger Strides (first strength workout), Single-Leg Strong, Calf Capacity, Core Engine (5 core missions), Mobility Matters (5 mobility sessions), Hips in Motion, Ankles Unlocked.
 
-## UX requirement — RACR must be able to answer
+## UX requirement — Zaera must be able to answer
 
-How far/long did I run today? What was my average pace? Did I follow the intended effort? Am I running farther/faster than when I started (at comparable effort)? What's my current longest run? How close am I to race distance? Which strength capability / mobility path am I developing? What should I do next? **If RACR can't answer these, the feature isn't complete.**
+How far/long did I run today? What was my average pace? Did I follow the intended effort? Am I running farther/faster than when I started (at comparable effort)? What's my current longest run? How close am I to race distance? Which strength capability / mobility path am I developing? What should I do next? **If Zaera can't answer these, the feature isn't complete.**
 
 ## Data model (reference — field lists, not literal schema requirement)
 

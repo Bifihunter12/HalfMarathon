@@ -1,5 +1,5 @@
 {
-  "name": "runner",
+  "name": "zaera-running-coach",
   "private": true,
   "description": "Zero-dependency test entry point for the Netlify Functions in netlify/functions/ -- the app itself stays a build-step-free vanilla JS PWA (see app.js).",
   "scripts": {

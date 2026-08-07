@@ -1,4 +1,4 @@
-# RACR — Deterministic Coaching Engine: Audit + Implementation
+# Zaera — Deterministic Coaching Engine: Audit + Implementation
 
 Status: **Implemented (2026-08-06).** Builds on the just-shipped Workout Runner (`docs/WORKOUT_RUNNER_SPEC.md`), Tier 0 + conditional Tier 1 only, exactly as approved.
 

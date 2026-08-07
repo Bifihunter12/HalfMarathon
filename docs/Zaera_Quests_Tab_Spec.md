@@ -1,6 +1,6 @@
-# RACR Quests Tab — Dedicated Side Quests Home
+# Zaera Quests Tab — Dedicated Side Quests Home
 
-Follow-up to `Runner_SideQuest_Spec.md`: instead of hiding quests behind "Not feeling this run?", give them a real home. Core promise: "Train for your race. Build a stronger body. Keep the journey interesting."
+Follow-up to `Zaera_SideQuest_Spec.md`: instead of hiding quests behind "Not feeling this run?", give them a real home. Core promise: "Train for your race. Build a stronger body. Keep the journey interesting."
 
 ## 1. Quests tab structure
 

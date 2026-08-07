@@ -1,4 +1,4 @@
-# RACR — Google Play Checklist
+# Zaera — Google Play Checklist
 
 Companion to `RELEASE_READINESS_AUDIT.md`. This is a realistic path from "no Android artifact exists" to a first internal-testing release, given this project is a vanilla JS PWA with no native wrapper (see the audit's Section 0). Nothing on this checklist has been started as of this audit unless marked ✅.
 

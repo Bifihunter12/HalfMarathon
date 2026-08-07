@@ -1,8 +1,8 @@
-# MASTER PROMPT — RACR Main Quest, Side Missions, Path & Badge System
+# MASTER PROMPT — Zaera Main Quest, Side Missions, Path & Badge System
 
-**Brand:** RACR — "Your race. Your plan."
+**Brand:** Zaera — "Your race. Your plan."
 
-Full product/behavioral-design spec for RACR's three connected systems: **Main Quest** (the race-training plan), **Side Missions** (optional strength/mobility/hiking/cross-training/recovery), and **Path** (a visual journey timeline with phase gates, badges, and milestones). Supersedes/formalizes the direction already underway in `side-quests.js` and `path-system.js`.
+Full product/behavioral-design spec for Zaera's three connected systems: **Main Quest** (the race-training plan), **Side Missions** (optional strength/mobility/hiking/cross-training/recovery), and **Path** (a visual journey timeline with phase gates, badges, and milestones). Supersedes/formalizes the direction already underway in `side-quests.js` and `path-system.js`.
 
 ## Core product identity
 
@@ -40,14 +40,14 @@ Upcoming, available, in progress, completed as planned, completed with coach-app
 
 Available, recommended, optional, not-recommended-today, locked-until-prerequisite, in progress, completed, mastered, temporarily paused.
 
-## Reward hierarchy (6 levels — refined by `docs/RACR_Reward_System_Master_Prompt.md`)
+## Reward hierarchy (6 levels — refined by `docs/Zaera_Reward_System_Master_Prompt.md`)
 
 1. **Micro-wins** (new, 2026-07-22 addition) — shown, not permanently collected: "You showed up," "Easy effort held," "Warm-up completed," "Returned after a missed day," "Stopped at the right time," etc. Give XP + immediate feedback + progress toward a larger badge without cluttering the badge cabinet — this is the layer that makes small, non-milestone actions feel rewarding.
 2. Accomplishments (factual milestones — first continuous mile, first 20-min run, four consistent weeks, etc. — not necessarily badges)
 3. Badges (meaningful behavior/capability/identity evidence) — see the "Showed Up" progressive identity badge, long-run reward set, and fast-run reward set (pace-blind for effort-based badges, purpose-gated for speed badges — never "fastest easy run") in the leveling doc
 4. Phase badges (major Main Quest transitions)
-5. Race artifact (permanent "RACR Season Card" after race day: race/distance/date/finish time/goal/plan length/completed+adapted workouts/longest run/key capability/favorite badge/collection/photo/title/coach reflection)
-6. **RACR Level** (new) — the permanent cross-season identity number sitting alongside all of the above, never substituting for any of them
+5. Race artifact (permanent "Zaera Season Card" after race day: race/distance/date/finish time/goal/plan length/completed+adapted workouts/longest run/key capability/favorite badge/collection/photo/title/coach reflection)
+6. **Zaera Level** (new) — the permanent cross-season identity number sitting alongside all of the above, never substituting for any of them
 
 ## Badges
 
@@ -55,7 +55,7 @@ Full data model: id/slug/name/descriptions/category/subcategory/tierModel/curren
 
 **13 categories**: Main Quest, Identity/consistency, Running mastery, Endurance, Speed/pace, Recovery/adaptation, Strength, Core, Mobility, Hiking, Cross-training, Race prep, Hidden discovery.
 
-**MVP set: ~30 badges**, spelled out in full in the source spec — 10 Main Quest (Laced Up, Week One, Base Builder, Long Run Unlocked, Halfway There, Peak Week, Taper Trust, Race Ready, Start Line, RACR Finisher), 6 Identity (Runner by Action, Kept the Promise, Momentum, Hard-Day Win, Never Miss Twice, Self-Trust), 6 Running Mastery (Easy Means Easy, Pace Sense, Interval Apprentice, Precision, Long-Run Confidence, Fuel Tested), 5 Recovery (Rest Is Training, Smart Swap, Body Listener, Deload Discipline, Comeback), 5 Side-Mission (Stronger Strides, Core Engine, Mobility Matters, Hiker's Detour, Quest Collector). Post-MVP list is much longer (running skill/strength/mobility/cross-training/exploration/discipline categories).
+**MVP set: ~30 badges**, spelled out in full in the source spec — 10 Main Quest (Laced Up, Week One, Base Builder, Long Run Unlocked, Halfway There, Peak Week, Taper Trust, Race Ready, Start Line, Zaera Finisher), 6 Identity (Runner by Action, Kept the Promise, Momentum, Hard-Day Win, Never Miss Twice, Self-Trust), 6 Running Mastery (Easy Means Easy, Pace Sense, Interval Apprentice, Precision, Long-Run Confidence, Fuel Tested), 5 Recovery (Rest Is Training, Smart Swap, Body Listener, Deload Discipline, Comeback), 5 Side-Mission (Stronger Strides, Core Engine, Mobility Matters, Hiker's Detour, Quest Collector). Post-MVP list is much longer (running skill/strength/mobility/cross-training/exploration/discipline categories).
 
 **Tiers**: Discovered → Built → Proven → Mastered, same icon evolving through tiers rather than 4 separate badges (example: Easy Means Easy 1/5/15 runs → full phase).
 
@@ -65,19 +65,19 @@ Full data model: id/slug/name/descriptions/category/subcategory/tierModel/curren
 
 ## Progress system — six questions, never merged into one number
 
-Superseded/completed by `docs/RACR_Reward_System_Master_Prompt.md` (2026-07-22, the authoritative engineering-grade version — full detail there, including quality bonuses, the XP event system, data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Points/XP are **not** just an optional light layer as originally scoped here — they're a full named system with a permanent **RACR Level**, explicitly separate from Race Readiness. Still true and unchanged: XP is never awarded for exceeding prescribed mileage and never determines coaching decisions.
+Superseded/completed by `docs/Zaera_Reward_System_Master_Prompt.md` (2026-07-22, the authoritative engineering-grade version — full detail there, including quality bonuses, the XP event system, data models, engine requirements, analytics, a 7-phase MVP order, and a 30-point Definition of Done). Points/XP are **not** just an optional light layer as originally scoped here — they're a full named system with a permanent **Zaera Level**, explicitly separate from Race Readiness. Still true and unchanged: XP is never awarded for exceeding prescribed mileage and never determines coaching decisions.
 
-Six questions, each answered by a different system, never combined into one number: **Path progress** ("how close am I to this race-training journey," season-specific) · **Running progress** ("am I running farther/faster/with better control") · **Achievements** ("what meaningful things have I done") · **XP** ("how much valid training experience did this action earn") · **RACR Level** ("how much experience have I accumulated as a runner across all seasons" — permanent, cross-season, 50 numeric levels with periodic titles In Motion→Building→Grounded→Enduring→Advancing→Racecraft→Seasoned→Proven→RACR, unlocking personalization only — never safety/coaching/logging/recovery, which stay free at every level) · **Race Readiness** ("how prepared am I for my current target race" — current-season only, a high-level user can have low readiness after a break and vice versa).
+Six questions, each answered by a different system, never combined into one number: **Path progress** ("how close am I to this race-training journey," season-specific) · **Running progress** ("am I running farther/faster/with better control") · **Achievements** ("what meaningful things have I done") · **XP** ("how much valid training experience did this action earn") · **Zaera Level** ("how much experience have I accumulated as a runner across all seasons" — permanent, cross-season, 50 numeric levels with periodic titles In Motion→Building→Grounded→Enduring→Advancing→Racecraft→Seasoned→Proven→Zaera, unlocking personalization only — never safety/coaching/logging/recovery, which stay free at every level) · **Race Readiness** ("how prepared am I for my current target race" — current-season only, a high-level user can have low readiness after a break and vice versa).
 
 **Weekly adherence, not daily streaks** — states: on course / adapted intelligently / partially completed / recovery week / needs recalibration. A user who did 3 planned + 2 valid adaptations may be more "adherent" than one who ran extra unplanned mileage.
 
-**Main Quest vs. Side Mission XP split**: target 70–80% of weekly XP from Main Quest, 20–30% from Side Missions (Side Mission XP additionally capped at 30% of that week's Main Quest XP) — protects the product hierarchy so a runner can't skip runs, do mobility daily, and out-level someone following the actual plan. Full XP tables (Main Quest base values 40–500, Side Mission base values 25–70, completion + quality-bonus modifiers keyed to whether the session's *purpose* was preserved not just raw compliance), the 50-level cumulative-XP curve, per-level unlock lists, the level-up presentation format, and the 8-step post-run / post-Side-Mission reward sequences all live in `docs/RACR_Reward_System_Master_Prompt.md` — condensing them here would just duplicate that doc.
+**Main Quest vs. Side Mission XP split**: target 70–80% of weekly XP from Main Quest, 20–30% from Side Missions (Side Mission XP additionally capped at 30% of that week's Main Quest XP) — protects the product hierarchy so a runner can't skip runs, do mobility daily, and out-level someone following the actual plan. Full XP tables (Main Quest base values 40–500, Side Mission base values 25–70, completion + quality-bonus modifiers keyed to whether the session's *purpose* was preserved not just raw compliance), the 50-level cumulative-XP curve, per-level unlock lists, the level-up presentation format, and the 8-step post-run / post-Side-Mission reward sequences all live in `docs/Zaera_Reward_System_Master_Prompt.md` — condensing them here would just duplicate that doc.
 
 ## Side-mission safety logic
 
 Each mission needs: min training-phase requirement, equipment, duration, muscle groups, recovery cost, impact level, running-interference risk, contraindications, recommended days, incompatible adjacent workouts. Specific rules given for lower-body strength (never before intervals/long run), upper-body (more flexible but still fatigue-aware), hiking (real endurance work, not "free recovery" — account for elevation/terrain/downhill damage/pack weight), kettlebell swings (technique-gated), plank challenges (accumulated quality sets, never a 20-min continuous hold).
 
-**Expanded in full by `docs/RACR_SideMission_Expansion.md`** (2026-07-22 addition): equipment onboarding (equipment/location/duration/goal, all editable later), equipment-adaptive mission versions (one movement, several equipment-scaled variants — extends the existing `MOVEMENT_VARIANTS` mechanism), a 12-challenge named bodyweight library (Squat Century, Lunge Ladder, Push-Up Progress, etc., each with beginner→advanced scaling and explicit quality-over-speed rules), per-mission substitution rules, and running-schedule-aware recommendation logic (e.g. never recommend a high-volume lower-body challenge before a long run or during taper). **This also resolves the "Side Mission catalog re-scope" flagged as deferred in the run-logging correction** — the expansion's entire MVP library is bodyweight/dumbbell/kettlebell/band/mobility only, with no hike/cross/cycling entries, so building from this doc IS that re-scope, not a separate pass.
+**Expanded in full by `docs/Zaera_SideMission_Expansion.md`** (2026-07-22 addition): equipment onboarding (equipment/location/duration/goal, all editable later), equipment-adaptive mission versions (one movement, several equipment-scaled variants — extends the existing `MOVEMENT_VARIANTS` mechanism), a 12-challenge named bodyweight library (Squat Century, Lunge Ladder, Push-Up Progress, etc., each with beginner→advanced scaling and explicit quality-over-speed rules), per-mission substitution rules, and running-schedule-aware recommendation logic (e.g. never recommend a high-volume lower-body challenge before a long run or during taper). **This also resolves the "Side Mission catalog re-scope" flagged as deferred in the run-logging correction** — the expansion's entire MVP library is bodyweight/dumbbell/kettlebell/band/mobility only, with no hike/cross/cycling entries, so building from this doc IS that re-scope, not a separate pass.
 
 ## Data models
 
@@ -107,6 +107,6 @@ Inspect existing architecture before changing code; reuse existing components/co
 
 12 questions, most load-bearing: does this reward a real behavior that supports the race goal? Can it be gamed unsafely? Does it make rest look like failure? Would a qualified running coach approve it? If the answer reveals unsafe/meaningless behavior, don't implement it.
 
-## Anti-gaming rules (2026-07-22 addition, full list in `docs/RACR_Reward_System_Master_Prompt.md`)
+## Anti-gaming rules (2026-07-22 addition, full list in `docs/Zaera_Reward_System_Master_Prompt.md`)
 
 No extra XP for mileage beyond the prescribed range; no repeat XP from delete-and-relog; no unlimited XP from very short mobility sessions; no multiple rest-day rewards on the same date; Side Mission weekly XP cap; badge awards idempotent; PRs require eligible activities only; easy-run speed never generates a speed bonus; pain tolerance never generates XP; unplanned double workouts get no bonus; imported activities checked for duplicates; honest-mistake edits never lose already-earned legitimate rewards.

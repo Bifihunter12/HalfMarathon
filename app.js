@@ -11,18 +11,18 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.07.1';
-  var SideQuestDomain = window.RACRSideQuests || {};
-  var PathDomain = window.RACRPath || {};
-  var MergeStateDomain = window.RACRMergeState || {};
-  var CoachingRulesDomain = window.RACRCoachingRules || {};
-  var ProgressStatsDomain = window.RACRProgressStats || {};
-  var WorkoutRunnerDomain = window.RACRWorkoutRunner || {};
-  var AudioCuesDomain = window.RACRAudioCues || {};
-  var CoachingContextDomain = window.RACRCoachingContext || {};
-  var CoachingCuesDomain = window.RACRCoachingCues || {};
+  var APP_VERSION = '2026.08.07.2';
+  var SideQuestDomain = window.ZaeraSideQuests || {};
+  var PathDomain = window.ZaeraPath || {};
+  var MergeStateDomain = window.ZaeraMergeState || {};
+  var CoachingRulesDomain = window.ZaeraCoachingRules || {};
+  var ProgressStatsDomain = window.ZaeraProgressStats || {};
+  var WorkoutRunnerDomain = window.ZaeraWorkoutRunner || {};
+  var AudioCuesDomain = window.ZaeraAudioCues || {};
+  var CoachingContextDomain = window.ZaeraCoachingContext || {};
+  var CoachingCuesDomain = window.ZaeraCoachingCues || {};
   // docs/COACHING_SPEC.md "Achievements" -- XP/generic player levels were
-  // removed from V1 (RACRXp / xp-system.js no longer exist); this app
+  // removed from V1 (ZaeraXp / xp-system.js no longer exist); this app
   // never rewards points, only real, verifiable running progress.
 
   // ── Minimal self-hosted crash/event logging (docs/RELEASE_BLOCKERS.md
@@ -229,7 +229,7 @@
     }
   };
 
-  // ── Side Quests (docs/Runner_SideQuest_Spec.md) ─────────────────────────
+  // ── Side Quests (docs/Zaera_SideQuest_Spec.md) ─────────────────────────
   // Deterministic substitution catalog for "Not feeling this run?" -- the
   // filter picks from this fixed list by reason + day type; nothing here is
   // AI-generated or AI-invented, matching the spec's "deterministic rules
@@ -295,7 +295,7 @@
     refreshPathProgress();
   }
 
-  // ── Quest Tracks (docs/Runner_Quests_Tab_Spec.md) ───────────────────────
+  // ── Quest Tracks (docs/Zaera_Quests_Tab_Spec.md) ───────────────────────
   // Multiweek strength programs, separate from the single-session
   // SIDE_QUESTS catalog above. Core idea: "every body can strength train,
   // every exercise can be scaled" -- movements with a real beginner/
@@ -463,7 +463,7 @@
       : { accumulated: 0, level: 0, levelTarget: 0, complete: false };
   }
 
-  // ── Bodyweight Challenge Library (docs/RACR_SideMission_Expansion.md) ──
+  // ── Bodyweight Challenge Library (docs/Zaera_SideMission_Expansion.md) ──
   // Logs one session's contribution toward a named accumulated challenge
   // (e.g. 30 of Squat Century's 100 squats). Awards its badge only once,
   // the first time the accumulated total crosses the challenge's final
@@ -554,7 +554,7 @@
     });
   }
 
-  // ── Weekly Challenges (docs/Runner_SideQuest_Spec.md §2B) ───────────────
+  // ── Weekly Challenges (docs/Zaera_SideQuest_Spec.md §2B) ───────────────
   // Session-COUNT targets within the current Mon-Sun week, not raw rep/
   // distance totals (those need per-log quantity tracking sideQuestLog
   // doesn't have yet). Progress is always computed from the existing log,
@@ -1150,7 +1150,7 @@
 
   // Deterministic (no AI call) comparison of a logged run against the day's
   // own planned distance / target pace range -- satisfies the "coach
-  // interpretation" requirement from docs/RACR_RunLogging_Correction.md
+  // interpretation" requirement from docs/Zaera_RunLogging_Correction.md
   // without a new AI dependency, matching this app's established
   // deterministic-first pattern (see logAndCelebrate's local-message
   // fallback and the SIDE_QUESTS reason-based filtering).
@@ -2084,7 +2084,7 @@
     app.innerHTML = '';
     var wrap = el(
       '<div class="ob intro">' +
-        '<div class="brand-mark">Runner</div>' +
+        '<div class="brand-mark">Zaera Running Coach</div>' +
         '<div class="intro-title">Hi.</div>' +
         '<div class="intro-body">I built this because I was training for my own half marathon and got tired of static PDF plans that didn\'t adapt to real life — a run moved to another day, a missed week, wanting to log how it actually went instead of just checking a box.</div>' +
         '<div class="intro-body">So this builds a real plan around wherever you\'re actually starting from — not just the race distance — and adjusts if life gets in the way. Works for anything from a 5K to a 100-miler.</div>' +
@@ -2092,7 +2092,7 @@
         '<input class="ob-input" type="text" id="introName" placeholder="e.g. Sarah" value="' + escapeHtml(state.userName || '') + '">' +
         '<button class="ob-btn" id="introStartBtn">Build My Plan</button>' +
         '<div class="intro-footer">No account required, no ads — your data stays on this device unless you turn on sync.</div>' +
-        '<div class="intro-disclaimer">Runner is a training tool, not a medical provider — it doesn\'t diagnose injuries or illness. See the shield icon for when to stop and see a doctor.</div>' +
+        '<div class="intro-disclaimer">Zaera Running Coach is a training tool, not a medical provider — it doesn\'t diagnose injuries or illness. See the shield icon for when to stop and see a doctor.</div>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -2704,7 +2704,7 @@
     });
   }
 
-  // ── Primary bottom tab bar (docs/RACR_Master_Prompt.md) -- exactly the 3
+  // ── Primary bottom tab bar (docs/Zaera_MainQuest_Master_Prompt.md) -- exactly the 3
   // co-equal primary destinations the spec calls out, not a catch-all nav.
   // Utility screens (Progress/Glossary/Safety/Edit/Settings) stay on the top
   // header icon row above; Coach stays reached via the Today card button.
@@ -2733,7 +2733,7 @@
     });
   }
 
-  // ── Quests home (docs/Runner_Quests_Tab_Spec.md) ──────────────────────
+  // ── Quests home (docs/Zaera_Quests_Tab_Spec.md) ──────────────────────
 
   var SQ_EXPERIENCE_LABEL = {
     new_strength: 'I am new to strength training',
@@ -2870,7 +2870,7 @@
       activeHtml = '<div class="quest-card"><div class="quest-name">No active Mission Track</div><div class="quest-desc">Start one progressive Side Mission track. Your Main Quest keeps scheduling priority.</div></div>';
     }
 
-    // Weekly challenge (docs/Runner_SideQuest_Spec.md §2B) -- restored here
+    // Weekly challenge (docs/Zaera_SideQuest_Spec.md §2B) -- restored here
     // after this screen was rebuilt; see weeklyChallengeProgress/etc. above.
     expireWeeklyChallengeIfStale();
     var activeChallenge = state.activeWeeklyChallenge;
@@ -3213,7 +3213,7 @@
   // ── Weekly row: meaningful status + planned/actual summaries ───────────
   // Replaces the old plain checkbox -- a status glyph reflecting
   // completionType (or missed/today/upcoming when unlogged), matching
-  // docs/RACR_RunLogging_Correction.md's "don't use a checkbox as the only
+  // docs/Zaera_RunLogging_Correction.md's "don't use a checkbox as the only
   // interaction" requirement. Tapping the date (existing behavior) still
   // opens the full detail view to actually log or edit a run.
   function dayStatusHtml(loggable, entry, isToday, isPast) {
@@ -3380,7 +3380,7 @@
       '<div>' +
         '<div class="hd">' +
           '<div>' +
-            '<div class="brand-mark">Runner</div>' +
+            '<div class="brand-mark">Zaera Running Coach</div>' +
             '<div class="hd-title">' + hdTitleText + '</div>' +
             '<div class="hd-sub">' + hdSubText + '</div>' +
           '</div>' +
@@ -4022,7 +4022,7 @@
           RED_FLAGS.map(function (f) { return '<li>' + escapeHtml(f) + '</li>'; }).join('') +
         '</ul>' +
         '<div class="legal-notice">' +
-          '<p><strong>Runner is not a medical provider.</strong> It does not diagnose injuries, illness, or any medical condition, and nothing in this app — including the AI coach — is medical advice. Seek care from a qualified professional for any concerning symptom.</p>' +
+          '<p><strong>Zaera Running Coach is not a medical provider.</strong> It does not diagnose injuries, illness, or any medical condition, and nothing in this app — including the AI coach — is medical advice. Seek care from a qualified professional for any concerning symptom.</p>' +
           '<p>A training plan, even one that adjusts carefully to how you\'re doing, cannot eliminate the risk of injury. You\'re responsible for choosing safe routes and environments — outdoor conditions and traffic require your own judgment.</p>' +
           '<p>Data imported from wearables can be inaccurate, and AI coaching recommendations may occasionally be imperfect. When in doubt, choose the more conservative option or see a doctor.</p>' +
         '</div>' +
@@ -4705,7 +4705,7 @@
       }
     }
 
-    // ── Planned vs. Actual review (docs/RACR_RunLogging_Correction.md) ──
+    // ── Planned vs. Actual review (docs/Zaera_RunLogging_Correction.md) ──
     // Only shown once something's actually been logged -- planned data is
     // never overwritten by the actual result, both stay visible together.
     var plannedVsActualHtml = '';
@@ -5418,7 +5418,7 @@
     document.getElementById('rescheduleBackBtn').addEventListener('click', function () { goBack(function () { renderWorkoutDetail(sourceWeekNum, sourceDayIdx); }); });
   }
 
-  // ── Side Quests: "Not feeling this run?" flow (docs/Runner_SideQuest_Spec.md) ──
+  // ── Side Quests: "Not feeling this run?" flow (docs/Zaera_SideQuest_Spec.md) ──
   // Fully deterministic -- no AI call. Ask why, filter the fixed catalog by
   // reason + day type, offer real substitutions, apply one if chosen.
   function renderSwitchItUp(weekNum, dayIdx) {
@@ -5619,10 +5619,10 @@
           : Notifications.permission === 'denied' ?
             '<p class="recap-empty">Notifications are blocked for this site in your browser settings &mdash; enable them there to turn this on.</p>'
           : (state.notifications.enabled && Notifications.permission === 'granted') ?
-            '<p class="recap-empty">On &mdash; today\'s workout reminders, missed-workout check-ins, race countdown, and plan updates. Rule-based, never AI. Only fires while Runner is open or running in the background &mdash; exact timing depends on your browser.</p>' +
+            '<p class="recap-empty">On &mdash; today\'s workout reminders, missed-workout check-ins, race countdown, and plan updates. Rule-based, never AI. Only fires while Zaera Running Coach is open or running in the background &mdash; exact timing depends on your browser.</p>' +
             '<button class="ob-btn ob-btn-secondary" id="notifDisableBtn">Turn off</button>'
           :
-            '<p class="recap-empty">Get a nudge for today\'s workout, a missed-session check-in, race countdown, and plan updates. Fully optional and rule-based &mdash; never AI &mdash; and only fires while Runner is open or running in the background.</p>' +
+            '<p class="recap-empty">Get a nudge for today\'s workout, a missed-session check-in, race countdown, and plan updates. Fully optional and rule-based &mdash; never AI &mdash; and only fires while Zaera Running Coach is open or running in the background.</p>' +
             '<button class="ob-btn ob-btn-secondary" id="notifEnableBtn">Enable notifications</button>'
         ) + '</div>' +
         '<div class="ob-label" style="margin-top:26px">Coach</div>' +
@@ -5645,7 +5645,7 @@
         '<select class="ob-input" id="set_neuralVoiceSelect">' + neuralVoiceOptionsHtml(state.workoutAudio.ttsVoice) + '</select>' +
         '<button type="button" class="ob-btn ob-btn-secondary" id="previewNeuralVoiceBtn" style="margin-top:8px">Preview neural voice</button>' +
         '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
-        '<p class="recap-empty">Experimental toggles from RACR\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
+        '<p class="recap-empty">Experimental toggles from Zaera\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
         '<p class="recap-empty">5K, 10K, and half marathon are always available. Marathon and ultra distances are still being reviewed &mdash; turn this on to unlock them for new plans.</p>' +
         '<div class="chip-grid" id="set_longerDistances">' + chipsHtml('longerDistances', ['off', 'on'], { off: 'Off', on: 'On' }, state.flags.enableLongerDistances ? 'on' : 'off', false) + '</div>' +
@@ -6058,7 +6058,7 @@
         var parsed;
         try { parsed = JSON.parse(reader.result); } catch (e) { window.alert("That file isn't valid JSON."); return; }
         if (!parsed || typeof parsed !== 'object' || !parsed.raceGoal || !parsed.profile) {
-          window.alert("That doesn't look like a Runner backup file.");
+          window.alert("That doesn't look like a Zaera Running Coach backup file.");
           return;
         }
         if (!window.confirm('This replaces everything currently saved in the app with the imported file. Continue?')) return;
@@ -6194,7 +6194,7 @@
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('progressBtn') + '</div>'));
     wireHeaderIcons();
 
-    // Boredom detection / Variety Week (docs/Runner_SideQuest_Spec.md §6/§7) --
+    // Boredom detection / Variety Week (docs/Zaera_SideQuest_Spec.md §6/§7) --
     // a plain weekly check-in, answered at most once per Monday-week. Both
     // the answered-summary and the form render into the DOM together and
     // toggle visibility on click, same pattern as the pain-report toggle in
@@ -6481,7 +6481,7 @@
     var banner = document.createElement('div');
     banner.className = 'update-banner';
     banner.setAttribute('role', 'status');
-    banner.innerHTML = '<span>A new version of Runner is ready.</span>' +
+    banner.innerHTML = '<span>A new version of Zaera Running Coach is ready.</span>' +
       '<button type="button" id="updateReloadBtn">Reload</button>' +
       '<button type="button" id="updateDismissBtn" aria-label="Dismiss">&times;</button>';
     document.body.appendChild(banner);

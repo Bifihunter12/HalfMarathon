@@ -1,8 +1,8 @@
-# RACR — Coaching Specification
+# Zaera — Coaching Specification
 
 **Version:** 1.0 (2026-07-29) · **Status:** Internally documented, describing behavior already implemented in code. Not yet reviewed by a qualified running coach or sports-science professional — nothing in this document is "coach-approved," and it must not be treated as production-approved coaching truth until that review happens.
 
-This document is the coaching-rules half of the lightweight governance structure adopted from the Zaera Labs Running master prompt (see `docs/RACR_Master_Prompt.md` for the underlying product/behavioral-design spec, and `docs/SAFETY_POLICY.md` for the safety/escalation half). Its job is narrow: make the rules that already govern plan generation and adaptation *inspectable and versioned*, and honestly flag where they fall short of the fuller philosophy, rather than leaving that logic implicit and undocumented inside `app.js`.
+This document is the coaching-rules half of the lightweight governance structure adopted from the Zaera Labs Running master prompt (see `docs/Zaera_MainQuest_Master_Prompt.md` for the underlying product/behavioral-design spec, and `docs/SAFETY_POLICY.md` for the safety/escalation half). Its job is narrow: make the rules that already govern plan generation and adaptation *inspectable and versioned*, and honestly flag where they fall short of the fuller philosophy, rather than leaving that logic implicit and undocumented inside `app.js`.
 
 Each section below cites the real function and location that implements it today, and carries its own status — **documented** (accurately describes shipped behavior) or **provisional** (a known, named gap against the target philosophy, not yet built). Runner classification, goal feasibility, and the two adaptation functions now live in `coaching-rules.js` (extracted 2026-07-29 from `app.js` for real automated test coverage — see `tests/coaching-rules.test.js` for extraction-fidelity checks and `tests/decision-scenarios.test.js` for the actual approved/forbidden-outcome decision library referenced throughout this document).
 
@@ -148,7 +148,7 @@ A freemium gate (AI coach chat + Google Health sync behind a `state.subscription
 
 ## Achievements — XP and generic player levels removed (new 2026-08-03)
 
-**Product decision**: XP, generic player levels, and rank titles (`xp-system.js`, `state.xp`/`xpEvents`/`xpProfile`) are removed from V1. They never influenced training, readiness, adaptation, or safety, so per the standing "no isolated points/badges/levels disconnected from meaningful training behavior" rule, they didn't belong in the shipped experience. `docs/RACR_Reward_System_Master_Prompt.md` and `docs/RACR_Leveling_System.md` (the two docs that specified the XP economy) are marked superseded, kept only for history.
+**Product decision**: XP, generic player levels, and rank titles (`xp-system.js`, `state.xp`/`xpEvents`/`xpProfile`) are removed from V1. They never influenced training, readiness, adaptation, or safety, so per the standing "no isolated points/badges/levels disconnected from meaningful training behavior" rule, they didn't belong in the shipped experience. `docs/Zaera_Reward_System_Master_Prompt.md` and `docs/Zaera_Leveling_System.md` (the two docs that specified the XP economy) are marked superseded, kept only for history.
 
 **Replaced with real, verifiable running achievements** — two kinds:
 
@@ -227,4 +227,4 @@ Extends the plan generator from "N running days placed by a static weekday prior
 
 ## Strength / mobility, environmental conditions, race execution — partially documented elsewhere
 
-Strength/mobility content lives in the separate Side Missions system (`side-quests.js`, `docs/RACR_SideMission_Expansion.md`) rather than this document, since it's a distinct catalog with its own equipment/difficulty/safety-gating logic. Environmental-conditions handling (heat/altitude/terrain substitutions) and detailed race-week execution guidance are not yet formally specified anywhere beyond `WORKOUT_DETAIL`'s per-type descriptions — out of scope for this pass, not claimed as complete.
+Strength/mobility content lives in the separate Side Missions system (`side-quests.js`, `docs/Zaera_SideMission_Expansion.md`) rather than this document, since it's a distinct catalog with its own equipment/difficulty/safety-gating logic. Environmental-conditions handling (heat/altitude/terrain substitutions) and detailed race-week execution guidance are not yet formally specified anywhere beyond `WORKOUT_DETAIL`'s per-type descriptions — out of scope for this pass, not claimed as complete.
