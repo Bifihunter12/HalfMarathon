@@ -63,6 +63,26 @@ test('Standard intermediate 10K plan satisfies all structural invariants', funct
   });
 });
 
+test('Beginner 10K plan with no longestRun on the profile never produces a NaN easy-run distance', function () {
+  // Regression: buildStructuredWeeks used profile.longestRun directly in
+  // longRunSafetyCap's Math.max(profile.longestRun * 1.15, 2) -- when
+  // longestRun is missing (undefined, as a freshly-seeded or partially
+  // filled-in profile can be), that multiplication produces NaN, and
+  // Math.max never recovers from a NaN argument, poisoning longRunCap ->
+  // longRunMiles -> remaining -> easyEach for every base-phase week, which
+  // then showed up to the runner as "NaN mi easy run" on their plan.
+  var profile = { weeklyMileage: 10, runDaysPerWeek: 3, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 3, terrains: ['road'], crossOptions: ['None'] };
+  var raceGoal = { event: '10k', goal: 'finish', startDate: '2026-08-07', raceDate: '2026-12-04' };
+  var planMeta = buildPlanMeta(profile, raceGoal);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi');
+  assertStructuralInvariants(weeks, 'beginner 10K, no longestRun');
+  weeks.forEach(function (wk) {
+    wk.days.forEach(function (d) {
+      assert.ok(!/NaN/.test(d.label), 'beginner 10K, no longestRun: week ' + wk.weekNum + ' has a NaN label (' + d.label + ')');
+    });
+  });
+});
+
 test('Beginner run-walk plan uses run/walk sessions during the window and never shows quality-pool tempo text then', function () {
   var profile = { weeklyMileage: 0, longestRun: 0, runDaysPerWeek: 0, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: false, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'] };
   var raceGoal = { event: '10k', goal: 'finish', startDate: '2026-08-01', raceDate: '2026-12-05' };
