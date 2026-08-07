@@ -94,6 +94,14 @@
     if (day.runWalk) return 'run_walk';
     if (day.type === 'cross') return 'cross';
     if (day.type === 'quality') {
+      // Entry-tier quality entries like "Easy + strides" carry no
+      // qualitySegments/qualityManualReps (no pace is ever invented for
+      // them -- see QUALITY_POOL's own comment), so normalizeWorkout falls
+      // all the way through to the honest open-stopwatch fallback
+      // (mode === 'continuous_open'). That's genuinely an easy effort, not
+      // a tempo -- coach it as 'easy' so the intro/transition language
+      // matches what's actually on screen instead of defaulting to tempo.
+      if (normalized.mode === 'continuous_open') return 'easy';
       var workSegs = normalized.segments.filter(function (s) { return s.kind === 'work' || s.kind === 'manual_rep'; });
       var totalIntervals = workSegs.length ? (workSegs[0].totalIntervals || 1) : 1;
       if (normalized.mode === 'guided_manual') return 'intervals_manual';

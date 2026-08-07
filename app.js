@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.06.6';
+  var APP_VERSION = '2026.08.07.1';
   var SideQuestDomain = window.RACRSideQuests || {};
   var PathDomain = window.RACRPath || {};
   var MergeStateDomain = window.RACRMergeState || {};
@@ -4409,8 +4409,18 @@
       phaseEl.textContent = phaseText;
 
       var remaining = machine.remainingSegmentMs();
-      countdownEl.textContent = remaining != null ? fmtCountdown(remaining) : '';
-      countdownEl.style.display = remaining != null ? '' : 'none';
+      if (remaining != null) {
+        countdownEl.textContent = fmtCountdown(remaining);
+        countdownEl.classList.remove('runner-countdown-elapsed');
+      } else {
+        // No prescribed duration for this segment (open-ended easy/long
+        // run, or a manual_rep segment) -- never hide the clock entirely,
+        // show an honest elapsed count-up instead (elapsedActiveMs already
+        // excludes paused time).
+        countdownEl.textContent = 'Elapsed ' + fmtCountdown(machine.elapsedActiveMs());
+        countdownEl.classList.add('runner-countdown-elapsed');
+      }
+      countdownEl.style.display = '';
 
       var nxt = nextSeg();
       nextEl.textContent = nxt ? 'Next: ' + segmentDisplayLabel(nxt, normalized.mode) : (normalized.mode !== 'continuous_open' && seg && seg.kind !== 'continuous' ? 'Next: finish' : '');

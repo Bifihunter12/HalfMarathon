@@ -1128,6 +1128,7 @@ dl.wd-info dd {
   margin: 8px 0;
   font-variant-numeric: tabular-nums;
 }
+.runner-countdown-elapsed { font-size: 40px; color: var(--text); }
 .runner-next { font-size: 14px; color: var(--text-faint); margin-bottom: 6px; }
 .runner-progress { font-size: 12px; color: var(--text-faint); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
 .runner-manual-note { max-width: 320px; margin: 8px auto 4px; }

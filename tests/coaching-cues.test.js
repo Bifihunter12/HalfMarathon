@@ -327,6 +327,10 @@ test('classifyWorkoutForCoaching: manual-distance intervals', function () {
 test('classifyWorkoutForCoaching: cross-training', function () {
   assert.equal(CoachingCues.classifyWorkoutForCoaching({ type: 'cross' }, { mode: 'structured', segments: [] }), 'cross');
 });
+test('classifyWorkoutForCoaching: unstructured entry-tier quality (e.g. "Easy + strides", no segments/manualReps) is coached as easy, not tempo', function () {
+  const normalized = { mode: 'continuous_open', segments: [{ kind: 'continuous', totalIntervals: null }] };
+  assert.equal(CoachingCues.classifyWorkoutForCoaching({ type: 'quality' }, normalized), 'easy');
+});
 test('detectTerrainHint: hills detected from the plan\'s own label text', function () {
   assert.equal(CoachingCues.detectTerrainHint('Hills: 6 x 2 min uphill'), 'hills');
   assert.equal(CoachingCues.detectTerrainHint('5 x 1000m @ 10K pace'), null);
