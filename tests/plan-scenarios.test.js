@@ -63,6 +63,19 @@ test('Standard intermediate 10K plan satisfies all structural invariants', funct
   });
 });
 
+test('A plan built from a profile missing weeklyMileage/longestRun (e.g. seeded directly rather than via the guarded onboarding form) never produces a NaN mileage label', function () {
+  var profile = { weeklyMileage: undefined, longestRun: undefined, runDaysPerWeek: 3, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Cycling'] };
+  var raceGoal = { event: '10k', goal: 'finish', startDate: '2026-08-01', raceDate: '2026-12-04' };
+  var planMeta = buildPlanMeta(profile, raceGoal);
+  var weeks = rules.buildStructuredWeeks(profile, raceGoal, planMeta, 'mi');
+  assertStructuralInvariants(weeks, 'missing-mileage-fields 10K');
+  weeks.forEach(function (wk) {
+    wk.days.forEach(function (d) {
+      assert.ok(!/NaN/.test(d.label || ''), 'missing-mileage-fields 10K: week ' + wk.weekNum + ' produced a NaN label ("' + d.label + '")');
+    });
+  });
+});
+
 test('Beginner run-walk plan uses run/walk sessions during the window and never shows quality-pool tempo text then', function () {
   var profile = { weeklyMileage: 0, longestRun: 0, runDaysPerWeek: 0, experienceLevel: 'beginner', injuryStatus: 'resolved', canRunContinuously: false, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'] };
   var raceGoal = { event: '10k', goal: 'finish', startDate: '2026-08-01', raceDate: '2026-12-05' };

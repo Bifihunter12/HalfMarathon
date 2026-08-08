@@ -249,7 +249,13 @@
   // a session's estimated time into an approximate distance, nothing more.
   var QUALITY_DEFAULT_PACE_MIN_PER_MI = 10;
 
-  function round5(n) { return Math.round(n * 2) / 2; }
+  // Every mileage figure the plan generator produces flows through this
+  // function before it's ever shown to a runner, so it's the one place that
+  // can guarantee a bad upstream number (NaN from an unparsed/omitted
+  // profile field, e.g. when a plan is seeded directly rather than built via
+  // the guarded onboarding form) never surfaces as a literal "NaN mi" label
+  // -- clamp to 0 instead of ever propagating NaN into a day's distance.
+  function round5(n) { return isFinite(n) ? Math.round(n * 2) / 2 : 0; }
 
   function parseDate(iso) {
     var p = iso.split('-').map(Number);
