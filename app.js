@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.08.1';
+  var APP_VERSION = '2026.08.08.2';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -910,19 +910,15 @@
     // must never affect the workout record).
     if (s.activeWorkoutSession === undefined) s.activeWorkoutSession = null; // { key, normalized, snapshot }
     if (!s.workoutAudio) s.workoutAudio = { enabled: true, volume: 1 }; // on by default -- this is the feature's whole point, unlike opt-in notifications below
-    // Added after workoutAudio itself already shipped -- existing installs
-    // have the object but not this field, so it needs its own migration
-    // check, not just the `if (!s.workoutAudio)` guard above. null means
-    // "platform default voice," exactly the same as before this existed.
-    if (s.workoutAudio.voiceURI === undefined) s.workoutAudio.voiceURI = null;
-    // Neural TTS (OpenAI, via netlify/functions/tts.js) -- OFF by default
-    // deliberately: this is a real per-character cost on the app owner's
-    // OpenAI key with no spending cap today, so it must be an explicit
-    // opt-in, never something an existing or new install silently starts
-    // using. ttsVoice defaults to the same 'nova' the proxy itself falls
-    // back to, so the Settings picker always has a sensible starting value.
-    if (s.workoutAudio.neuralEnabled === undefined) s.workoutAudio.neuralEnabled = false;
-    if (s.workoutAudio.ttsVoice === undefined) s.workoutAudio.ttsVoice = 'nova';
+    // Voice is a fixed product decision, not a per-user choice: always the
+    // platform default Web Speech voice as a fallback, always OpenAI neural
+    // TTS (netlify/functions/tts.js) as the primary voice, always the
+    // 'nova' voice. Forced unconditionally (not just migrated when
+    // undefined) so an existing install that previously picked something
+    // else converges to the same fixed setup as everyone else.
+    s.workoutAudio.voiceURI = null;
+    s.workoutAudio.neuralEnabled = true;
+    s.workoutAudio.ttsVoice = 'nova';
     // docs/COACHING_ENGINE_SPEC.md -- user-facing coaching preferences
     // (frequency mode + category toggles), separate from workoutAudio
     // above (that's the audio channel itself; this is what the coach is
@@ -4117,33 +4113,6 @@
     return _cueService;
   }
 
-  // English voices first (most relevant given this app's copy is
-  // English-only), everything else after -- never hidden, since some
-  // devices only expose one or two voices total and hiding them would
-  // leave the picker looking broken. "Device default" always exists so
-  // there's a way back to platform-default behavior (same as before this
-  // feature existed) without needing to know which voice that actually is.
-  function voiceOptionsHtml(selectedURI) {
-    var svc = getCueService();
-    var voices = svc ? svc.getVoices() : [];
-    var english = voices.filter(function (v) { return /^en/i.test(v.lang || ''); });
-    var rest = voices.filter(function (v) { return !/^en/i.test(v.lang || ''); });
-    var html = '<option value=""' + (!selectedURI ? ' selected' : '') + '>Device default</option>';
-    english.concat(rest).forEach(function (v) {
-      html += '<option value="' + escapeHtml(v.voiceURI) + '"' + (selectedURI === v.voiceURI ? ' selected' : '') + '>' + escapeHtml(v.name) + ' (' + escapeHtml(v.lang) + ')</option>';
-    });
-    return html;
-  }
-
-  // OpenAI's fixed voice list (mirrored in audio-cues.js/tts.js) -- no
-  // async loading needed, unlike the device Web Speech voices above.
-  function neuralVoiceOptionsHtml(selected) {
-    var voices = AudioCuesDomain.NEURAL_VOICES || [];
-    return voices.map(function (v) {
-      return '<option value="' + escapeHtml(v) + '"' + (selected === v ? ' selected' : '') + '>' + escapeHtml(v.charAt(0).toUpperCase() + v.slice(1)) + '</option>';
-    }).join('');
-  }
-
   // Cue text -> haptic pattern, so every cue gets its own short vibration
   // alongside speech (or as the sole channel when audio is off/unavailable).
   function hapticFor(cueType) {
@@ -5657,15 +5626,8 @@
         '<div class="ob-label" style="margin-top:14px">Audio cues</div>' +
         '<div class="chip-grid" id="set_workoutAudio">' + chipsHtml('workoutAudioEnabled', ['on', 'off'], { on: 'On', off: 'Off' }, state.workoutAudio.enabled ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:14px">Coach voice</div>' +
-        '<p class="recap-empty">Uses your device\'s own text-to-speech voices -- quality depends on what\'s installed. If the list looks short, check your device\'s text-to-speech settings for higher-quality voices.</p>' +
-        '<select class="ob-input" id="set_coachVoiceSelect">' + voiceOptionsHtml(state.workoutAudio.voiceURI) + '</select>' +
+        '<p class="recap-empty">Zaera\'s neural coach voice (Nova) &mdash; falls back to your device\'s built-in voice automatically if it\'s slow, fails, or you\'re offline.</p>' +
         '<button type="button" class="ob-btn ob-btn-secondary" id="previewVoiceBtn" style="margin-top:8px">Preview voice</button>' +
-        '<div class="ob-label" style="margin-top:26px">Neural voice (beta)</div>' +
-        '<p class="recap-empty">A higher-quality AI voice instead of your device\'s built-in one. Uses a paid service and needs a network connection &mdash; falls back to your device voice automatically if it\'s slow, fails, or you\'re offline. Off by default.</p>' +
-        '<div class="chip-grid" id="set_neuralEnabled">' + chipsHtml('neuralEnabled', ['off', 'on'], { off: 'Off', on: 'On' }, state.workoutAudio.neuralEnabled ? 'on' : 'off', false) + '</div>' +
-        '<div class="ob-label" style="margin-top:14px">Neural voice</div>' +
-        '<select class="ob-input" id="set_neuralVoiceSelect">' + neuralVoiceOptionsHtml(state.workoutAudio.ttsVoice) + '</select>' +
-        '<button type="button" class="ob-btn ob-btn-secondary" id="previewNeuralVoiceBtn" style="margin-top:8px">Preview neural voice</button>' +
         '<div class="ob-label" style="margin-top:26px">Beta features</div>' +
         '<p class="recap-empty">Experimental toggles from Zaera\'s current governance pass (docs/COACHING_SPEC.md). Off by default.</p>' +
         '<div class="ob-label" style="margin-top:14px">Longer race distances</div>' +
@@ -5762,66 +5724,10 @@
       });
     });
 
-    var coachVoiceSelect = document.getElementById('set_coachVoiceSelect');
-    coachVoiceSelect.addEventListener('change', function () {
-      state.workoutAudio.voiceURI = coachVoiceSelect.value || null;
-      saveState(state);
-      var svc = getCueService();
-      if (svc) svc.setVoice(state.workoutAudio.voiceURI);
-    });
-    // Android/Chrome commonly loads its voice roster asynchronously --
-    // getVoices() can return empty on first call, then 'voiceschanged'
-    // fires once the real list is ready. Refresh the dropdown in place if
-    // that happens while this screen is still showing; { once: true } so
-    // it self-removes and repeated Settings visits can't stack up listeners
-    // that never fire.
-    if (typeof window !== 'undefined' && window.speechSynthesis && typeof window.speechSynthesis.addEventListener === 'function') {
-      window.speechSynthesis.addEventListener('voiceschanged', function () {
-        var current = coachVoiceSelect.value;
-        coachVoiceSelect.innerHTML = voiceOptionsHtml(current || state.workoutAudio.voiceURI);
-      }, { once: true });
-    }
     document.getElementById('previewVoiceBtn').addEventListener('click', function () {
       var svc = getCueService();
       if (!svc) return;
-      // Preview whatever's currently picked in the dropdown, even if not
-      // saved yet, so the runner can compare voices before committing.
-      svc.setVoice(coachVoiceSelect.value || null);
       svc.playCue('This is what your coach sounds like.', null);
-    });
-
-    wrap.querySelectorAll('#set_neuralEnabled .chip').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        state.workoutAudio.neuralEnabled = chip.getAttribute('data-value') === 'on';
-        saveState(state);
-        var svc = getCueService();
-        if (svc) svc.setNeuralEnabled(state.workoutAudio.neuralEnabled);
-        wrap.querySelectorAll('#set_neuralEnabled .chip').forEach(function (c) {
-          c.classList.toggle('selected', c.getAttribute('data-value') === (state.workoutAudio.neuralEnabled ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.workoutAudio.neuralEnabled ? 'on' : 'off'))));
-        });
-      });
-    });
-    var neuralVoiceSelect = document.getElementById('set_neuralVoiceSelect');
-    neuralVoiceSelect.addEventListener('change', function () {
-      state.workoutAudio.ttsVoice = neuralVoiceSelect.value || 'nova';
-      saveState(state);
-      var svc = getCueService();
-      if (svc) svc.setTtsVoice(state.workoutAudio.ttsVoice);
-    });
-    document.getElementById('previewNeuralVoiceBtn').addEventListener('click', function () {
-      var svc = getCueService();
-      if (!svc) return;
-      // Force this one preview through the neural path even if the "Neural
-      // voice" toggle above is currently off (and revert right after) --
-      // otherwise there'd be no way to hear it before deciding to enable it
-      // for real. The revert happens on the next tick, after speakNext()'s
-      // own synchronous neuralAvailable() check has already captured this
-      // preview's forced-on state -- see audio-cues.js.
-      var wasEnabled = svc.neuralEnabled, wasVoice = svc.ttsVoice;
-      svc.setTtsVoice(neuralVoiceSelect.value);
-      svc.setNeuralEnabled(true);
-      svc.playCue('This is what your coach sounds like.', null);
-      setTimeout(function () { svc.setNeuralEnabled(wasEnabled); svc.setTtsVoice(wasVoice); }, 0);
     });
 
     var toReason = 'illness';
