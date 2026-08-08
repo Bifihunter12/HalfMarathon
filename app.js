@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.07.3';
+  var APP_VERSION = '2026.08.08.1';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -4076,6 +4076,7 @@
   // very next reconcile() call still produces the correct result.
   var _activeMachine = null;
   var _activeWorkoutKey = null;
+  var _activeCoachingSessionId = null;
   var _activeTicker = null;
   var _cueService = null;
 
@@ -4216,9 +4217,10 @@
     saveState(state);
   }
 
-  function stopTicking() {
+  function stopTicking(opts) {
+    opts = opts || {};
     if (_activeTicker) { clearInterval(_activeTicker); _activeTicker = null; }
-    if (_cueService) _cueService.stopAll();
+    if (_cueService && !opts.preserveAudio) _cueService.stopAll();
     document.removeEventListener('visibilitychange', _onVisibilityReconcile);
   }
 
@@ -4250,7 +4252,7 @@
   }
 
   function recordCoachingCue(selected) {
-    state.coachingHistory.push({ cueId: selected.cueId, category: selected.category, topic: selected.topic, deliveredAt: Date.now(), workoutId: _activeWorkoutKey });
+    state.coachingHistory.push({ cueId: selected.cueId, category: selected.category, topic: selected.topic, deliveredAt: Date.now(), workoutId: _activeCoachingSessionId });
     // Capped so a runner's cue history can never grow unbounded across a
     // lifetime of workouts (task: "limit the history to a reasonable size").
     if (state.coachingHistory.length > 200) state.coachingHistory = state.coachingHistory.slice(-200);
@@ -4286,7 +4288,12 @@
       units: state.units,
       sensorSnapshot: {}, // always empty -- see header comment
       cueHistory: state.coachingHistory,
+      workoutId: _activeCoachingSessionId,
       coachingPreferences: state.coachingPreferences,
+      focusTopic: CoachingCuesDomain.buildCoachingFocus
+        ? CoachingCuesDomain.buildCoachingFocus(state.coachingHistory, _activeCoachingSessionId,
+          CoachingCuesDomain.availableTeachingTopics ? CoachingCuesDomain.availableTeachingTopics(workoutType, terrainHint) : null)
+        : null,
       terrainHint: terrainHint,
       triggerEvent: triggerEvent
     }, extra || {}));
@@ -4294,7 +4301,12 @@
     var selected = CoachingCuesDomain.selectCoachingCue(context);
     if (!selected) return false;
     var svc = getCueService();
-    if (svc) svc.playCue(selected.text, hapticFor(selected.category));
+    if (svc) svc.playCue(selected.text, hapticFor(triggerEvent), {
+      priority: selected.priority,
+      expiresAt: selected.expiresAt,
+      interrupt: selected.priority <= 3,
+      replaceLowerPriority: selected.priority <= 3
+    });
     recordCoachingCue(selected);
     return true;
   }
@@ -4319,7 +4331,7 @@
   // opportunity to offer optional coaching. At most one processCoachingTick
   // call (and therefore at most one spoken cue) per tick, matching "never
   // speak two full cues simultaneously."
-  var TRIGGER_EVENT_PRIORITY = ['segment_start', 'warning_10s', 'halfway', 'final_interval', 'paused', 'resumed', 'complete'];
+  var TRIGGER_EVENT_PRIORITY = ['complete', 'paused', 'resumed', 'final_interval', 'segment_start', 'warning_10s', 'halfway'];
   function playDueCues(dayData, normalized, workoutType, terrainHint) {
     if (!_activeMachine) return;
     var drained = _activeMachine.drainCues();
@@ -4339,6 +4351,10 @@
 
   function renderActiveWorkout(weekNum, dayIdx) {
     _recordScreen(function () { renderActiveWorkout(weekNum, dayIdx); });
+    // Tear down the previous screen/ticker before any startup audio is
+    // queued. Doing this later would cancel the safety and introduction
+    // cues that fire below.
+    stopTicking();
     var key = weekNum + '-' + dayIdx;
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
@@ -4356,8 +4372,11 @@
       _activeMachine = WorkoutRunnerDomain.createRunnerStateMachine(normalized, { workoutId: key });
       _activeWorkoutKey = key;
       _activeMachine.start();
+      _activeCoachingSessionId = key + ':' + _activeMachine.state.startedAt;
       persistActiveSession(normalized);
       fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint);
+    } else if (!_activeCoachingSessionId && _activeMachine.state.startedAt) {
+      _activeCoachingSessionId = key + ':' + _activeMachine.state.startedAt;
     }
     var machine = _activeMachine;
 
@@ -4500,7 +4519,6 @@
       tick();
     });
 
-    stopTicking(); // clear any previous screen's ticker before starting a new one
     _activeTicker = setInterval(tick, 500);
     document.addEventListener('visibilitychange', _onVisibilityReconcile);
     tick(); // immediate reconcile + render, don't wait for the first interval
@@ -4514,7 +4532,7 @@
   // are themselves idempotent, and this function is only ever called from
   // refreshDisplay()'s phase check, which stops ticking immediately after).
   function onWorkoutEnded(phase) {
-    stopTicking();
+    stopTicking({ preserveAudio: phase === 'completed' });
     var machine = _activeMachine;
     var key = _activeWorkoutKey;
     var activeMs = machine.elapsedActiveMs();
@@ -4524,7 +4542,7 @@
     if (phase === 'completed') {
       finalizeWorkoutLog(key, activeMs, 'planned');
       clearActiveSession();
-      _activeMachine = null; _activeWorkoutKey = null;
+      _activeMachine = null; _activeWorkoutKey = null; _activeCoachingSessionId = null;
       var doneWrap = el(
         '<div class="ob runner-screen">' +
           '<div class="ob-title">Workout complete</div>' +
@@ -4555,12 +4573,12 @@
     guardOnce(document.getElementById('runnerSavePartialBtn'), function () {
       finalizeWorkoutLog(key, activeMs, 'stopped_early');
       clearActiveSession();
-      _activeMachine = null; _activeWorkoutKey = null;
+      _activeMachine = null; _activeWorkoutKey = null; _activeCoachingSessionId = null;
       renderMain();
     });
     guardOnce(document.getElementById('runnerDiscardBtn'), function () {
       clearActiveSession();
-      _activeMachine = null; _activeWorkoutKey = null;
+      _activeMachine = null; _activeWorkoutKey = null; _activeCoachingSessionId = null;
       renderMain();
     });
   }
@@ -4616,6 +4634,7 @@
         if (!normalized) { clearActiveSession(); renderMain(); return; }
         _activeMachine = WorkoutRunnerDomain.restoreRunnerStateMachine(normalized, recovery.session.snapshot, {});
         _activeWorkoutKey = recovery.session.key;
+        _activeCoachingSessionId = _activeWorkoutKey + ':' + recovery.session.snapshot.startedAt;
         renderActiveWorkout(weekNum, dayIdx);
       });
     }
@@ -4787,7 +4806,10 @@
     // separate/different guess.
     var coachingFocusHtml = '';
     if (runnerPreview && CoachingCuesDomain.buildCoachingFocus) {
-      var focusTopic = CoachingCuesDomain.buildCoachingFocus(state.coachingHistory, key);
+      var previewWorkoutType = CoachingCuesDomain.classifyWorkoutForCoaching ? CoachingCuesDomain.classifyWorkoutForCoaching(dayData, runnerPreview) : null;
+      var previewTerrainHint = CoachingCuesDomain.detectTerrainHint ? CoachingCuesDomain.detectTerrainHint(label) : null;
+      var previewTopics = CoachingCuesDomain.availableTeachingTopics ? CoachingCuesDomain.availableTeachingTopics(previewWorkoutType, previewTerrainHint) : null;
+      var focusTopic = CoachingCuesDomain.buildCoachingFocus(state.coachingHistory, key, previewTopics);
       var focusLabel = focusTopic && CoachingCuesDomain.TOPIC_LABEL ? CoachingCuesDomain.TOPIC_LABEL[focusTopic] : null;
       if (focusLabel) coachingFocusHtml = '<p class="wd-coaching-focus">Today’s focus: ' + escapeHtml(focusLabel) + '.</p>';
     }

@@ -15,7 +15,7 @@
   // separation matters (data truthfulness is enforced at the selection
   // layer by simply never having a non-null value to react to).
 
-  var UNAVAILABLE_SENSOR = { livePace: null, livePaceReliability: 'unavailable', liveHeartRate: null, heartRateTimestamp: null, heartRateReliability: 'unavailable', personalizedHrZones: null, currentElevationOrGrade: null };
+  var UNAVAILABLE_SENSOR = { livePace: null, livePaceReliability: 'unavailable', liveHeartRate: null, heartRateTimestamp: null, heartRateReliability: 'unavailable', heartRateTrendBpmPerMin: null, personalizedHrZones: null, currentElevationOrGrade: null };
 
   // A heart-rate reading older than this is treated as if it never arrived
   // (task: "Treat stale data as unavailable" / "timestamped readings...
@@ -46,6 +46,15 @@
     // persisted history (task: "malformed cue history falls back safely").
     var cueHistory = (inputs.cueHistory || []).filter(function (h) { return h && typeof h === 'object'; });
     var now = inputs.currentTime != null ? inputs.currentTime : Date.now();
+    var workoutId = inputs.workoutId || null;
+    // Per-workout caps and silence gaps must only inspect this execution of
+    // this workout. Older persisted history remains available separately for
+    // teaching-focus rotation and text variety, but can never suppress a cue
+    // in a new session. Contexts without a workoutId keep the legacy behavior
+    // for backwards compatibility with isolated callers/tests.
+    var workoutCueHistory = workoutId
+      ? cueHistory.filter(function (h) { return h.workoutId === workoutId; })
+      : cueHistory;
 
     // Staleness/plausibility enforcement -- runs regardless of what the
     // caller claims about reliability, so a caller can never accidentally
@@ -65,7 +74,7 @@
     // count as "recent" for spacing/dedup purposes -- an old workout's
     // history shouldn't suppress today's cues forever.
     var RECENT_WINDOW_MS = 10 * 60 * 1000;
-    var recent = cueHistory.filter(function (h) { return h && typeof h.deliveredAt === 'number' && (now - h.deliveredAt) <= RECENT_WINDOW_MS; });
+    var recent = workoutCueHistory.filter(function (h) { return h && typeof h.deliveredAt === 'number' && (now - h.deliveredAt) <= RECENT_WINDOW_MS; });
 
     return {
       workoutType: inputs.workoutType || null,
@@ -110,6 +119,7 @@
       liveHeartRate: sensor.liveHeartRate,
       heartRateTimestamp: sensor.heartRateTimestamp,
       heartRateReliability: sensor.heartRateReliability,
+      heartRateTrendBpmPerMin: sensor.heartRateTrendBpmPerMin,
       personalizedHrZones: sensor.personalizedHrZones,
       currentElevationOrGrade: sensor.currentElevationOrGrade,
       sensorAvailability: { pace: sensor.livePaceReliability === 'reliable', heartRate: sensor.heartRateReliability === 'reliable', gps: false },
@@ -119,7 +129,10 @@
       // maxPerWorkout / topic-repetition checks that must span the whole
       // workout, not just a recent window.
       fullCueHistory: cueHistory,
+      workoutCueHistory: workoutCueHistory,
+      workoutId: workoutId,
       coachingPreferences: inputs.coachingPreferences || null,
+      focusTopic: inputs.focusTopic || null,
       terrainHint: inputs.terrainHint || null, // 'hills' | null -- derived from the workout label, see coaching-cues.js classifyWorkoutForCoaching
       triggerEvent: inputs.triggerEvent || null,
       currentTime: now

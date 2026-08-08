@@ -244,14 +244,36 @@ test('remaining segment time is never negative, even long after a segment should
   assert.ok(remaining >= 0, 'remainingSegmentMs must never return a negative number');
 });
 
-test('halfway cue fires exactly once per segment, never twice from repeated reconcile calls', function () {
+test('halfway means halfway through the whole prescribed workout, not halfway through the current segment, and fires exactly once', function () {
+  // structuredWorkout() totals 240s active (60 warmup + 3x30 work + 2x15
+  // recovery between reps + 60 cooldown) -- workout halfway is at 120s.
   var clock = fakeClock();
   var m = Runner.createRunnerStateMachine(structuredWorkout(), { now: clock.now });
   m.start(); // warmup, 60s
-  clock.advance(31000); // just past halfway
+  clock.advance(31000); // just past halfway through the 60s warmup segment, nowhere near workout halfway
   for (var i = 0; i < 10; i++) m.reconcile(); // hammer reconcile many times at the same instant
+  assert.ok(!m.drainCues().some(function (c) { return c.type === 'halfway'; }), 'halfway must not fire from mere segment-halfway');
+
+  clock.advance(90000); // now 121s active elapsed -- just past the real workout halfway
+  for (var j = 0; j < 10; j++) m.reconcile();
   var halfwayCues = m.drainCues().filter(function (c) { return c.type === 'halfway'; });
   assert.equal(halfwayCues.length, 1, 'halfway cue must be deduped across repeated reconcile calls');
+});
+
+test('pause and resume expose stable event types (never the dedup-only timestamp suffix) while remaining repeatable', function () {
+  var clock = fakeClock();
+  var m = Runner.createRunnerStateMachine(structuredWorkout(), { now: clock.now, workoutId: 'w' });
+  m.start();
+  m.drainCues();
+  clock.advance(1000);
+  m.pause();
+  assert.equal(m.drainCues()[0].type, 'paused');
+  clock.advance(1000);
+  m.resume();
+  assert.equal(m.drainCues()[0].type, 'resumed');
+  clock.advance(1000);
+  m.pause();
+  assert.equal(m.drainCues()[0].type, 'paused', 'a later pause must still emit another stable "paused" event type, not a one-off dedup key');
 });
 
 test('final-interval cue fires exactly once, on the last interval only', function () {

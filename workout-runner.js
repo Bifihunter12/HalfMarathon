@@ -175,8 +175,8 @@
 
     function cueKey(idx, type) { return idx + '_' + type; }
 
-    function pushCue(idx, type, text) {
-      var key = cueKey(idx, type);
+    function pushCue(idx, type, text, dedupType) {
+      var key = cueKey(idx, dedupType || type);
       if (s.playedCues[key]) return; // hard dedup -- never fires twice, ever
       s.playedCues[key] = true;
       s.pendingCues.push({ key: key, type: type, text: text, segmentIndex: idx });
@@ -239,7 +239,7 @@
       s.previousPhase = s.phase;
       s.pauseStartedAt = now();
       s.phase = 'paused';
-      pushCue(s.segmentIndex, 'paused_' + s.pauseStartedAt, 'Workout paused'); // keyed per-pause so pause/resume/pause again still dedups within THIS pause only
+      pushCue(s.segmentIndex, 'paused', 'Workout paused', 'paused_' + s.pauseStartedAt); // stable event type, unique key per pause
     }
 
     function resume() {
@@ -251,7 +251,7 @@
       // duration (pause time is never counted as active/elapsed time).
       if (s.segmentStartedAt != null) s.segmentStartedAt += pausedFor;
       var resumedPhase = s.previousPhase;
-      pushCue(s.segmentIndex, 'resumed_' + s.pauseStartedAt, 'Workout resumed');
+      pushCue(s.segmentIndex, 'resumed', 'Workout resumed', 'resumed_' + s.pauseStartedAt);
       s.phase = resumedPhase;
       s.previousPhase = null;
       s.pauseStartedAt = null;
@@ -311,9 +311,9 @@
       maybeWarnings(seg);
     }
 
-    // 10-second warning and halfway cues -- computed from real elapsed
-    // time each call, deduped per-segment via playedCues so they can never
-    // fire twice even across many reconcile() calls within the same segment.
+    // 10-second warning and true workout-halfway cues -- computed from real
+    // elapsed time. A missed halfway event is marked consumed after a short
+    // grace window instead of replayed late when a suspended PWA resumes.
     function maybeWarnings(seg) {
       if (!seg || seg.durationSec == null || s.segmentStartedAt == null) return;
       var elapsedMs = now() - s.segmentStartedAt;
@@ -321,8 +321,14 @@
       if (seg.durationSec > 20 && remainingMs <= 10000 && remainingMs > 0) {
         pushCue(seg.index, 'warning_10s', 'Ten seconds');
       }
-      if (elapsedMs >= (seg.durationSec * 1000) / 2) {
-        pushCue(seg.index, 'halfway', 'Halfway');
+      if (normalized.totalPrescribedSec != null) {
+        var halfwayMs = normalized.totalPrescribedSec * 500;
+        var activeMs = elapsedActiveMs();
+        var halfwayKey = cueKey(-1, 'workout_halfway');
+        if (!s.playedCues[halfwayKey] && activeMs >= halfwayMs) {
+          if (activeMs - halfwayMs <= 15000) pushCue(-1, 'halfway', 'Workout halfway', 'workout_halfway');
+          else s.playedCues[halfwayKey] = true;
+        }
       }
     }
 

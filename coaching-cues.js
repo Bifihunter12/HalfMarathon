@@ -138,8 +138,18 @@
   };
   var TOPIC_LOOKBACK_WORKOUTS = 3; // don't repeat a topic taught in the last 3 distinct workouts
 
-  function buildCoachingFocus(cueHistory, workoutId) {
+  function availableTeachingTopics(workoutType, terrainHint) {
+    var topics = ['relaxed_shoulders', 'short_light_stride', 'controlled_breathing'];
+    if (workoutType === 'easy' || workoutType === 'long' || workoutType === 'run_walk') topics.unshift('talk_test_effort');
+    if (workoutType === 'intervals_time' || workoutType === 'intervals_manual') topics.unshift('pacing_first_interval');
+    if (terrainHint === 'hills') topics.unshift('hill_effort');
+    return topics;
+  }
+
+  function buildCoachingFocus(cueHistory, workoutId, availableTopics) {
     cueHistory = cueHistory || [];
+    var topicPool = (availableTopics && availableTopics.length ? availableTopics : TEACHING_TOPICS).filter(function (t) { return TEACHING_TOPICS.indexOf(t) !== -1; });
+    if (!topicPool.length) return null;
     var recentWorkoutIds = [];
     var taughtByWorkout = {};
     cueHistory.forEach(function (h) {
@@ -151,12 +161,12 @@
     var recentTopics = recentWorkoutIds.slice(-TOPIC_LOOKBACK_WORKOUTS).reduce(function (acc, wid) {
       return acc.concat(taughtByWorkout[wid] || []);
     }, []);
-    var candidate = TEACHING_TOPICS.filter(function (t) { return recentTopics.indexOf(t) === -1; })[0];
+    var candidate = topicPool.filter(function (t) { return recentTopics.indexOf(t) === -1; })[0];
     if (candidate) return candidate;
     // Every topic was taught recently -- fall back to a deterministic
     // rotation by total distinct-workout count instead of repeating the
     // very last one taught.
-    return TEACHING_TOPICS[recentWorkoutIds.length % TEACHING_TOPICS.length];
+    return topicPool[recentWorkoutIds.length % topicPool.length];
   }
 
   // ── Deterministic text-variant rotation ─────────────────────────────────
@@ -186,7 +196,14 @@
     var m = Math.floor(sec / 60), s = Math.round(sec % 60);
     return m + ':' + String(s).padStart(2, '0');
   }
-  function fmtMinutes(sec) { return Math.round(sec / 60); }
+  function fmtDuration(sec) {
+    sec = Math.max(1, Math.round(sec));
+    if (sec < 60) return sec + ' second' + (sec === 1 ? '' : 's');
+    var minutes = Math.floor(sec / 60), remainder = sec % 60;
+    var text = minutes + ' minute' + (minutes === 1 ? '' : 's');
+    if (remainder) text += ' ' + remainder + ' second' + (remainder === 1 ? '' : 's');
+    return text;
+  }
 
   var CUE_CATALOG = [
     // ── Safety (priority 1) -- always eligible, no data requirements ──
@@ -238,26 +255,35 @@
     // ── Immediate transitions (priority 2) -- one per segment kind ──
     {
       id: 'trans_warmup', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: ['warmup'],
+      triggerEvents: ['segment_start'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Begin your warm-up.' + (ctx.segmentRemainingSec ? ' Walk comfortably for ' + fmtMinutes(ctx.segmentRemainingSec) + ' minutes.' : ' Walk comfortably to start.'); }
+      buildText: function (ctx) { return 'Begin your warm-up.' + (ctx.segmentRemainingSec ? ' Walk comfortably for ' + fmtDuration(ctx.segmentRemainingSec) + '.' : ' Walk comfortably to start.'); }
     },
     {
       id: 'trans_work_start', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: ['work', 'continuous'],
+      triggerEvents: ['segment_start', 'final_interval'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       buildText: function (ctx) {
         if (ctx.isFinalInterval) return 'Final running interval. Stay smooth; there\'s no need to sprint.';
         var intervalPart = ctx.segmentTotalIntervals > 1 ? 'Interval ' + ctx.segmentIntervalNumber + ' of ' + ctx.segmentTotalIntervals + '. ' : '';
-        var durationPart = ctx.segmentRemainingSec ? ' for ' + fmtMinutes(ctx.segmentRemainingSec) + ' minutes' : '';
+        var durationPart = ctx.segmentRemainingSec ? ' for ' + fmtDuration(ctx.segmentRemainingSec) : '';
         var effort = ctx.prescribedPaceMin != null && ctx.prescribedPaceMax != null
-          ? ' Settle into your planned pace of ' + fmtPace(ctx.prescribedPaceMin, ctx.units) + ' to ' + fmtPace(ctx.prescribedPaceMax, ctx.units) + ' per ' + UNITS_LABEL[ctx.units] + '.'
-          : ' Easy effort' + durationPart + '. You should be able to speak in short sentences.';
+          ? ' Settle into your planned pace of ' + fmtPace(ctx.prescribedPaceMin, ctx.units) + ' to ' + fmtPace(ctx.prescribedPaceMax, ctx.units) + ' per ' + UNITS_LABEL[ctx.units] + durationPart + '.'
+          : ctx.workoutType === 'tempo'
+            ? ' Settle into a comfortably hard, controlled effort' + durationPart + '.'
+            : (ctx.workoutType === 'intervals_time' || ctx.workoutType === 'intervals_manual')
+              ? ' Run strong but controlled' + durationPart + '. Do not sprint.'
+              : ctx.workoutType === 'cross'
+                ? ' Keep this session controlled' + durationPart + '.'
+                : ' Keep an easy, conversational effort' + durationPart + '.';
         return 'Start running.' + (intervalPart ? ' ' + intervalPart.trim() : '') + effort;
       }
     },
     {
       id: 'trans_manual_rep_start', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: ['manual_rep'],
+      triggerEvents: ['segment_start', 'final_interval'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       buildText: function (ctx) {
@@ -267,6 +293,7 @@
     },
     {
       id: 'trans_recovery_start', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery'],
+      triggerEvents: ['segment_start'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       buildText: function (ctx) {
@@ -281,18 +308,21 @@
     },
     {
       id: 'trans_cooldown', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: ['cooldown'],
+      triggerEvents: ['segment_start'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
       buildText: function (ctx) { return 'Begin your cooldown. Walk easily and allow your breathing to settle.'; }
     },
     {
       id: 'trans_paused', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: null,
+      triggerEvents: ['paused'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       textVariants: ['Workout paused.']
     },
     {
       id: 'trans_resumed', category: 'transition', applicableWorkoutTypes: null, applicableSegmentTypes: null,
+      triggerEvents: ['resumed'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       textVariants: ['Workout resumed.']
@@ -350,7 +380,7 @@
     {
       id: 'hr_not_declining', category: 'sensor_corrective', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery'],
       experienceLevels: null, minimumSegmentDurationSec: 60, earliestSegmentOffsetSec: 30, latestSegmentOffsetSec: null,
-      minimumGapSec: 100, requiresData: ['liveHeartRate', 'heartRateTimestamp', 'personalizedHrZones'], conflictsWith: ['encouragement'], maxPerWorkout: null,
+      minimumGapSec: 100, requiresData: ['liveHeartRate', 'heartRateTimestamp', 'heartRateTrendBpmPerMin', 'personalizedHrZones'], conflictsWith: ['encouragement'], maxPerWorkout: null,
       textVariants: ['Your heart rate is still elevated. Continue walking and focus on relaxed breathing.']
     },
 
@@ -392,6 +422,12 @@
       experienceLevels: null, minimumSegmentDurationSec: 45, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
       textVariants: ['Stay smooth; there is no need to sprint.']
+    },
+    {
+      id: 'effort_first_interval_control', category: 'effort', applicableWorkoutTypes: ['intervals_time', 'intervals_manual'], applicableSegmentTypes: ['work', 'manual_rep'],
+      experienceLevels: null, minimumSegmentDurationSec: 45, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'pacing_first_interval', firstIntervalOnly: true,
+      textVariants: ['Keep this first interval controlled. The goal is to finish the last one as strongly as the first.']
     },
 
     // ── Posture coaching ──
@@ -445,8 +481,9 @@
     },
     {
       id: 'recovery_prepare_next', category: 'recovery_guidance', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery'],
-      experienceLevels: null, minimumSegmentDurationSec: 30, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: 35,
-      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
+      experienceLevels: null, minimumSegmentDurationSec: 30, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
+      earliestSegmentRemainingSec: 12, latestSegmentRemainingSec: 35,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null, timeCritical: true,
       buildText: function (ctx) { return ctx.segmentRemainingSec ? Math.round(ctx.segmentRemainingSec) + ' seconds until the next interval. Stay relaxed.' : 'Stay relaxed — the next interval is coming up.'; }
     },
 
@@ -513,9 +550,11 @@
     // Step 3: remove cues that don't apply to this workout/segment/experience/terrain.
     candidates = candidates.filter(function (cue) {
       if (cue.applicableWorkoutTypes && context.workoutType && cue.applicableWorkoutTypes.indexOf(context.workoutType) === -1) return false;
+      if (cue.triggerEvents && cue.triggerEvents.indexOf(context.triggerEvent) === -1) return false;
       if (cue.applicableSegmentTypes && context.segmentType && cue.applicableSegmentTypes.indexOf(context.segmentType) === -1) return false;
       if (cue.experienceLevels && context.runnerExperience && cue.experienceLevels.indexOf(context.runnerExperience) === -1) return false;
       if (cue.terrainHint && cue.terrainHint !== context.terrainHint) return false;
+      if (cue.firstIntervalOnly && context.segmentIntervalNumber !== 1) return false;
       if ((context.segmentCount || 0) && cue.minimumSegmentDurationSec) {
         var segDur = (context.segmentElapsedSec != null && context.segmentRemainingSec != null) ? context.segmentElapsedSec + context.segmentRemainingSec : null;
         if (segDur != null && segDur < cue.minimumSegmentDurationSec) return false;
@@ -528,13 +567,35 @@
       if (context.segmentElapsedSec == null) return true; // no timing info (e.g. manual/open segment) -- window checks don't apply
       if (cue.earliestSegmentOffsetSec != null && context.segmentElapsedSec < cue.earliestSegmentOffsetSec) return false;
       if (cue.latestSegmentOffsetSec != null && context.segmentElapsedSec > cue.latestSegmentOffsetSec) return false;
+      if (context.segmentRemainingSec != null) {
+        if (cue.earliestSegmentRemainingSec != null && context.segmentRemainingSec < cue.earliestSegmentRemainingSec) return false;
+        if (cue.latestSegmentRemainingSec != null && context.segmentRemainingSec > cue.latestSegmentRemainingSec) return false;
+      }
+      return true;
+    });
+
+    // Sensor fields being present is not enough: the measured condition
+    // must actually be true. These guards keep future integrations from
+    // turning every valid reading into a corrective cue.
+    candidates = candidates.filter(function (cue) {
+      if (cue.id === 'pace_too_fast') return context.livePaceReliability === 'reliable' && context.livePace < context.prescribedPaceMin;
+      if (cue.id === 'pace_too_slow') return context.livePaceReliability === 'reliable' && context.livePace > context.prescribedPaceMax;
+      if (cue.id === 'hr_above_zone') {
+        var targetMax = context.prescribedHrZone && context.prescribedHrZone.max;
+        if (targetMax == null && context.personalizedHrZones) targetMax = context.personalizedHrZones.targetMax;
+        return context.heartRateReliability === 'reliable' && targetMax != null && context.liveHeartRate > targetMax;
+      }
+      if (cue.id === 'hr_not_declining') {
+        var recoveryMax = context.personalizedHrZones && context.personalizedHrZones.recoveryMax;
+        return context.heartRateReliability === 'reliable' && recoveryMax != null && context.heartRateTrendBpmPerMin != null && context.heartRateTrendBpmPerMin >= -1 && context.liveHeartRate > recoveryMax;
+      }
       return true;
     });
 
     // Step 5: remove cues already delivered beyond their per-workout limit.
     candidates = candidates.filter(function (cue) {
       if (cue.maxPerWorkout == null) return true;
-      var used = (context.fullCueHistory || []).filter(function (h) { return h.cueId === cue.id; }).length;
+      var used = (context.workoutCueHistory || context.fullCueHistory || []).filter(function (h) { return h.cueId === cue.id; }).length;
       return used < cue.maxPerWorkout;
     });
 
@@ -568,8 +629,9 @@
     // apply to essential categories -- those must always be able to speak).
     candidates = candidates.filter(function (cue) {
       if (OPTIONAL_CATEGORIES.indexOf(cue.category) === -1) return true;
+      if (cue.timeCritical) return true;
       var lastOptionalAt = null;
-      (context.fullCueHistory || []).forEach(function (h) {
+      (context.workoutCueHistory || context.fullCueHistory || []).forEach(function (h) {
         if (OPTIONAL_CATEGORIES.indexOf(h.category) !== -1 && (lastOptionalAt == null || h.deliveredAt > lastOptionalAt)) lastOptionalAt = h.deliveredAt;
       });
       if (lastOptionalAt != null && preset.minOptionalGapSec !== Infinity) {
@@ -578,7 +640,7 @@
       }
       if (preset.minOptionalGapSec === Infinity) return false; // Minimal mode -- no optional cues at all
       if (cue.minimumGapSec) {
-        var lastSameCue = (context.fullCueHistory || []).filter(function (h) { return h.cueId === cue.id; }).sort(function (a, b) { return b.deliveredAt - a.deliveredAt; })[0];
+        var lastSameCue = (context.workoutCueHistory || context.fullCueHistory || []).filter(function (h) { return h.cueId === cue.id; }).sort(function (a, b) { return b.deliveredAt - a.deliveredAt; })[0];
         if (lastSameCue && (context.currentTime - lastSameCue.deliveredAt) / 1000 < cue.minimumGapSec) return false;
       }
       return true;
@@ -586,7 +648,18 @@
 
     // Step 9: rank by priority (lower number = higher priority), then by
     // catalog order (stable, deterministic) as the tiebreak.
-    candidates.sort(function (a, b) { return (CATEGORY_PRIORITY[a.category] || 99) - (CATEGORY_PRIORITY[b.category] || 99); });
+    var focusAlreadyDelivered = context.focusTopic && (context.workoutCueHistory || []).some(function (h) { return h.topic === context.focusTopic; });
+    candidates.sort(function (a, b) {
+      var priorityDiff = (CATEGORY_PRIORITY[a.category] || 99) - (CATEGORY_PRIORITY[b.category] || 99);
+      if (priorityDiff) return priorityDiff;
+      if (context.focusTopic && !focusAlreadyDelivered) {
+        if (a.topic === context.focusTopic && b.topic !== context.focusTopic) return -1;
+        if (b.topic === context.focusTopic && a.topic !== context.focusTopic) return 1;
+      }
+      if (a.timeCritical && !b.timeCritical) return -1;
+      if (b.timeCritical && !a.timeCritical) return 1;
+      return 0;
+    });
 
     // Step 10: select no more than one.
     var winner = candidates[0];
@@ -614,6 +687,7 @@
     defaultCoachingPreferences: defaultCoachingPreferences,
     classifyWorkoutForCoaching: classifyWorkoutForCoaching,
     detectTerrainHint: detectTerrainHint,
+    availableTeachingTopics: availableTeachingTopics,
     buildCoachingFocus: buildCoachingFocus,
     selectCoachingCue: selectCoachingCue
   };

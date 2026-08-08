@@ -74,9 +74,12 @@
     // which still works, just isn't free after the first time.
     var audioCache = opts.audioCache || null;
     var neuralAvailable = function () { return neuralEnabled && !!fetchFn && !!AudioCtor && !!createObjectURL; };
+    var nowFn = opts.now || function () { return Date.now(); };
 
-    var queue = [];      // sequential speak queue -- overlapping cues never clobber each other
+    var queue = [];      // priority-aware sequential queue; each item carries expiry metadata
     var speaking = false;
+    var currentItem = null;
+    var sequence = 0;
     var currentAudioEl = null; // the in-flight neural <audio> element, if any -- tracked so stopAll() can actually silence it
     var stopToken = 0;         // bumped by stopAll() -- invalidates any in-flight neural fetch/cache lookup so a late response can't start playing after the workout it belonged to has already stopped
 
@@ -107,41 +110,47 @@
     }
 
     function speakNext() {
-      if (speaking || !queue.length) return;
+      if (speaking) return;
+      while (queue.length && queue[0].expiresAt <= nowFn()) queue.shift();
+      if (!queue.length) return;
       if (!enabled) { queue = []; return; }
       if (!speechAvailable && !neuralAvailable()) { queue = []; return; }
-      var text = queue.shift();
+      var item = queue.shift();
+      if (item.expiresAt <= nowFn()) { speakNext(); return; }
       speaking = true;
+      currentItem = item;
       var myToken = stopToken;
 
       if (neuralAvailable()) {
-        speakViaNeural(text, myToken).then(function (played) {
+        speakViaNeural(item, myToken).then(function (played) {
           if (myToken !== stopToken) return; // stopAll() happened while this was in flight -- do not resume a queue that's already been cleared
-          if (played) { speaking = false; speakNext(); }
-          else speakViaWebSpeech(text);
+          if (played) { speaking = false; currentItem = null; speakNext(); }
+          else speakViaWebSpeech(item, myToken);
         });
       } else {
-        speakViaWebSpeech(text);
+        speakViaWebSpeech(item, myToken);
       }
     }
 
-    function speakViaWebSpeech(text) {
-      if (!speechAvailable) { speaking = false; speakNext(); return; }
+    function speakViaWebSpeech(item, myToken) {
+      if (item.expiresAt <= nowFn()) { speaking = false; currentItem = null; speakNext(); return; }
+      if (!speechAvailable) { speaking = false; currentItem = null; speakNext(); return; }
       try {
-        var utt = new UtteranceCtor(text);
+        var utt = new UtteranceCtor(item.text);
         utt.volume = volume;
         // A voice that isn't found (unset, not loaded yet, or removed from
         // the device) just falls through to the platform's own default --
         // never an error, never blocks speech.
         var resolvedVoice = resolveVoice();
         if (resolvedVoice) utt.voice = resolvedVoice;
-        utt.onend = function () { speaking = false; speakNext(); };
+        utt.onend = function () { if (myToken !== stopToken) return; speaking = false; currentItem = null; speakNext(); };
         // A speech engine error must never hang the queue or block the
         // workout -- move on exactly as if it had spoken successfully.
-        utt.onerror = function () { speaking = false; speakNext(); };
+        utt.onerror = function () { if (myToken !== stopToken) return; speaking = false; currentItem = null; speakNext(); };
         speechApi.speak(utt);
       } catch (e) {
         speaking = false;
+        currentItem = null;
         speakNext();
       }
     }
@@ -162,17 +171,17 @@
     // playBlob() call, a stop could still be "raced" by a fetch that
     // resolves moments later, starting audio for a workout that already
     // ended (found by the test suite, not assumed safe).
-    function speakViaNeural(text, myToken) {
-      var key = cacheKeyFor(text);
+    function speakViaNeural(item, myToken) {
+      var key = cacheKeyFor(item.text);
       var cacheGet = (audioCache && typeof audioCache.get === 'function')
         ? audioCache.get(key).catch(function () { return null; })
         : Promise.resolve(null);
 
       return cacheGet.then(function (cachedBlob) {
-        if (myToken !== stopToken) return false;
+        if (myToken !== stopToken || item.expiresAt <= nowFn()) return false;
         if (cachedBlob) return playBlob(cachedBlob, myToken);
-        return fetchBlob(text).then(function (blob) {
-          if (myToken !== stopToken) return false;
+        return fetchBlob(item.text).then(function (blob) {
+          if (myToken !== stopToken || item.expiresAt <= nowFn()) return false;
           if (!blob) return false;
           if (audioCache && typeof audioCache.put === 'function') {
             try { audioCache.put(key, blob); } catch (e) { /* caching is best-effort -- a failed write must never block playback */ }
@@ -227,9 +236,32 @@
     // (if available) -- vibration fires independently of the audio on/off
     // preference, so a muted runner still gets haptic feedback, matching
     // the requirement for a non-audio cue channel.
-    function playCue(text, hapticPattern) {
-      if (enabled && (speechAvailable || neuralAvailable()) && text) { queue.push(text); speakNext(); }
+    function playCue(text, hapticPattern, meta) {
+      meta = meta || {};
+      if (enabled && (speechAvailable || neuralAvailable()) && text) {
+        var item = {
+          text: text,
+          priority: meta.priority != null ? meta.priority : 99,
+          expiresAt: meta.expiresAt != null ? meta.expiresAt : Infinity,
+          sequence: sequence++
+        };
+        if (item.expiresAt > nowFn()) {
+          if (meta.replaceLowerPriority) queue = queue.filter(function (queued) { return queued.priority <= item.priority && queued.expiresAt > nowFn(); });
+          queue.push(item);
+          queue.sort(function (a, b) { return a.priority - b.priority || a.sequence - b.sequence; });
+          if (meta.interrupt && currentItem && item.priority < currentItem.priority) interruptCurrent();
+          speakNext();
+        }
+      }
       if (hapticPattern) vibrate(hapticPattern);
+    }
+
+    function interruptCurrent() {
+      stopToken++;
+      if (speechApi && typeof speechApi.cancel === 'function') { try { speechApi.cancel(); } catch (e) {} }
+      if (currentAudioEl) { try { currentAudioEl.pause(); } catch (e) {} currentAudioEl = null; }
+      speaking = false;
+      currentItem = null;
     }
 
     // Called on pause and on workout end (completed/ended_early) -- clears
@@ -242,6 +274,7 @@
       if (speechApi && typeof speechApi.cancel === 'function') { try { speechApi.cancel(); } catch (e) {} }
       if (currentAudioEl) { try { currentAudioEl.pause(); } catch (e) {} currentAudioEl = null; }
       speaking = false;
+      currentItem = null;
     }
 
     return {
