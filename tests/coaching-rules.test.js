@@ -127,3 +127,170 @@ test('visibleEventsFor: an existing longer-distance plan keeps its own event vis
 test('visibleEventsFor: does not duplicate the current event when it is already public', function () {
   assert.deepEqual(rules.visibleEventsFor(ALL_EVENTS, false, 'half'), ['5k', '10k', 'half']);
 });
+
+// ── Coach-negotiated day trades (Monday rest -> 12-3-30, Sunday becomes
+// the new recovery day) ──────────────────────────────────────────────────
+var SAMPLE_WEEK = [
+  { key: '1-0', type: 'rest', label: 'Rest' },
+  { key: '1-1', type: 'easy', label: '3 mi easy run' },
+  { key: '1-2', type: 'cross', label: '30 min cross' },
+  { key: '1-3', type: 'quality', label: 'Tempo: 20 min' },
+  { key: '1-4', type: 'easy', label: '3 mi easy run' },
+  { key: '1-5', type: 'long', label: '8 mi long run' },
+  { key: '1-6', type: 'easy', label: '4 mi easy run' }
+];
+
+test('normalizeKnownWorkoutPhrase: recognizes 12-3-30 in every common spelling', function () {
+  ['12 3 30', '12-3-30', '12/3/30', 'lets do 12-3-30 today', 'I want to do a 12/3/30'].forEach(function (phrase) {
+    var w = rules.normalizeKnownWorkoutPhrase(phrase);
+    assert.ok(w, 'should recognize: ' + phrase);
+    assert.equal(w.type, 'cross');
+    assert.equal(w.label, '12-3-30 Incline Walk');
+    assert.equal(w.durationMinutes, 30);
+    assert.equal(w.plannedDistance, null);
+  });
+});
+
+test('normalizeKnownWorkoutPhrase: returns null for unrelated text', function () {
+  assert.equal(rules.normalizeKnownWorkoutPhrase('I want to go for an easy run'), null);
+  assert.equal(rules.normalizeKnownWorkoutPhrase(''), null);
+  assert.equal(rules.normalizeKnownWorkoutPhrase(null), null);
+});
+
+test('validateRescheduleDays: core scenario -- Monday rest becomes 12-3-30, Sunday becomes the new recovery day', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-6', workout: { type: 'rest', label: 'Rest', durationMinutes: null, plannedDistance: null } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, true);
+  var monday = result.resultingWeek.filter(function (d) { return d.key === '1-0'; })[0];
+  var sunday = result.resultingWeek.filter(function (d) { return d.key === '1-6'; })[0];
+  assert.equal(monday.type, 'cross');
+  assert.equal(monday.label, '12-3-30 Incline Walk');
+  assert.equal(sunday.type, 'rest');
+});
+
+test('validateRescheduleDays: race day is never a valid change target', function () {
+  var week = SAMPLE_WEEK.concat([{ key: '1-7', type: 'race', label: '10K Race' }]);
+  var changes = [{ key: '1-7', workout: { type: 'easy', label: 'Easy shakeout', durationMinutes: 20, plannedDistance: 2 } }];
+  var result = rules.validateRescheduleDays(week, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'race_day_protected');
+});
+
+test('validateRescheduleDays: rejects an unknown day key', function () {
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '9-9', workout: { type: 'rest', label: 'Rest' } }]);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'unknown_key');
+});
+
+test('validateRescheduleDays: rejects a duplicate key within one change set', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: 'A', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-0', workout: { type: 'rest', label: 'Rest' } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'duplicate_key');
+});
+
+test('validateRescheduleDays: rejects an invalid workout type (not in the allowed enum)', function () {
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '1-0', workout: { type: 'nonsense', label: 'X' } }]);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: rejects a malformed change (missing workout object)', function () {
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '1-0' }]);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: choosing a day with a long run as the new recovery day is rejected without explicit confirmation, and reports what would be displaced', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-5', workout: { type: 'rest', label: 'Rest' } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'would_displace_key_workout');
+  assert.equal(result.displaced.length, 1);
+  assert.equal(result.displaced[0].key, '1-5');
+  assert.equal(result.displaced[0].type, 'long');
+});
+
+test('validateRescheduleDays: choosing a day with a quality session as the new recovery day is rejected the same way', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-3', workout: { type: 'rest', label: 'Rest' } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'would_displace_key_workout');
+  assert.equal(result.displaced[0].type, 'quality');
+});
+
+test('validateRescheduleDays: a displaced long run is allowed through when the SAME change set relocates a long run to another day', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-5', workout: { type: 'rest', label: 'Rest' } },
+    { key: '1-6', workout: { type: 'long', label: '8 mi long run', durationMinutes: null, plannedDistance: 8 } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, true);
+});
+
+test('validateRescheduleDays: a displaced key workout is allowed through with explicit confirmDisplacement', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-5', workout: { type: 'rest', label: 'Rest' } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes, { confirmDisplacement: ['1-5'] });
+  assert.equal(result.ok, true);
+});
+
+test('validateRescheduleDays: a week that would end without any real rest day is rejected', function () {
+  var changes = SAMPLE_WEEK.filter(function (d) { return d.type === 'rest'; }).map(function (d) {
+    return { key: d.key, workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } };
+  });
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'insufficient_recovery');
+});
+
+test('validateRescheduleDays: a week that still keeps at least one real rest day after the trade is allowed', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-1', workout: { type: 'rest', label: 'Rest' } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, true);
+});
+
+test('validateRescheduleDays: rejects an out-of-range duration', function () {
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '1-0', workout: { type: 'cross', label: 'X', durationMinutes: 9999 } }]);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: rejects an out-of-range planned distance', function () {
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '1-0', workout: { type: 'easy', label: 'X', plannedDistance: -5 } }]);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: an invalid second change fails the entire atomic action (no partial validation success)', function () {
+  var changes = [
+    { key: '1-0', workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null } },
+    { key: '1-6', workout: { type: 'bogus', label: 'X' } }
+  ];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: existing single-day mark-rest-style trade (one change, no displacement, recovery preserved) still works', function () {
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '1-1', workout: { type: 'rest', label: 'Rest' } }]);
+  assert.equal(result.ok, true);
+});

@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.08.2';
+  var APP_VERSION = '2026.08.10.1';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -882,10 +882,20 @@
     // "deleted on this device" apart from "never synced here" and stop a
     // stale device's copy from winning the key back (merge-state.js mergeMapT).
     if (!s.deletedKeys) s.deletedKeys = {};
-    ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments', 'scheduleChoices', 'sideQuestCalendar', 'recurringWorkouts', 'travelPeriods'].forEach(function (f) {
+    ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments', 'scheduleChoices', 'sideQuestCalendar', 'recurringWorkouts', 'travelPeriods', 'workoutOverrides'].forEach(function (f) {
       if (!s.deletedKeys[f]) s.deletedKeys[f] = {};
     });
     if (!s.overrides) s.overrides = {};
+    // Typed schedule overrides (coach-negotiated day trades -- "I want to do
+    // 12-3-30 today instead of resting"). Distinct from the legacy
+    // state.overrides label-only string above: a typed entry replaces the
+    // day's real TYPE and structure (duration/distance), not just its
+    // display text, so a coach-swapped rest day actually becomes a loggable,
+    // startable workout instead of a rest day wearing a different label.
+    // Legacy overrides remain fully readable (effectiveWorkoutForDay below
+    // falls back to them) -- this is additive, not a replacement migration.
+    // { 'week-day': { type, label, durationMinutes, plannedDistance, source } }
+    if (!s.workoutOverrides) s.workoutOverrides = {};
     if (!s.crossType) s.crossType = {};
     // docs/COACHING_SPEC.md "Session-level architecture" -- independent
     // state for a secondary same-day session, keyed by stable session id
@@ -1028,6 +1038,48 @@
   // callers still save afterward exactly as before.
   function setOverride(key, value) { state.overrides[key] = value; delete state.deletedKeys.overrides[key]; }
   function clearOverride(key) { delete state.overrides[key]; state.deletedKeys.overrides[key] = true; }
+  // Typed schedule override (see state init above) -- a real type/label/
+  // duration/distance swap, not just a label string. Clears any legacy
+  // label-only override for the same key so there's exactly one source of
+  // truth going forward for a day this feature has touched (a typed entry
+  // always wins over a legacy one in effectiveWorkoutForDay's resolution
+  // order anyway -- this just keeps the two from silently disagreeing).
+  function setWorkoutOverride(key, workout) {
+    state.workoutOverrides[key] = { type: workout.type, label: workout.label, durationMinutes: workout.durationMinutes != null ? workout.durationMinutes : null, plannedDistance: workout.plannedDistance != null ? workout.plannedDistance : null, source: workout.source || 'coach' };
+    delete state.deletedKeys.workoutOverrides[key];
+    if (state.overrides[key] !== undefined) clearOverride(key);
+  }
+  function clearWorkoutOverride(key) { delete state.workoutOverrides[key]; state.deletedKeys.workoutOverrides[key] = true; }
+
+  // ── Single source of truth for "what actually happens on this day" ──────
+  // Resolution order: typed override (real type/label/duration/distance) >
+  // legacy label-only override (display text only, base type/structure
+  // unchanged) > the generated base day. Every place behavior depends on a
+  // day's type/label/loggability/pace guidance/side-mission eligibility
+  // should read through this instead of `dayData.type`/`state.overrides[key]
+  // || dayData.label` directly -- otherwise a coach-swapped rest day keeps
+  // showing rest-day guidance and can't actually be logged or started, which
+  // was the whole bug this exists to fix. Returns a day-shaped object
+  // (normalizeWorkout/WORKOUT_DETAIL-compatible): { type, label, miles,
+  // durationMinutes, sessions, runWalk, overridden, overrideSource }.
+  function effectiveWorkoutForDay(baseDay, key) {
+    var typed = state.workoutOverrides && state.workoutOverrides[key];
+    if (typed) {
+      return {
+        type: typed.type, label: typed.label,
+        miles: typed.plannedDistance != null ? typed.plannedDistance : null,
+        durationMinutes: typed.durationMinutes != null ? typed.durationMinutes : null,
+        sessions: (typed.type === 'cross' && typed.durationMinutes != null) ? [{ durationMinutes: typed.durationMinutes }] : undefined,
+        runWalk: null, qualitySegments: undefined, qualityManualReps: undefined,
+        overridden: true, overrideSource: 'typed'
+      };
+    }
+    var legacyLabel = state.overrides && state.overrides[key];
+    if (legacyLabel) {
+      return Object.assign({}, baseDay, { label: legacyLabel, overridden: true, overrideSource: 'legacy' });
+    }
+    return Object.assign({}, baseDay, { overridden: false, overrideSource: null });
+  }
   function setCrossType(key, value) { state.crossType[key] = value; delete state.deletedKeys.crossType[key]; }
   function clearCrossType(key) { delete state.crossType[key]; state.deletedKeys.crossType[key] = true; }
   function setDayAdjustment(key, value) { state.dayAdjustments[key] = value; delete state.deletedKeys.dayAdjustments[key]; }
@@ -1851,7 +1903,7 @@
         wk.days.forEach(function (day, di) {
           var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
           var key = wk.weekNum + '-' + di;
-          var label = state.overrides[key] || day.label;
+          var label = effectiveWorkoutForDay(day, key).label;
           if (sameDate(d, today)) { todayKey = key; todayLabel = label; }
           if (sameDate(d, yesterday)) { yesterdayKey = key; yesterdayLabel = label; }
           if (sameDate(d, tomorrow)) { tomorrowLabel = label; tomorrowDay = day; }
@@ -1949,6 +2001,15 @@
   // the synced state blob with chat transcripts.
   var coachHistory = [];
   var coachWaiting = false;
+  // The latest unresolved scheduling negotiation (e.g. "which day should
+  // become recovery?"), so a short follow-up like "Sunday" can complete the
+  // earlier request without the model having to re-derive it from prose
+  // alone. Same in-memory-only lifetime as coachHistory above -- never
+  // synced/persisted. { type: 'move_recovery', sourceKey, requestedWorkout }
+  // or null. Cleared whenever a response resolves it with a real action, is
+  // explicitly cancelled, or its sourceKey no longer exists in the current
+  // schedule (see renderCoachChatScreen).
+  var coachPendingIntent = null;
 
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
@@ -2610,6 +2671,7 @@
       state.logs = {}; state.overrides = {}; state.crossType = {};
       state.sessionLogs = {}; state.sessionOverrides = {};
       state.dayAdjustments = {};
+      state.workoutOverrides = {};
       state.goalCheckpointResolved = false;
     }
     // docs/COACHING_SPEC.md "Race readiness" -- evaluateReadiness above is
@@ -3275,7 +3337,7 @@
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
         var key = wk.weekNum + '-' + di;
-        var effectiveLabel = state.overrides[key] || day.label;
+        var effectiveLabel = effectiveWorkoutForDay(day, key).label;
         if (isLoggable(effectiveLabel)) {
           totalLoggable++;
           if (state.logs[key]) totalLogged++;
@@ -3465,8 +3527,8 @@
 
     if (todayDayIdx !== -1) {
       var todayKey = currentWeek + '-' + todayDayIdx;
-      var todayDayData = weeks[currentWeek - 1].days[todayDayIdx];
-      var todayLabel = state.overrides[todayKey] || todayDayData.label;
+      var todayDayData = effectiveWorkoutForDay(weeks[currentWeek - 1].days[todayDayIdx], todayKey);
+      var todayLabel = todayDayData.label;
       if (hasCross(todayLabel) && state.crossType[todayKey]) todayLabel = applyCrossOverride(todayLabel, state.crossType[todayKey]);
       var todayMission = missionById(state.sideQuestCalendar[todayKey]);
       var todayLoggable = isLoggable(todayLabel);
@@ -3546,7 +3608,7 @@
       var weekLoggable = 0, weekLogged = 0;
       wk.days.forEach(function (dayData, di) {
         var key = weekNum + '-' + di;
-        var lbl = state.overrides[key] || dayData.label;
+        var lbl = effectiveWorkoutForDay(dayData, key).label;
         if (isLoggable(lbl)) { weekLoggable++; if (state.logs[key]) weekLogged++; }
       });
 
@@ -3573,8 +3635,13 @@
       wk.days.forEach(function (dayData, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, weekNum, di);
         var key = weekNum + '-' + di;
+        // Shadow with the effective (typed override > legacy override > base)
+        // day, same as renderWorkoutDetail -- so a coach-negotiated typed
+        // override's real type/label drives rest styling, loggability, and
+        // target/pace summaries below, not the original generated day.
+        dayData = effectiveWorkoutForDay(dayData, key);
         var baseLabel = dayData.label;
-        var label = state.overrides[key] || baseLabel;
+        var label = baseLabel;
         var loggable = isLoggable(label);
         var race = isRace(label);
         var cross = hasCross(label);
@@ -3652,8 +3719,17 @@
             if (committed) return;
             committed = true;
             var val = inputEl.value.trim();
-            if (!val || val === baseLabel) clearOverride(key);
-            else setOverride(key, val);
+            if (!val || val === baseLabel) {
+              // No real change -- leave any typed override alone, just
+              // make sure no stale legacy override lingers on top of it.
+              clearOverride(key);
+            } else {
+              // A manual text edit can't express type/duration, so it must
+              // not silently coexist with (and lose to) a typed override --
+              // it always reverts the day to a plain label override.
+              if (state.workoutOverrides[key]) clearWorkoutOverride(key);
+              setOverride(key, val);
+            }
             saveState(state);
             renderMain();
           }
@@ -3755,6 +3831,7 @@
 
     var daysByKey = {};
     var daysPayload = [];
+    var weekDaysForValidation = []; // {key, type, label} across the visible window -- validateRescheduleDays' own input shape
     [currentWeek - 1, currentWeek].forEach(function (wIdx) {
       if (wIdx < 0 || wIdx >= weeks.length) return;
       var wk = weeks[wIdx];
@@ -3762,15 +3839,26 @@
         if (dd.type === 'race') return; // never let chat touch race day
         var dt = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
         var key = wk.weekNum + '-' + di;
-        var effectiveLabel = state.overrides[key] || dd.label;
+        // effectiveWorkoutForDay -- a day the coach already rescheduled
+        // (typed override) reports its REAL current type/label/duration
+        // here, not the originally-generated one, so the model always
+        // negotiates against what's actually on the calendar right now.
+        var eff = effectiveWorkoutForDay(dd, key);
         var logEntry = getLog(key);
-        daysByKey[key] = { effectiveLabel: effectiveLabel, baseLabel: dd.label, type: dd.type, date: dt, miles: dd.miles || null };
+        daysByKey[key] = { effectiveLabel: eff.label, baseLabel: dd.label, type: eff.type, baseType: dd.type, date: dt, miles: eff.miles != null ? eff.miles : null, durationMinutes: eff.durationMinutes != null ? eff.durationMinutes : null };
+        weekDaysForValidation.push({ key: key, type: eff.type, label: eff.label });
         daysPayload.push({
-          key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: effectiveLabel, type: dd.type,
-          plannedDistance: dd.miles || null, log: logEntry
+          key: key, dow: DOW_FULL[dt.getDay()], date: dateToISO(dt), label: eff.label, type: eff.type,
+          plannedDistance: eff.miles != null ? eff.miles : null, durationMinutes: eff.durationMinutes != null ? eff.durationMinutes : null, log: logEntry
         });
       });
     });
+
+    // The pending intent's sourceKey must still exist in the currently
+    // visible schedule window, or a stale "which day should become
+    // recovery?" question from an earlier, now-irrelevant week could
+    // silently resolve against the wrong day.
+    if (coachPendingIntent && !daysByKey[coachPendingIntent.sourceKey]) coachPendingIntent = null;
 
     function findSourceKey(excludeKey, type) {
       return Object.keys(daysByKey).filter(function (k) { return k !== excludeKey && daysByKey[k].type === type; })[0];
@@ -3778,6 +3866,7 @@
     function applyMarkRest(key, note) {
       var day = daysByKey[key];
       var label = 'Rest' + (note ? ' — ' + note : '');
+      if (state.workoutOverrides[key]) clearWorkoutOverride(key);
       if (day && label === day.baseLabel) clearOverride(key); else setOverride(key, label);
       saveState(state);
     }
@@ -3786,8 +3875,26 @@
       var sourceKey = findSourceKey(key, newType);
       if (!sourceKey) return false;
       var newLabel = daysByKey[sourceKey].effectiveLabel;
+      if (state.workoutOverrides[key]) clearWorkoutOverride(key);
       if (newLabel === day.baseLabel) clearOverride(key); else setOverride(key, newLabel);
       saveState(state);
+      return true;
+    }
+    // Atomic multi-day trade (docs: "recovery is a weekly requirement, not
+    // an immovable calendar date"). Re-validates with the exact same
+    // deterministic rules the server already checked (validateRescheduleDays)
+    // -- the AI proposes, this decides, every single time, never trusting
+    // that a proposal already vetted server-side is still safe to apply by
+    // the time the runner actually taps Confirm (the schedule could have
+    // changed underneath it). Applies every change or none; saves once.
+    function applyRescheduleDays(changes) {
+      var result = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, changes) : { ok: false };
+      if (!result.ok) return false;
+      changes.forEach(function (c) {
+        setWorkoutOverride(c.key, { type: c.workout.type, label: c.workout.label, durationMinutes: c.workout.durationMinutes, plannedDistance: c.workout.plannedDistance, source: 'coach' });
+      });
+      saveState(state);
+      coachPendingIntent = null;
       return true;
     }
     function applyLogUnplanned(key, note) {
@@ -3799,6 +3906,7 @@
       var newMiles = round1(day.miles * factor);
       var terrainNote = terrainNoteFrom(state.profile.terrains);
       var newLabel = day.type === 'long' ? formatLongRunLabel(newMiles, terrainNote) : formatEasyRunLabel(newMiles);
+      if (state.workoutOverrides[key]) clearWorkoutOverride(key);
       if (newLabel === day.baseLabel) clearOverride(key); else setOverride(key, newLabel);
       saveState(state);
       return true;
@@ -3810,6 +3918,7 @@
       var quest = missionById(sideQuestId);
       var replaces = quest && (quest.replaces || quest.canReplaceWorkoutTypes || []);
       if (!day || !quest || replaces.indexOf(day.type) === -1) return false;
+      if (state.workoutOverrides[key]) clearWorkoutOverride(key);
       if (quest.name === day.baseLabel) clearOverride(key); else setOverride(key, quest.name);
       state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), relationship: quest.relationshipLabel || 'Can replace an easy Main Mission' });
       // Same fix as applySideQuest -- must save explicitly, not rely on
@@ -3823,6 +3932,36 @@
     // as an explanatory note with no Confirm button, since acting on it would
     // either do nothing or isn't something this action type can actually do.
     function actionConfirmText(action, day) {
+      // Atomic multi-day trade -- one confirmation for every change in the
+      // set, never a separate confirm per day (task: "Never make the user
+      // confirm Monday and Sunday separately"). Re-runs the exact same
+      // deterministic validator applyRescheduleDays will use, so the
+      // confirmation text shown here can never promise something the app
+      // then refuses to actually apply.
+      if (action.type === 'reschedule_days') {
+        if (!Array.isArray(action.changes) || !action.changes.length) return null;
+        var missingKey = action.changes.some(function (c) { return !daysByKey[c.key]; });
+        if (missingKey) {
+          return { text: "That trade refers to a day that's no longer on your schedule -- ask your coach again and I'll work out a fresh one.", confirmable: false };
+        }
+        var preview = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, action.changes) : { ok: false, reason: 'invalid_workout' };
+        if (!preview.ok) {
+          var reasonText = {
+            race_day_protected: "That would touch race day, which never changes here.",
+            would_displace_key_workout: preview.displaced && preview.displaced.length ? 'That would bump ' + preview.displaced.map(function (d) { return d.label; }).join(' and ') + ' with nowhere for it to go -- ask your coach to also say where that session should move, or confirm skipping it.' : 'That would displace a long run or quality session with nowhere for it to go.',
+            insufficient_recovery: "That wouldn't leave a real recovery day this week -- ask your coach to pick a different day to free up.",
+            invalid_workout: "That trade isn't valid -- ask your coach again.",
+            duplicate_key: "That trade lists the same day twice -- ask your coach again.",
+            unknown_key: "That trade refers to a day that isn't on your schedule -- ask your coach again."
+          }[preview.reason] || "That trade isn't valid right now -- ask your coach again.";
+          return { text: reasonText, confirmable: false };
+        }
+        var summary = action.changes.map(function (c) {
+          var dow = DOW_FULL[daysByKey[c.key].date.getDay()];
+          return c.workout.type === 'rest' ? 'make ' + dow + ' a recovery day' : 'update ' + dow + ' to ' + escapeHtml(c.workout.label);
+        }).join(' and ');
+        return { text: summary.charAt(0).toUpperCase() + summary.slice(1) + '?', confirmable: true };
+      }
       if (action.type === 'mark_rest') {
         return { text: 'Mark ' + DOW_FULL[day.date.getDay()] + ' as rest' + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
       }
@@ -3863,8 +4002,10 @@
       }
       var actionHtml = '';
       if (turn.action && !turn.resolved) {
-        var day = daysByKey[turn.action.key];
-        var confirm = day ? actionConfirmText(turn.action, day) : null;
+        // reschedule_days is inherently multi-day -- it has `changes`, not a
+        // single `key`, so there's no one `day` to look up here.
+        var day = turn.action.type === 'reschedule_days' ? null : daysByKey[turn.action.key];
+        var confirm = (day || turn.action.type === 'reschedule_days') ? actionConfirmText(turn.action, day) : null;
         if (confirm && confirm.confirmable) {
           actionHtml = '<div class="coach-action">' +
             '<div style="margin-bottom:8px">' + confirm.text + '</div>' +
@@ -3875,7 +4016,10 @@
           actionHtml = '<div class="coach-action-status">' + confirm.text + '</div>';
         }
       } else if (turn.action && turn.resolved) {
-        actionHtml = '<div class="coach-action-status">' + (turn.resolved === 'confirmed' ? '✓ Done' : 'Cancelled') + '</div>';
+        // 'failed' (validation rejected it at the moment of confirming --
+        // e.g. the schedule changed underneath a stale proposal) must never
+        // read as "Done" or as a plain user-initiated "Cancelled".
+        actionHtml = '<div class="coach-action-status">' + (turn.resolved === 'confirmed' ? '✓ Done' : (turn.resolved === 'failed' ? "Couldn't apply that -- the schedule may have changed. Ask your coach again." : 'Cancelled')) + '</div>';
       }
       var redFlagHtml = (turn.redFlags && turn.redFlags.length) || turn.riskLevel === 'red'
         ? '<div class="coach-redflag">⚠ Please stop training and see a doctor' + (turn.redFlags && turn.redFlags.length ? ' — mentioned: ' + turn.redFlags.map(escapeHtml).join(', ') : '') + '. This isn’t something a training app should manage.</div>'
@@ -3913,6 +4057,7 @@
         else if (turn.action.type === 'log_unplanned_activity') applyLogUnplanned(turn.action.key, turn.action.note);
         else if (turn.action.type === 'reduce_intensity') ok = applyReduceIntensity(turn.action.key, turn.action.factor);
         else if (turn.action.type === 'substitute_side_quest') ok = applySideQuestChat(turn.action.key, turn.action.sideQuestId);
+        else if (turn.action.type === 'reschedule_days') ok = applyRescheduleDays(turn.action.changes);
         turn.resolved = ok ? 'confirmed' : 'failed';
         renderCoachChatScreen();
       });
@@ -3920,6 +4065,11 @@
     wrap.querySelectorAll('[data-cancel-idx]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         coachHistory[parseInt(btn.getAttribute('data-cancel-idx'), 10)].resolved = 'cancelled';
+        // Cancelling the trade that a pending intent was building toward
+        // must not leave a stale "which day should become recovery?"
+        // context lying around for an unrelated future message to
+        // accidentally resolve against -- neither day is changed either way.
+        coachPendingIntent = null;
         renderCoachChatScreen();
       });
     });
@@ -3969,7 +4119,12 @@
             return p;
           })(),
           sideQuests: SideQuestDomain.MISSION_CATALOG && SideQuestDomain.missionSummaryForCoach ? SideQuestDomain.MISSION_CATALOG.map(SideQuestDomain.missionSummaryForCoach) : SIDE_QUESTS,
-          history: history
+          history: history,
+          // The latest unresolved scheduling negotiation, if any -- lets a
+          // short reply like "Sunday" reliably complete the earlier "which
+          // day should become recovery?" question instead of depending
+          // entirely on the model re-deriving it from conversation prose.
+          pendingIntent: coachPendingIntent || null
         })
       }).then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
@@ -3982,6 +4137,12 @@
             role: 'coach', text: result2.data.message || '', action: result2.data.action || null, resolved: null,
             riskLevel: result2.data.riskLevel || 'green', avoidToday: result2.data.avoidToday || [], redFlags: result2.data.redFlags || []
           });
+          // A real action means the negotiation is now resolved into a
+          // concrete, confirmable proposal -- the pending intent has done
+          // its job. Otherwise adopt (or keep null) whatever the server
+          // returned, so a still-unresolved "which day?" question survives
+          // to the next message.
+          coachPendingIntent = result2.data.action ? null : (result2.data.pendingIntent || null);
         }
       }).catch(function () {
         logTelemetryEvent('ai_call_failed', 'coach');
@@ -4239,7 +4400,7 @@
     var refNow = _activeMachine.state.phase === 'paused' ? _activeMachine.state.pauseStartedAt : now;
     var elapsedSegMs = _activeMachine.state.segmentStartedAt != null ? Math.max(0, refNow - _activeMachine.state.segmentStartedAt) : null;
     var remainingMs = _activeMachine.remainingSegmentMs();
-    var label = state.overrides[_activeWorkoutKey] || dayData.label;
+    var label = dayData.label; // dayData is already the effective (override-resolved) day here -- see renderActiveWorkout
 
     var context = CoachingContextDomain.buildCoachingContext(Object.assign({
       currentTime: now,
@@ -4327,8 +4488,12 @@
     var key = weekNum + '-' + dayIdx;
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
-    var dayData = result.weeks[weekNum - 1].days[dayIdx];
-    var label = state.overrides[key] || dayData.label;
+    // Shadowed with the effective day (typed override > legacy override >
+    // base) so a coach-negotiated cross-training swap is actually
+    // startable/runnable here, not just a relabeled rest day that
+    // normalizeWorkout would still refuse to turn into a real session.
+    var dayData = effectiveWorkoutForDay(result.weeks[weekNum - 1].days[dayIdx], key);
+    var label = dayData.label;
     var normalized = WorkoutRunnerDomain.normalizeWorkout ? WorkoutRunnerDomain.normalizeWorkout(dayData, { label: label }) : null;
     if (!normalized) { renderWorkoutDetail(weekNum, dayIdx); return; } // not an executable workout type -- safe fallback, never a blank/broken screen
     var workoutType = CoachingCuesDomain.classifyWorkoutForCoaching ? CoachingCuesDomain.classifyWorkoutForCoaching(dayData, normalized) : null;
@@ -4624,10 +4789,11 @@
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var wk = result.weeks[weekNum - 1];
-    var dayData = wk && wk.days[dayIdx];
-    if (!dayData) return null;
+    var baseDayData = wk && wk.days[dayIdx];
+    if (!baseDayData) return null;
     var key = weekNum + '-' + dayIdx;
-    var label = state.overrides[key] || dayData.label;
+    var dayData = effectiveWorkoutForDay(baseDayData, key);
+    var label = dayData.label;
     return WorkoutRunnerDomain.normalizeWorkout ? WorkoutRunnerDomain.normalizeWorkout(dayData, { label: label }) : null;
   }
 
@@ -4642,10 +4808,18 @@
     var raceDate = parseDate(state.raceGoal.raceDate);
     var planLengthWeeks = state.planMeta.planLengthWeeks;
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
-    var dayData = result.weeks[weekNum - 1].days[dayIdx];
     var key = weekNum + '-' + dayIdx;
+    // effectiveWorkoutForDay resolves a coach-negotiated typed override (real
+    // type/miles/duration, not just a label) ahead of the base generated day
+    // -- shadowing `dayData` with it here means every existing `dayData.type`/
+    // `.miles`/`.runWalk` reference below this line (WORKOUT_DETAIL lookup,
+    // rest-vs-workout branching, pace guidance, Planned-vs-Actual) already
+    // reflects what's actually scheduled today, with zero behavior change
+    // for the common non-overridden/legacy-label-override cases (see the
+    // helper's own comment for the exact resolution order).
+    var dayData = effectiveWorkoutForDay(result.weeks[weekNum - 1].days[dayIdx], key);
     var d = dateForSlot(raceDate, planLengthWeeks, weekNum, dayIdx);
-    var label = state.overrides[key] || dayData.label;
+    var label = dayData.label;
     if (hasCross(label) && state.crossType[key]) label = applyCrossOverride(label, state.crossType[key]);
     var loggable = isLoggable(label);
     var race = isRace(label);
@@ -5419,9 +5593,12 @@
     var raceDate = parseDate(state.raceGoal.raceDate);
     var planLengthWeeks = state.planMeta.planLengthWeeks;
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
-    var dayData = result.weeks[weekNum - 1].days[dayIdx];
     var key = weekNum + '-' + dayIdx;
-    var baseLabel = state.overrides[key] || dayData.label;
+    // Effective type/label so a coach-negotiated day trade offers Side
+    // Mission options that actually fit what's scheduled today, not the
+    // originally-generated day.
+    var dayData = effectiveWorkoutForDay(result.weeks[weekNum - 1].days[dayIdx], key);
+    var baseLabel = dayData.label;
     var selectedReason = null;
     var showingOptions = false;
 
@@ -6007,6 +6184,7 @@
       state.sessionLogs = {};
       state.sessionOverrides = {};
       state.dayAdjustments = {};
+      state.workoutOverrides = {};
       // Bypasses setLog/setOverride/etc.'s per-key tombstone bookkeeping (a
       // bulk reset, not a per-key delete), so clear their deletedKeys too --
       // otherwise they'd just linger unbounded across every future plan.
@@ -6015,7 +6193,7 @@
       // second device that hasn't synced the reset yet -- a materially
       // different, larger fix (marking every pre-reset key deleted) than
       // this audit's per-key-delete scope covered.
-      ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments'].forEach(function (f) { state.deletedKeys[f] = {}; });
+      ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments', 'workoutOverrides'].forEach(function (f) { state.deletedKeys[f] = {}; });
       saveState(state);
       didAutoScroll = false;
       renderMain();
@@ -6151,7 +6329,7 @@
       wk.days.forEach(function (day, di) {
         var d = dateForSlot(raceDate, planLengthWeeks, wk.weekNum, di);
         var key = wk.weekNum + '-' + di;
-        var label = state.overrides[key] || day.label;
+        var label = effectiveWorkoutForDay(day, key).label;
         if (d <= today && isLoggable(label)) {
           scheduledSoFar++;
           var entry = getLog(key);
@@ -6254,7 +6432,7 @@
       var planned = 0, completed = 0, plannedDist = 0, doneDist = 0, hardestLabel = null, hardestRpe = -1;
       lastWeek.days.forEach(function (day, di) {
         var key = lastWeek.weekNum + '-' + di;
-        var label = state.overrides[key] || day.label;
+        var label = effectiveWorkoutForDay(day, key).label;
         if (!isLoggable(label)) return;
         planned++;
         if (day.miles) plannedDist += day.miles;
@@ -6296,7 +6474,7 @@
     if (nextWeek) {
       var items = nextWeek.days.map(function (day, di) {
         var key = nextWeek.weekNum + '-' + di;
-        var label = state.overrides[key] || day.label;
+        var label = effectiveWorkoutForDay(day, key).label;
         var d = dateForSlot(raceDate, planLengthWeeks, nextWeek.weekNum, di);
         if (!isLoggable(label)) return null;
         return '<li>' + DOW_FULL[d.getDay()] + ' &middot; ' + escapeHtml(label) + '</li>';

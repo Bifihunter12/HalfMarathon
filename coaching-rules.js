@@ -2291,6 +2291,148 @@
     return 'Run ' + fmtMinSec(session.runSec) + ' / walk ' + fmtMinSec(session.walkSec) + ' ×' + session.cycles + ' (' + session.totalMin + ' min)';
   }
 
+  // ── Coach-negotiated day trades (recovery is a weekly requirement, not an
+  // immovable calendar date) ────────────────────────────────────────────
+  // A day's TYPE is still always one of these -- the same enum
+  // buildStructuredWeeks/normalizeWorkout already use everywhere else.
+  // What's new is that the coach can now propose a *typed* override (real
+  // type + label + duration/distance, not just a label string) for one or
+  // more days at once, and this module is the single place that decides
+  // whether that proposal is actually allowed -- the AI proposes, this
+  // decides (never the reverse).
+  var ALLOWED_OVERRIDE_TYPES = ['easy', 'long', 'quality', 'cross', 'rest'];
+
+  // A week must always keep at least this many real rest days -- matches
+  // assignWeekTemplate's own guaranteed-rest-day design (it deliberately
+  // caps run/cross slots at 6 of 7 so one day is always structurally left
+  // as 'rest'). Recovery is enforced at this granularity (a whole day),
+  // not partial credit for an easy or cross day -- moving the day is fine,
+  // dropping it to zero recovery days is not.
+  var REQUIRED_RECOVERY_DAYS_PER_WEEK = 1;
+
+  // Days that represent real, race-specific training the plan is actually
+  // built around -- silently losing one of these to a rest-day swap is
+  // exactly the "silently discard a protected workout" failure this whole
+  // feature exists to prevent.
+  var KEY_WORKOUT_TYPES = ['long', 'quality'];
+
+  function isRaceDay(day) { return !!day && day.type === 'race'; }
+  function isKeyWorkoutType(type) { return KEY_WORKOUT_TYPES.indexOf(type) !== -1; }
+
+  // ── Known custom-workout phrase table (task 14: "the same architecture
+  // must support running, hiking, cycling, fitness classes, strength,
+  // incline walking, and other custom workouts -- not only 12-3-30"). This
+  // is deliberately a data table, not one-off string matching, so adding a
+  // new recognized phrase later is one array entry, not new logic. Each
+  // entry's `pattern` is tested against the runner's raw free-text request
+  // so the effective workout is always a deterministic, known-good object --
+  // never trusted from the AI's own wording for a phrase this table already
+  // recognizes.
+  var KNOWN_WORKOUT_PHRASES = [
+    {
+      // Matches "12 3 30", "12-3-30", "12/3/30" (any separator, optional
+      // "incline walk"/"treadmill" suffix words), case-insensitive.
+      pattern: /\b12[\s\-\/]?3[\s\-\/]?30\b/i,
+      workout: { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null }
+    }
+  ];
+
+  function normalizeKnownWorkoutPhrase(text) {
+    if (typeof text !== 'string' || !text) return null;
+    for (var i = 0; i < KNOWN_WORKOUT_PHRASES.length; i++) {
+      if (KNOWN_WORKOUT_PHRASES[i].pattern.test(text)) {
+        // Shallow copy -- callers may attach extra fields (e.g. source)
+        // without mutating the shared table entry.
+        var w = KNOWN_WORKOUT_PHRASES[i].workout;
+        return { type: w.type, label: w.label, durationMinutes: w.durationMinutes, plannedDistance: w.plannedDistance };
+      }
+    }
+    return null;
+  }
+
+  // Applies `changes` ({key, workout:{type,label,durationMinutes,
+  // plannedDistance}}) to `weekDays` (a plain array of {key, type, label}
+  // covering every day currently visible to the coach, already excluding
+  // race days at the caller's level) and decides whether the resulting
+  // week is allowed. Pure and deterministic -- same inputs, same verdict,
+  // every time. Returns:
+  //   { ok: true, resultingWeek: [...] }
+  //   { ok: false, reason: '<code>', displaced: [...] } -- reason is one of
+  //     'no_changes' | 'unknown_key' | 'duplicate_key' | 'race_day_protected'
+  //     | 'invalid_workout' | 'would_displace_key_workout' | 'insufficient_recovery'
+  // `options.confirmDisplacement` (array of day keys) lets a change that
+  // would otherwise displace a long/quality day through anyway -- set only
+  // when the runner has explicitly agreed the displaced workout is skipped
+  // or the proposed changes themselves relocate it to another day in the
+  // SAME change set (checked automatically, no confirmation needed for
+  // that case).
+  function validateRescheduleDays(weekDays, changes, options) {
+    options = options || {};
+    var confirmDisplacement = {};
+    (options.confirmDisplacement || []).forEach(function (k) { confirmDisplacement[k] = true; });
+
+    if (!Array.isArray(changes) || !changes.length) return { ok: false, reason: 'no_changes', displaced: [] };
+
+    var byKey = {};
+    (weekDays || []).forEach(function (d) { if (d && d.key != null) byKey[d.key] = d; });
+
+    var seenKeys = {};
+    for (var i = 0; i < changes.length; i++) {
+      var change = changes[i];
+      if (!change || change.key == null || !change.workout || typeof change.workout !== 'object') {
+        return { ok: false, reason: 'invalid_workout', displaced: [] };
+      }
+      if (seenKeys[change.key]) return { ok: false, reason: 'duplicate_key', displaced: [] };
+      seenKeys[change.key] = true;
+
+      var currentDay = byKey[change.key];
+      if (!currentDay) return { ok: false, reason: 'unknown_key', displaced: [] };
+      if (isRaceDay(currentDay)) return { ok: false, reason: 'race_day_protected', displaced: [] };
+
+      var w = change.workout;
+      if (ALLOWED_OVERRIDE_TYPES.indexOf(w.type) === -1) return { ok: false, reason: 'invalid_workout', displaced: [] };
+      if (typeof w.label !== 'string' || !w.label.trim() || w.label.length > 80) return { ok: false, reason: 'invalid_workout', displaced: [] };
+      if (w.durationMinutes != null && (typeof w.durationMinutes !== 'number' || !isFinite(w.durationMinutes) || w.durationMinutes < 0 || w.durationMinutes > 600)) {
+        return { ok: false, reason: 'invalid_workout', displaced: [] };
+      }
+      if (w.plannedDistance != null && (typeof w.plannedDistance !== 'number' || !isFinite(w.plannedDistance) || w.plannedDistance < 0 || w.plannedDistance > 200)) {
+        return { ok: false, reason: 'invalid_workout', displaced: [] };
+      }
+    }
+
+    // Displacement check: any change that moves a currently long/quality
+    // day to a different type loses that key workout unless the SAME
+    // change set relocates a matching type to another day, or the caller
+    // explicitly confirmed the skip for that key.
+    var incomingKeyTypes = {}; // type -> count of changes introducing that type
+    changes.forEach(function (c) { incomingKeyTypes[c.workout.type] = (incomingKeyTypes[c.workout.type] || 0) + 1; });
+    var displaced = [];
+    changes.forEach(function (c) {
+      var currentDay = byKey[c.key];
+      if (!isKeyWorkoutType(currentDay.type) || currentDay.type === c.workout.type) return;
+      if (confirmDisplacement[c.key]) return;
+      // Relocated within this same change set? (e.g. the long run's slot
+      // becomes recovery, and another change in this same set gives a
+      // different day type 'long') -- consumes one relocation credit so
+      // two displaced long runs can't both claim the same single relocation.
+      if (incomingKeyTypes[currentDay.type] > 0) { incomingKeyTypes[currentDay.type]--; return; }
+      displaced.push({ key: c.key, type: currentDay.type, label: currentDay.label });
+    });
+    if (displaced.length) return { ok: false, reason: 'would_displace_key_workout', displaced: displaced };
+
+    // Recovery-sufficiency check: apply the changes to a copy of the week
+    // and count real 'rest' days left. Never hard-codes which day -- only
+    // the resulting weekly structure matters.
+    var resultingWeek = (weekDays || []).map(function (d) {
+      var change = changes.filter(function (c) { return c.key === d.key; })[0];
+      return change ? { key: d.key, type: change.workout.type, label: change.workout.label } : { key: d.key, type: d.type, label: d.label };
+    });
+    var restDaysLeft = resultingWeek.filter(function (d) { return d.type === 'rest'; }).length;
+    if (restDaysLeft < REQUIRED_RECOVERY_DAYS_PER_WEEK) return { ok: false, reason: 'insufficient_recovery', displaced: [] };
+
+    return { ok: true, resultingWeek: resultingWeek };
+  }
+
   return {
     LEVELS: LEVELS,
     EVENT_TABLE: EVENT_TABLE,
@@ -2364,6 +2506,13 @@
     runWalkWeeksFor: runWalkWeeksFor,
     runWalkStageForWeek: runWalkStageForWeek,
     buildRunWalkSession: buildRunWalkSession,
-    formatRunWalkLabel: formatRunWalkLabel
+    formatRunWalkLabel: formatRunWalkLabel,
+    ALLOWED_OVERRIDE_TYPES: ALLOWED_OVERRIDE_TYPES,
+    REQUIRED_RECOVERY_DAYS_PER_WEEK: REQUIRED_RECOVERY_DAYS_PER_WEEK,
+    KEY_WORKOUT_TYPES: KEY_WORKOUT_TYPES,
+    isRaceDay: isRaceDay,
+    isKeyWorkoutType: isKeyWorkoutType,
+    normalizeKnownWorkoutPhrase: normalizeKnownWorkoutPhrase,
+    validateRescheduleDays: validateRescheduleDays
   };
 });

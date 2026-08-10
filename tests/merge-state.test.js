@@ -293,7 +293,7 @@ test('legacy states missing deletedKeys entirely still merge logs correctly (no 
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.logs['1-1'].distance, 5);
   assert.deepEqual(merged.deletedKeys, {
-    logs: {}, overrides: {}, crossType: {}, sessionLogs: {}, sessionOverrides: {},
+    logs: {}, overrides: {}, workoutOverrides: {}, crossType: {}, sessionLogs: {}, sessionOverrides: {},
     dayAdjustments: {}, scheduleChoices: {}, sideQuestCalendar: {},
     recurringWorkouts: {}, travelPeriods: {}
   });
@@ -451,5 +451,63 @@ test('legacy states missing dayAdjustments entirely still merge to a safe empty 
   const remote = { lastModified: 1000, units: 'mi' };
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.deepEqual(merged.dayAdjustments, {});
+});
+
+// ── Typed schedule overrides (coach-negotiated day trades, app.js
+// setWorkoutOverride/clearWorkoutOverride) -- same mergeMapT-by-day-key
+// pattern and tombstone protection as `overrides`/`dayAdjustments` above.
+test('typed workoutOverrides made on different devices for different days both survive the merge (two devices, two different day trades)', function () {
+  const local = baseState({
+    lastModified: 2000,
+    workoutOverrides: { '1-0': { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' } }
+  });
+  const remote = baseState({
+    lastModified: 1000,
+    workoutOverrides: { '2-3': { type: 'rest', label: 'Rest', durationMinutes: null, plannedDistance: null, source: 'coach' } }
+  });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.workoutOverrides, {
+    '1-0': { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' },
+    '2-3': { type: 'rest', label: 'Rest', durationMinutes: null, plannedDistance: null, source: 'coach' }
+  });
+});
+
+test('two devices editing the same day\'s typed workoutOverride: the newer device\'s trade wins outright, matching logs/overrides', function () {
+  const local = baseState({
+    lastModified: 2000,
+    workoutOverrides: { '1-0': { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' } }
+  });
+  const remote = baseState({
+    lastModified: 1000,
+    workoutOverrides: { '1-0': { type: 'easy', label: '2 mi easy shakeout', durationMinutes: null, plannedDistance: 2, source: 'coach' } }
+  });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.workoutOverrides['1-0'], { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' });
+});
+
+test('a workoutOverride deleted on the newer device stays deleted (tombstone) rather than resurrected by a stale remote copy', function () {
+  const local = baseState({ lastModified: 2000, workoutOverrides: {}, deletedKeys: { workoutOverrides: { '1-0': true } } });
+  const remote = baseState({ lastModified: 1000, workoutOverrides: { '1-0': { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' } } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.workoutOverrides['1-0'], undefined);
+});
+
+test('legacy states missing workoutOverrides entirely still merge to a safe empty object (old saved states load normally)', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = { lastModified: 1000, units: 'mi' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.workoutOverrides, {});
+});
+
+test('legacy label-only overrides and new typed workoutOverrides merge independently, side by side, without interfering with each other', function () {
+  const local = baseState({
+    lastModified: 2000,
+    overrides: { '1-1': 'Easy 3 mi (feeling great)' },
+    workoutOverrides: { '1-0': { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' } }
+  });
+  const remote = baseState({ lastModified: 1000 });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.overrides['1-1'], 'Easy 3 mi (feeling great)');
+  assert.deepEqual(merged.workoutOverrides['1-0'], { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' });
 });
 

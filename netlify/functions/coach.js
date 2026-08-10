@@ -15,13 +15,87 @@
 // specific day -- general questions, motivation, venting, or a bare
 // symptom mention with no requested change are NOT actions.
 
+var path = require('path');
+// Deterministic recovery/schedule-trade rules -- the model proposes a
+// reschedule_days action, this module decides whether it's actually
+// allowed (race-day protection, recovery sufficiency, key-workout
+// displacement). Never trust the model's own judgment on any of that.
+var CoachingRules = require(path.join(__dirname, '..', '..', 'coaching-rules.js'));
+
 var OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 var MODEL = 'gpt-4o-mini';
 var VALID_TYPES = ['easy', 'long', 'quality', 'cross', 'rest'];
-var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity', 'substitute_side_quest'];
+var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity', 'substitute_side_quest', 'reschedule_days'];
 var VALID_RISK = ['green', 'yellow', 'red'];
 var VALID_DECISION = ['keep_plan', 'modify_workout', 'replace_with_cross_training', 'rest', 'seek_medical_evaluation'];
 var REDUCE_MIN = 0.5, REDUCE_MAX = 0.9;
+var MAX_RESCHEDULE_CHANGES = 4;
+
+// ── Server-side repetition guard ──────────────────────────────────────────
+// Prompt instructions alone ("don't repeat yourself") aren't reliable --
+// a model can drift back to phrasing that already worked earlier in the
+// same conversation. This is the deterministic backstop: normalize and
+// compare candidate sentences against recent assistant turns, and only
+// treat a real, substantive sentence (not a short fragment like "Got it.")
+// as a repeat.
+var MIN_SIGNIFICANT_WORDS = 8;
+function normalizeSentenceText(s) {
+  return (s || '').toLowerCase().replace(/[.,!?;:'"()\-]/g, '').replace(/\s+/g, ' ').trim();
+}
+function splitIntoSentences(text) {
+  return (text || '').split(/(?<=[.!?])\s+|\n+/).map(function (s) { return s.trim(); }).filter(Boolean);
+}
+function significantSentences(text) {
+  return splitIntoSentences(text).filter(function (s) {
+    return normalizeSentenceText(s).split(' ').filter(Boolean).length >= MIN_SIGNIFICANT_WORDS;
+  });
+}
+function isRepeatedMessage(candidateMessage, recentAssistantMessages) {
+  var candidateNorm = significantSentences(candidateMessage).map(normalizeSentenceText);
+  if (!candidateNorm.length) return false;
+  var priorNorm = {};
+  (recentAssistantMessages || []).forEach(function (m) {
+    significantSentences(m).forEach(function (s) { priorNorm[normalizeSentenceText(s)] = true; });
+  });
+  return candidateNorm.some(function (s) { return priorNorm[s]; });
+}
+var DETERMINISTIC_FALLBACK_MESSAGES = {
+  withAction: "Here's the updated plan below -- take a look and confirm if it works for you.",
+  withoutAction: "Got it -- let's take this one step at a time. What would help most right now?"
+};
+// One controlled rewrite attempt -- same recommendation, different wording.
+// Never touches `action`; the caller validates that completely separately
+// from `parsed.action`, so a rewritten (or fallback) message can never
+// silently drop or alter a validated schedule action. Returns null (never
+// throws) on any failure, so the caller always has a safe deterministic
+// fallback to reach for.
+async function repairRepeatedMessage(originalMessage, recentAssistantMessages, apiKey, fetchFn) {
+  var repairPrompt = 'The following coach reply repeats something already said earlier in this conversation almost word-for-word: "' + String(originalMessage).replace(/"/g, "'") + '". Rewrite it so it conveys the exact same recommendation and facts in genuinely different wording -- 2-5 sentences, direct and warm, no hype. Respond with ONLY the rewritten reply text, no quotes, no JSON, no preamble.';
+  try {
+    var res = await fetchFn(OPENAI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: 'You rewrite a short passage so it reads differently while preserving its exact meaning.' },
+          { role: 'user', content: repairPrompt }
+        ],
+        temperature: 0.6,
+        max_tokens: 200
+      })
+    });
+    if (!res.ok) return null;
+    var data = await res.json();
+    var text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (typeof text !== 'string') return null;
+    text = text.trim().replace(/^"+|"+$/g, '');
+    if (!text || isRepeatedMessage(text, recentAssistantMessages)) return null;
+    return text;
+  } catch (e) {
+    return null;
+  }
+}
 
 var SYSTEM_PROMPT = [
   'You are a practical, direct, honest, evidence-informed running coach chatting with a runner inside their training app. You coach 5K through 100-mile, base building, return-to-running, and post-race recovery.',
@@ -35,6 +109,12 @@ var SYSTEM_PROMPT = [
   'Back pain specifically: mild stiffness -> easy walk + gentle mobility (cat-cow, child\'s pose breathing, hip flexor stretch, glute bridge, dead bug, bird dog, hamstring stretch), avoid sprints/hills/tempo/heavy lifting/twisting. Radiating leg pain, numbness, weakness, severe pain, bladder/bowel issues, fever, or trauma -> red flag, urgent medical evaluation.',
 
   'REST-DAY-BUT-WANTS-TO-RUN: do not automatically agree. Consider: pain-free? yesterday/tomorrow hard or long? weekly load already high? in taper? sleep-deprived/fatigued? Is the urge emotional/restless rather than strategic? If fresh, pain-free, not in taper, reasonable load: allow a small easy run (conversational, no pace goal, no intervals/hills) and note it lightly affects tomorrow only if tomorrow was already hard. If tired/sore/injured/tapering/recently hard: do not add a run -- offer a walk, mobility, easy bike, or full rest instead.',
+
+  'RECOVERY IS A WEEKLY REQUIREMENT, NOT AN IMMOVABLE CALENDAR DATE: when a runner wants to do a real workout on a day the plan generated as "rest", do not simply refuse and defend the original placement -- the specific day recovery lands on is flexible; the fact that a real recovery day still happens somewhere this week is what matters. Negotiate instead: (1) acknowledge the requested workout plainly (do not hedge or re-litigate whether it is a good idea unless there is an actual safety concern), (2) briefly note that recovery still needs to happen this week, (3) if the runner has not already said which day should become the new recovery day, ask them directly which day they would like to keep free -- do not guess it yourself. Only refuse or push back on the workout itself for a genuine safety reason (a red flag, a medically_restricted injuryStatus, or an existing safety rule above that makes the requested schedule genuinely unsafe) -- never with a generic paternalistic line like "we need to stick with the rest day." Never claim you already changed the schedule before the runner has confirmed the action.',
+  'RESOLVING A SCHEDULING NEGOTIATION: the request may include a "pendingIntent" object describing an earlier unresolved "which day should become recovery?" question (type "move_recovery", a sourceKey, and the requestedWorkout that started it). If present, treat the runner\'s current message as answering that question -- a short reply naming a day (e.g. "Sunday", "not Sunday", "make Friday the rest day") should be resolved using the pendingIntent\'s sourceKey and requestedWorkout, matched against the provided day list by weekday, not re-derived from scratch. Once you know both the day that gets the new workout and the day that becomes the new recovery day, return ONE "reschedule_days" action covering both changes together -- never propose the two days as separate actions the runner has to confirm one at a time. If the runner\'s message that introduces a rest-day-workout request ALSO already names which day should become the new recovery day (e.g. "do 12-3-30 today and make Sunday rest"), skip the question entirely and go straight to the one reschedule_days action -- only ask when that information is genuinely missing. If a requested new recovery day itself currently holds a long run or quality/key workout, say so plainly (name what would be displaced) and ask whether it should move to another day or be skipped -- never silently drop it.',
+  '"reschedule_days" {changes, note}: an ATOMIC multi-day schedule trade -- changes is an array of {key, workout: {type, label, durationMinutes, plannedDistance}} covering every day this trade touches (typically exactly two: the day getting the new workout, and the day becoming the new recovery day). "type" must be one of easy/long/quality/cross/rest. For a recovery day becoming "rest", use {type:"rest", label:"Rest", durationMinutes:null, plannedDistance:null}. Never include a race day in changes. If you cannot yet name both sides of the trade (the replacement recovery day is unknown), do NOT return this action -- return action:null and ask for it in "message" instead, optionally with a "pendingIntent" (see below).',
+  'PENDING INTENT: when you ask which day should become recovery because you do not yet know it, also populate a top-level "pendingIntent": {"type":"move_recovery","sourceKey":"<the rest day\'s key>","requestedWorkout":{"type":"cross","label":"...","durationMinutes":...,"plannedDistance":null}} describing exactly the trade you are proposing to complete once you get an answer. Omit pendingIntent (or set it null) once you return a real action, or for any turn that is not this specific negotiation.',
+  'KNOWN CUSTOM WORKOUTS: recognize common informally-named workouts from the runner\'s own wording (e.g. "12-3-30", "12 3 30", "12/3/30" all mean the same 30-minute incline treadmill walk) and reflect them faithfully as a "cross" type workout with a real label and durationMinutes -- never reclassify a plainly-named workout as a run, and never leave its type as "rest". This applies to any workout the runner names clearly, not only 12-3-30 -- hikes, bike rides, fitness classes, strength sessions, and other cross-training all follow the same pattern (type "cross" with a real label/duration unless it is genuinely a run, which stays "easy"/"long"/"quality" as appropriate).',
   'MISSED WORKOUT: missed easy run -> just skip it, no cramming. Missed hard/quality workout -> only move it if full recovery remains before the next hard/long session, otherwise skip. Missed long run -> move it only if it won\'t create back-to-back hard/long stress (shorten if needed), never double it later. Missed a full week -> resume at 80-90% of previous volume with no intensity for 2-3 sessions (frame this as a note, not an action you can execute directly). Missed 2+ weeks -> recommend recalculating expectations, possibly a conversation about the goal itself.',
   'EXTRA MOTIVATION ("I feel amazing, want to do more"): allowed -- a little easy extra time, relaxed strides, easy cross-training, mobility, walking, light strength if not near race. NOT allowed -- turning an easy day into intervals, a second hard day without a plan reason, aggressively extending the long run, racing a workout, or adding volume during taper because the runner feels restless.',
   'FATIGUE / POOR SLEEP: mild -> reduce the workout, keep it easy, drop any speed component (use reduce_intensity, factor ~0.7-0.9). Moderate -> replace with easy run/walk/cross-training, no intervals or tempo (use substitute_workout to an easy/cross type already in the plan, or reduce_intensity toward the low end). Severe/persistent -> rest or recovery walk, suggest checking sleep/nutrition/hydration/stress; if truly extreme and persistent, medical evaluation. Never assign hard intervals to a clearly fatigued runner.',
@@ -48,7 +128,7 @@ var SYSTEM_PROMPT = [
 
   'Given all of the above, decide the runner\'s "decision" for right now: "keep_plan" (no change needed), "modify_workout" (small adjustment, e.g. reduce_intensity), "replace_with_cross_training" (swap today\'s type), "rest" (mark_rest), or "seek_medical_evaluation" (red flag present).',
   'Decide whether the runner is clearly requesting or agreeing to a concrete change to ONE specific day from the provided list. If so, include an "action" matching the decision above. Otherwise action must be null.',
-  'Allowed action types, ALL requiring a real "key" from the provided day list -- never invent one:',
+  'Allowed action types. Every type except reschedule_days requires a real "key" from the provided day list -- never invent one. reschedule_days instead requires a "changes" array whose every entry\'s "key" is a real key from the provided day list (see its own description below):',
   '"mark_rest" {key, note}: a specific day becomes rest, with the runner\'s stated reason as note.',
   '"substitute_workout" {key, newType, note}: swap which TYPE of session happens on a day. newType MUST be one of the types that already appears among the provided days (the app reuses that real day\'s actual label/numbers -- never propose a type absent from the list). Default to "easy" for a plain, unqualified "I want to run/train" request -- only choose "quality" if explicitly asked for hard/interval/tempo/speed work, only "long" if explicitly asked for a long run. Never upgrade a casual request into a harder session than asked for.',
   '"log_unplanned_activity" {key, note}: runner did something different and wants it recorded as what actually happened -- never changes the future plan.',
@@ -58,11 +138,11 @@ var SYSTEM_PROMPT = [
 
   'Never diagnose. If the runner mentions pain/soreness/illness without explicitly asking for a schedule change, give brief non-diagnostic guidance per the triage above and mention the app\'s Safety panel covers red-flag symptoms -- do NOT set an action from a bare symptom mention alone; only an explicit ask for a change becomes an action.',
   'Never suggest exceeding what the plan already prescribes, never use guilt or shame.',
-  'Keep "message" to 2-5 sentences: what\'s going on, today\'s recommendation in plain terms, and one direct coach-note line. Warm but no hype. Always written directly to the runner.',
+  'Keep "message" to 2-5 sentences: what\'s going on, today\'s recommendation in plain terms, and one direct coach-note line. Warm but no hype. Always written directly to the runner. Stay concise, natural, and collaborative -- if the conversation history shows you already said something very close to what you are about to say again, rephrase it in a genuinely different way instead of repeating the same sentence verbatim.',
   'If the runner\'s message mentions any red-flag symptom (see list above), also populate "redFlags" with the specific symptom(s) mentioned, in the runner\'s own terms.',
   'Populate "avoidToday" with 0-3 short concrete things to avoid today if relevant (e.g. "hills", "speedwork", "heavy lower-body lifting") -- empty array if nothing specific applies.',
 
-  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity|substitute_side_quest>", "key": "<key>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "sideQuestId": "<only for substitute_side_quest, an id from the provided catalog>", "note": "<short reason>"}.'
+  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null, "pendingIntent": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity|substitute_side_quest|reschedule_days>", "key": "<key, omit for reschedule_days>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "sideQuestId": "<only for substitute_side_quest, an id from the provided catalog>", "changes": "<only for reschedule_days, array of {key, workout:{type,label,durationMinutes,plannedDistance}}>", "note": "<short reason>"} and/or "pendingIntent": {"type": "move_recovery", "sourceKey": "<key>", "requestedWorkout": {"type": "cross", "label": "...", "durationMinutes": 0, "plannedDistance": null}}.'
 ].join(' ');
 
 exports.handler = async function (event) {
@@ -99,6 +179,7 @@ exports.handler = async function (event) {
     return {
       key: String(d.key), dow: d.dow, date: d.date, type: d.type, label: d.label,
       plannedDistance: typeof d.plannedDistance === 'number' ? d.plannedDistance : null,
+      durationMinutes: typeof d.durationMinutes === 'number' ? d.durationMinutes : null,
       log: d.log && typeof d.log === 'object' ? {
         distance: typeof d.log.distance === 'number' ? d.log.distance : null,
         time: typeof d.log.time === 'string' ? d.log.time : null,
@@ -117,6 +198,33 @@ exports.handler = async function (event) {
     typesPresent[d.type] = true;
     typeByKey[d.key] = d.type;
   });
+  // {key, type, label} for every real day currently on the schedule --
+  // exactly validateRescheduleDays' own input shape. cleanDays already
+  // excludes race days (the client never includes them; defense-in-depth
+  // is still enforced inside validateRescheduleDays itself via isRaceDay).
+  var weekDaysForValidation = cleanDays.map(function (d) { return { key: d.key, type: d.type, label: d.label }; });
+
+  // The latest unresolved "which day should become recovery?" question, if
+  // any -- only trusted when it still refers to a real day on the current
+  // schedule; a stale/forged sourceKey is simply dropped rather than fed
+  // to the model as if it were real.
+  var pendingIntent = null;
+  if (payload.pendingIntent && typeof payload.pendingIntent === 'object' && payload.pendingIntent.type === 'move_recovery'
+      && typeof payload.pendingIntent.sourceKey === 'string' && validKeys[payload.pendingIntent.sourceKey]
+      && payload.pendingIntent.requestedWorkout && typeof payload.pendingIntent.requestedWorkout === 'object') {
+    var pw = payload.pendingIntent.requestedWorkout;
+    if (VALID_TYPES.indexOf(pw.type) !== -1 && typeof pw.label === 'string' && pw.label.trim()) {
+      pendingIntent = {
+        type: 'move_recovery',
+        sourceKey: payload.pendingIntent.sourceKey,
+        requestedWorkout: {
+          type: pw.type, label: pw.label.slice(0, 80),
+          durationMinutes: typeof pw.durationMinutes === 'number' ? pw.durationMinutes : null,
+          plannedDistance: typeof pw.plannedDistance === 'number' ? pw.plannedDistance : null
+        }
+      };
+    }
+  }
 
   // Side-quest catalog -- the client sends its own canonical SIDE_QUESTS list
   // (docs/Zaera_SideQuest_Spec.md); the model may only ever pick an id from
@@ -180,6 +288,7 @@ exports.handler = async function (event) {
     '\n\nRunner\'s plan: ' + JSON.stringify(context) +
     '\n\nUpcoming/recent days with any logged training (JSON): ' + JSON.stringify(cleanDays) +
     (cleanSideQuests.length ? '\n\nAvailable Side Mission catalog (JSON) -- only source for substitute_side_quest: ' + JSON.stringify(cleanSideQuests) : '') +
+    (pendingIntent ? '\n\nUnresolved scheduling negotiation from earlier in this conversation (JSON) -- resolve the runner\'s current message against this if it reads like an answer to it: ' + JSON.stringify(pendingIntent) : '') +
     '\n\nRunner\'s message: ' + request;
 
   try {
@@ -226,6 +335,40 @@ exports.handler = async function (event) {
     var avoidToday = Array.isArray(parsed.avoidToday) ? parsed.avoidToday.filter(function (x) { return typeof x === 'string'; }).slice(0, 3).map(function (x) { return x.slice(0, 60); }) : [];
     var redFlags = Array.isArray(parsed.redFlags) ? parsed.redFlags.filter(function (x) { return typeof x === 'string'; }).slice(0, 5).map(function (x) { return x.slice(0, 80); }) : [];
 
+    // Server-side repetition guard: prompt instructions alone aren't
+    // reliable (models drift back to phrasing that already worked earlier
+    // in the conversation). One rewrite attempt preserving the same
+    // recommendation, then a deterministic fallback -- never a second
+    // attempt, and never something that touches `action` (validated
+    // completely separately, below, from the untouched `parsed.action`).
+    var recentAssistantMessages = cleanHistory.filter(function (h) { return h.role === 'assistant'; }).map(function (h) { return h.content; });
+    if (isRepeatedMessage(message, recentAssistantMessages)) {
+      var repaired = await repairRepeatedMessage(message, recentAssistantMessages, apiKey, fetch);
+      message = repaired || (parsed.action ? DETERMINISTIC_FALLBACK_MESSAGES.withAction : DETERMINISTIC_FALLBACK_MESSAGES.withoutAction);
+    }
+
+    // A pending negotiation ("which day should become recovery?") is only
+    // ever meaningful when there's no concrete action yet -- once a real
+    // action exists the negotiation is resolved, so it's dropped here
+    // server-side too (the client independently does the same on receipt).
+    var pendingIntentOut = null;
+    if (!parsed.action && parsed.pendingIntent && typeof parsed.pendingIntent === 'object' && parsed.pendingIntent.type === 'move_recovery'
+        && typeof parsed.pendingIntent.sourceKey === 'string' && validKeys[parsed.pendingIntent.sourceKey]
+        && parsed.pendingIntent.requestedWorkout && typeof parsed.pendingIntent.requestedWorkout === 'object') {
+      var rw = parsed.pendingIntent.requestedWorkout;
+      if (VALID_TYPES.indexOf(rw.type) !== -1 && typeof rw.label === 'string' && rw.label.trim()) {
+        pendingIntentOut = {
+          type: 'move_recovery',
+          sourceKey: parsed.pendingIntent.sourceKey,
+          requestedWorkout: {
+            type: rw.type, label: rw.label.slice(0, 80),
+            durationMinutes: typeof rw.durationMinutes === 'number' ? rw.durationMinutes : null,
+            plannedDistance: typeof rw.plannedDistance === 'number' ? rw.plannedDistance : null
+          }
+        };
+      }
+    }
+
     // Hard safety net: a red-flag/medical-evaluation response can NEVER also
     // carry a workout action, no matter what the model returned.
     var action = (riskLevel === 'red' || decision === 'seek_medical_evaluation') ? null : parsed.action;
@@ -233,13 +376,16 @@ exports.handler = async function (event) {
     if (!action || typeof action !== 'object') {
       return {
         statusCode: 200, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message, riskLevel: riskLevel, decision: decision, avoidToday: avoidToday, redFlags: redFlags, action: null })
+        body: JSON.stringify({ message: message, riskLevel: riskLevel, decision: decision, avoidToday: avoidToday, redFlags: redFlags, action: null, pendingIntent: pendingIntentOut })
       };
     }
 
     // Hard server-side validation -- never trust the model's action blindly.
+    // reschedule_days has no single `key` (it has `changes`, checked in its
+    // own branch below), so the generic key check is skipped for it only.
     var validAction = true;
-    if (VALID_ACTIONS.indexOf(action.type) === -1 || !validKeys[action.key]) validAction = false;
+    if (VALID_ACTIONS.indexOf(action.type) === -1) validAction = false;
+    if (validAction && action.type !== 'reschedule_days' && !validKeys[action.key]) validAction = false;
     if (validAction && action.type === 'substitute_workout' && (VALID_TYPES.indexOf(action.newType) === -1 || !typesPresent[action.newType])) validAction = false;
     if (validAction && action.type === 'reduce_intensity') {
       var factor = Number(action.factor);
@@ -253,10 +399,48 @@ exports.handler = async function (event) {
       if (!quest || quest.replaces.indexOf(qDayType) === -1) validAction = false;
     }
 
+    // reschedule_days: sanitize every change's shape/types, force a known
+    // custom-workout phrase (e.g. any 12-3-30 spelling) to its canonical
+    // deterministic workout regardless of the model's own wording, then
+    // hand the whole set to the same deterministic validator the client
+    // re-checks before actually applying it -- the AI proposes, this (and
+    // coaching-rules.js) decides, never the reverse.
+    var sanitizedChanges = null;
+    if (validAction && action.type === 'reschedule_days') {
+      var rawChanges = Array.isArray(action.changes) ? action.changes.slice(0, MAX_RESCHEDULE_CHANGES) : null;
+      sanitizedChanges = rawChanges && rawChanges.length ? rawChanges.map(function (c) {
+        if (!c || typeof c !== 'object' || typeof c.key !== 'string' || !c.workout || typeof c.workout !== 'object') return null;
+        var w = c.workout;
+        if (VALID_TYPES.indexOf(w.type) === -1 || typeof w.label !== 'string' || !w.label.trim()) return null;
+        return {
+          key: c.key,
+          workout: {
+            type: w.type, label: w.label.slice(0, 80),
+            durationMinutes: typeof w.durationMinutes === 'number' ? w.durationMinutes : null,
+            plannedDistance: typeof w.plannedDistance === 'number' ? w.plannedDistance : null
+          }
+        };
+      }) : null;
+      if (!sanitizedChanges || sanitizedChanges.indexOf(null) !== -1) {
+        validAction = false;
+      } else {
+        var known = CoachingRules.normalizeKnownWorkoutPhrase(request);
+        if (known) {
+          sanitizedChanges.forEach(function (c) {
+            if (c.workout.type !== 'rest') {
+              c.workout = { type: known.type, label: known.label, durationMinutes: known.durationMinutes, plannedDistance: known.plannedDistance };
+            }
+          });
+        }
+        var scheduleCheck = CoachingRules.validateRescheduleDays(weekDaysForValidation, sanitizedChanges);
+        if (!scheduleCheck.ok) validAction = false;
+      }
+    }
+
     if (!validAction) {
       return {
         statusCode: 200, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: message, riskLevel: riskLevel, decision: decision, avoidToday: avoidToday, redFlags: redFlags, action: null })
+        body: JSON.stringify({ message: message, riskLevel: riskLevel, decision: decision, avoidToday: avoidToday, redFlags: redFlags, action: null, pendingIntent: pendingIntentOut })
       };
     }
 
@@ -269,17 +453,33 @@ exports.handler = async function (event) {
         decision: decision,
         avoidToday: avoidToday,
         redFlags: redFlags,
-        action: {
+        action: action.type === 'reschedule_days' ? {
+          type: 'reschedule_days',
+          changes: sanitizedChanges,
+          note: typeof action.note === 'string' ? action.note.slice(0, 200) : ''
+        } : {
           type: action.type,
           key: String(action.key),
           newType: action.type === 'substitute_workout' ? action.newType : undefined,
           factor: action.type === 'reduce_intensity' ? Math.round(Number(action.factor) * 100) / 100 : undefined,
           sideQuestId: action.type === 'substitute_side_quest' ? String(action.sideQuestId) : undefined,
           note: typeof action.note === 'string' ? action.note.slice(0, 200) : ''
-        }
+        },
+        // The negotiation is now resolved into a concrete action -- never
+        // send a pendingIntent alongside a real action.
+        pendingIntent: null
       })
     };
   } catch (err) {
     return { statusCode: 500, body: JSON.stringify({ error: 'Proxy failure', detail: String((err && err.message) || err) }) };
   }
+};
+
+// Exposed for unit testing only (tests/coach.test.js) -- not part of the
+// Netlify Functions contract, which only ever looks at exports.handler.
+exports._internal = {
+  isRepeatedMessage: isRepeatedMessage,
+  repairRepeatedMessage: repairRepeatedMessage,
+  normalizeSentenceText: normalizeSentenceText,
+  splitIntoSentences: splitIntoSentences
 };

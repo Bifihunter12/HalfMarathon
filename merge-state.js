@@ -169,6 +169,14 @@
 
     var logsMerged = mergeMapT(local.logs, remote.logs, localDK.logs, remoteDK.logs);
     var overridesMerged = mergeMapT(local.overrides, remote.overrides, localDK.overrides, remoteDK.overrides);
+    // Typed schedule overrides (coach-negotiated day trades -- app.js
+    // setWorkoutOverride/clearWorkoutOverride) -- same dict/id-map-by-day-key
+    // shape and same tombstone reasoning as `overrides` immediately above,
+    // just carrying a real {type, label, durationMinutes, plannedDistance,
+    // source} object per key instead of a bare label string. Without this,
+    // a coach-negotiated trade made on one device would either vanish or
+    // (worse) resurrect after syncing from a stale device that never saw it.
+    var workoutOverridesMerged = mergeMapT(local.workoutOverrides, remote.workoutOverrides, localDK.workoutOverrides, remoteDK.workoutOverrides);
     var crossTypeMerged = mergeMapT(local.crossType, remote.crossType, localDK.crossType, remoteDK.crossType);
     var sessionLogsMerged = mergeMapT(local.sessionLogs, remote.sessionLogs, localDK.sessionLogs, remoteDK.sessionLogs);
     var sessionOverridesMerged = mergeMapT(local.sessionOverrides, remote.sessionOverrides, localDK.sessionOverrides, remoteDK.sessionOverrides);
@@ -222,6 +230,7 @@
       planMeta: prefer.planMeta,
       logs: logsMerged.value,
       overrides: overridesMerged.value,
+      workoutOverrides: workoutOverridesMerged.value,
       crossType: crossTypeMerged.value,
       // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary
       // same-day session's log/override, keyed by its own stable session id
@@ -248,6 +257,7 @@
       deletedKeys: {
         logs: logsMerged.deleted,
         overrides: overridesMerged.deleted,
+        workoutOverrides: workoutOverridesMerged.deleted,
         crossType: crossTypeMerged.deleted,
         sessionLogs: sessionLogsMerged.deleted,
         sessionOverrides: sessionOverridesMerged.deleted,
