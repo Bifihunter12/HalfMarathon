@@ -294,3 +294,54 @@ test('validateRescheduleDays: existing single-day mark-rest-style trade (one cha
   var result = rules.validateRescheduleDays(SAMPLE_WEEK, [{ key: '1-1', workout: { type: 'rest', label: 'Rest' } }]);
   assert.equal(result.ok, true);
 });
+
+// ── Arbitrary planned-activity classification (hiking scenario, task 8) ──
+test('buildPlannedActivityWorkout: a steep 3-hour hike gets real high-load classification and honest purpose text, not treated as equivalent to a run', function () {
+  var w = rules.buildPlannedActivityWorkout('hiking', 180, 'hard', 'mi');
+  assert.equal(w.type, 'cross');
+  assert.equal(w.loadClass, 'high');
+  assert.match(w.label, /Hike/);
+  assert.match(w.purpose, /not equivalent to rest/i);
+});
+
+test('buildPlannedActivityWorkout: an easy short hike gets low/moderate load, not automatically flagged as a big session', function () {
+  var w = rules.buildPlannedActivityWorkout('hiking', 45, 'easy', 'mi');
+  assert.equal(w.type, 'cross');
+  assert.notEqual(w.loadClass, 'high');
+});
+
+test('buildPlannedActivityWorkout: an unfamiliar activity type still gets a real classification via the generic cross-training builder', function () {
+  var w = rules.buildPlannedActivityWorkout('cycling', 60, 'hard', 'mi');
+  assert.equal(w.type, 'cross');
+  assert.equal(w.loadClass, 'high');
+  assert.ok(w.label);
+});
+
+test('validateRescheduleDays: a change carrying activityType is deterministically rebuilt from the real prescription builder, ignoring the model\'s own label/duration for that field', function () {
+  var changes = [{ key: '1-1', workout: { type: 'easy', label: 'Some hike thing', durationMinutes: 5, activityType: 'hiking', terrainDifficulty: 'hard' } }];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, true);
+  var tue = result.resultingWeek.filter(function (d) { return d.key === '1-1'; })[0];
+  assert.match(tue.label, /Hike/);
+  assert.notEqual(tue.label, 'Some hike thing');
+});
+
+test('validateRescheduleDays: an unknown activityType is rejected', function () {
+  var changes = [{ key: '1-0', workout: { type: 'easy', label: 'X', activityType: 'not_a_real_activity' } }];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: an invalid terrainDifficulty is rejected', function () {
+  var changes = [{ key: '1-0', workout: { type: 'easy', label: 'X', activityType: 'hiking', terrainDifficulty: 'extreme' } }];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateRescheduleDays: a hike swapped onto an easy-run day (recovery untouched) is accepted end to end', function () {
+  var changes = [{ key: '1-1', workout: { type: 'easy', label: 'placeholder', activityType: 'hiking', durationMinutes: 90, terrainDifficulty: 'moderate' } }];
+  var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
+  assert.equal(result.ok, true, 'a hike replacing an easy run must not trip any check on its own -- ' + result.reason);
+});

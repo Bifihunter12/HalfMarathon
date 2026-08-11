@@ -340,6 +340,29 @@ test('pendingIntent: the request payload accepts and forwards a client-supplied 
 // ── Server-side repetition guard ──────────────────────────────────────────
 const { _internal } = require(path.join(__dirname, '..', 'netlify', 'functions', 'coach.js'));
 
+// ── Planned-activity discovery (arbitrary activities via chat, task 8) ───
+test('reschedule_days: a hike named with activityType/terrainDifficulty gets its real deterministic classification, not the model\'s own wording', async function () {
+  mockOpenAI({
+    message: "I'll add that hike and keep your easy run day free.", riskLevel: 'green', decision: 'replace_with_cross_training',
+    avoidToday: [], redFlags: [],
+    action: { type: 'reschedule_days', changes: [{ key: '1-1', workout: { type: 'easy', label: 'a hike I guess', durationMinutes: 5, activityType: 'hiking', terrainDifficulty: 'hard' } }], note: '' }
+  });
+  var result = await callHandler({ request: "I'm hiking Saturday, about 3 hours with a lot of climbing", days: RESCHEDULE_DAYS });
+  var change = result.body.action.changes[0];
+  assert.equal(change.workout.type, 'cross');
+  assert.match(change.workout.label, /Hike/);
+  assert.notEqual(change.workout.label, 'a hike I guess');
+});
+
+test('reschedule_days: an unknown activityType is rejected server-side even if everything else about the change is valid', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'replace_with_cross_training', avoidToday: [], redFlags: [],
+    action: { type: 'reschedule_days', changes: [{ key: '1-1', workout: { type: 'easy', label: 'Trapeze practice', activityType: 'trapeze' } }], note: '' }
+  });
+  var result = await callHandler({ request: 'trapeze class Saturday', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action, null);
+});
+
 test('isRepeatedMessage: true when a real (>=8-word) sentence exactly matches a recent assistant sentence, modulo case/punctuation', function () {
   var prior = ["We need to stick with the rest day to protect your recovery this week."];
   var candidate = "We need to stick with the rest day to protect your recovery this week!";

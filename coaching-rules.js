@@ -2337,6 +2337,29 @@
     }
   ];
 
+  // ── Deterministic classification for an ARBITRARY planned activity named
+  // in chat (task 8/8.1: "the same architecture must support running,
+  // hiking, cycling, fitness classes, strength, incline walking, and other
+  // custom workouts -- not only 12-3-30"). Given just an activityType +
+  // duration + optional terrain/intensity difficulty, this reuses the
+  // exact same prescription builders the Recurring Workouts settings form
+  // already uses (buildHikePrescription/buildCrossTrainingPrescription),
+  // so a hike or class added through chat gets the identical real
+  // load-classification and purpose text as one added through the form --
+  // never a second, independently-invented description of the same thing.
+  var VALID_TERRAIN_DIFFICULTY = ['easy', 'moderate', 'hard'];
+  function buildPlannedActivityWorkout(activityType, durationMinutes, terrainDifficulty, units) {
+    var dur = typeof durationMinutes === 'number' && durationMinutes > 0 ? durationMinutes : 30;
+    if (activityType === 'hiking') {
+      var hp = buildHikePrescription({ durationMinutes: dur, terrainDifficulty: terrainDifficulty || 'easy' }, units || 'mi');
+      return { type: 'cross', label: hp.label, durationMinutes: hp.durationMinutes, plannedDistance: null, loadClass: hp.loadClass, purpose: hp.trainingEffect };
+    }
+    var purpose = terrainDifficulty === 'hard' ? 'threshold' : terrainDifficulty === 'moderate' ? 'steady' : 'easy';
+    var cp = buildCrossTrainingPrescription(activityType, purpose, dur);
+    var loadClass = terrainDifficulty === 'hard' ? 'high' : terrainDifficulty === 'moderate' ? 'moderate' : 'low';
+    return { type: 'cross', label: cp.label, durationMinutes: cp.durationMinutes, plannedDistance: null, loadClass: loadClass, purpose: cp.trainingEffect };
+  }
+
   function normalizeKnownWorkoutPhrase(text) {
     if (typeof text !== 'string' || !text) return null;
     for (var i = 0; i < KNOWN_WORKOUT_PHRASES.length; i++) {
@@ -2388,6 +2411,23 @@
       var currentDay = byKey[change.key];
       if (!currentDay) return { ok: false, reason: 'unknown_key', displaced: [] };
       if (isRaceDay(currentDay)) return { ok: false, reason: 'race_day_protected', displaced: [] };
+
+      // A named activityType (e.g. "hiking") always wins over whatever
+      // label/duration the caller (the AI) supplied for this change -- the
+      // real classification comes from the same deterministic prescription
+      // builders the Recurring Workouts form uses, never from the model's
+      // own wording. terrainDifficulty is optional and only meaningful
+      // alongside activityType.
+      if (change.workout.terrainDifficulty != null && VALID_TERRAIN_DIFFICULTY.indexOf(change.workout.terrainDifficulty) === -1) {
+        return { ok: false, reason: 'invalid_workout', displaced: [] };
+      }
+      if (change.workout.activityType != null) {
+        if (typeof change.workout.activityType !== 'string' || !RECURRING_ACTIVITY_LABEL[change.workout.activityType]) {
+          return { ok: false, reason: 'invalid_workout', displaced: [] };
+        }
+        var built = buildPlannedActivityWorkout(change.workout.activityType, change.workout.durationMinutes, change.workout.terrainDifficulty, options.units);
+        change.workout = Object.assign({}, built, { activityType: change.workout.activityType, terrainDifficulty: change.workout.terrainDifficulty || null });
+      }
 
       var w = change.workout;
       if (ALLOWED_OVERRIDE_TYPES.indexOf(w.type) === -1) return { ok: false, reason: 'invalid_workout', displaced: [] };
@@ -2513,6 +2553,7 @@
     isRaceDay: isRaceDay,
     isKeyWorkoutType: isKeyWorkoutType,
     normalizeKnownWorkoutPhrase: normalizeKnownWorkoutPhrase,
+    buildPlannedActivityWorkout: buildPlannedActivityWorkout,
     validateRescheduleDays: validateRescheduleDays
   };
 });

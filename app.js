@@ -1045,7 +1045,19 @@
   // always wins over a legacy one in effectiveWorkoutForDay's resolution
   // order anyway -- this just keeps the two from silently disagreeing).
   function setWorkoutOverride(key, workout) {
-    state.workoutOverrides[key] = { type: workout.type, label: workout.label, durationMinutes: workout.durationMinutes != null ? workout.durationMinutes : null, plannedDistance: workout.plannedDistance != null ? workout.plannedDistance : null, source: workout.source || 'coach' };
+    state.workoutOverrides[key] = {
+      type: workout.type, label: workout.label,
+      durationMinutes: workout.durationMinutes != null ? workout.durationMinutes : null,
+      plannedDistance: workout.plannedDistance != null ? workout.plannedDistance : null,
+      // Optional: set when this override came from a named planned activity
+      // (coaching-rules.js buildPlannedActivityWorkout) -- purpose/loadClass
+      // carry the real, deterministic explanation of what this activity is
+      // actually worth training-wise, so renderWorkoutDetail can show the
+      // real reasoning instead of a generic cross-training blurb.
+      activityType: workout.activityType || null, terrainDifficulty: workout.terrainDifficulty || null,
+      purpose: workout.purpose || null, loadClass: workout.loadClass || null,
+      source: workout.source || 'coach'
+    };
     delete state.deletedKeys.workoutOverrides[key];
     if (state.overrides[key] !== undefined) clearOverride(key);
   }
@@ -1071,6 +1083,8 @@
         durationMinutes: typed.durationMinutes != null ? typed.durationMinutes : null,
         sessions: (typed.type === 'cross' && typed.durationMinutes != null) ? [{ durationMinutes: typed.durationMinutes }] : undefined,
         runWalk: null, qualitySegments: undefined, qualityManualReps: undefined,
+        activityType: typed.activityType || null, terrainDifficulty: typed.terrainDifficulty || null,
+        purpose: typed.purpose || null, loadClass: typed.loadClass || null,
         overridden: true, overrideSource: 'typed'
       };
     }
@@ -3888,10 +3902,14 @@
     // the time the runner actually taps Confirm (the schedule could have
     // changed underneath it). Applies every change or none; saves once.
     function applyRescheduleDays(changes) {
-      var result = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, changes) : { ok: false };
+      var result = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, changes, { units: state.units }) : { ok: false };
       if (!result.ok) return false;
       changes.forEach(function (c) {
-        setWorkoutOverride(c.key, { type: c.workout.type, label: c.workout.label, durationMinutes: c.workout.durationMinutes, plannedDistance: c.workout.plannedDistance, source: 'coach' });
+        setWorkoutOverride(c.key, {
+          type: c.workout.type, label: c.workout.label, durationMinutes: c.workout.durationMinutes, plannedDistance: c.workout.plannedDistance,
+          activityType: c.workout.activityType, terrainDifficulty: c.workout.terrainDifficulty, purpose: c.workout.purpose, loadClass: c.workout.loadClass,
+          source: 'coach'
+        });
       });
       saveState(state);
       coachPendingIntent = null;
@@ -3944,7 +3962,7 @@
         if (missingKey) {
           return { text: "That trade refers to a day that's no longer on your schedule -- ask your coach again and I'll work out a fresh one.", confirmable: false };
         }
-        var preview = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, action.changes) : { ok: false, reason: 'invalid_workout' };
+        var preview = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, action.changes, { units: state.units }) : { ok: false, reason: 'invalid_workout' };
         if (!preview.ok) {
           var reasonText = {
             race_day_protected: "That would touch race day, which never changes here.",
@@ -4833,7 +4851,12 @@
       howHard: 'Easy effort on every running interval — RPE 3-4, conversational. The walk breaks are the point, not a failure.',
       ifCant: "Take an extra walk break or two if you need it — finishing the full time matters more than nailing every interval exactly.",
       mistakes: 'Running the intervals too fast because they feel short. Slow down — you have more of these coming.'
-    } : (WORKOUT_DETAIL[dayData.type] || null);
+    // A named planned activity (coaching-rules.js buildPlannedActivityWorkout,
+    // e.g. a coach-added hike) carries its own real, duration/terrain-aware
+    // "why" explanation -- show that instead of the generic cross-training
+    // blurb, so a 3-hour steep hike honestly says what it's actually worth
+    // training-wise rather than a one-size-fits-all cross-training line.
+    } : (dayData.purpose ? Object.assign({}, WORKOUT_DETAIL.cross, { why: dayData.purpose }) : (WORKOUT_DETAIL[dayData.type] || null));
     var entry = getLog(key) || {};
 
     // Only shown when the runner actually supplied a recent race result --
