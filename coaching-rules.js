@@ -2316,6 +2316,67 @@
   // feature exists to prevent.
   var KEY_WORKOUT_TYPES = ['long', 'quality'];
 
+  // ── Weekly-job priorities, ideal week vs. minimum viable week (task 7.2) ──
+  // A small, deterministic, testable brief the coach can ground its
+  // reasoning in instead of guessing what matters this week. Bounded to the
+  // training jobs this app's own plan generator actually produces (see
+  // RUN_SESSION_META above) -- not every job listed in the master prompt's
+  // full taxonomy, since inventing jobs this codebase has no data for would
+  // just be aspirational, not real. Varies by phase and, for quality
+  // stimulus specifically, by level -- a beginner/run-walk plan prioritizes
+  // frequency and confidence over formal intensity, matching how
+  // buildStructuredWeeks itself never assigns true quality work to a
+  // beginner still in the run-walk window.
+  var WEEKLY_JOB_LABEL = {
+    long_endurance: 'Long aerobic endurance', quality_stimulus: 'Quality / race-specific intensity',
+    easy_volume: 'Easy aerobic volume', consistency: 'Run-frequency / consistency exposure',
+    recovery: 'Recovery', race: 'Race day'
+  };
+  function weeklyJobPriorityBrief(phase, level) {
+    var ideal, minimumViable, explanation;
+    switch (phase) {
+      case 'base':
+        ideal = ['consistency', 'easy_volume', 'long_endurance', 'recovery'];
+        minimumViable = ['long_endurance', 'recovery'];
+        explanation = 'Base phase prioritizes consistent easy running and a gradually built long session over formal intensity.';
+        break;
+      case 'build':
+        ideal = ['long_endurance', 'quality_stimulus', 'easy_volume', 'recovery'];
+        minimumViable = ['long_endurance', 'quality_stimulus', 'recovery'];
+        explanation = 'Build phase preserves the long run and one appropriate quality stimulus above everything else.';
+        break;
+      case 'peak':
+        ideal = ['quality_stimulus', 'long_endurance', 'easy_volume', 'recovery'];
+        minimumViable = ['quality_stimulus', 'long_endurance', 'recovery'];
+        explanation = 'Peak phase protects the key race-specific workout and long run; extras are the first thing to trim.';
+        break;
+      case 'taper':
+        ideal = ['recovery', 'easy_volume', 'quality_stimulus'];
+        minimumViable = ['recovery', 'easy_volume'];
+        explanation = 'Taper protects freshness -- never add missed mileage back, never chase fitness this late.';
+        break;
+      case 'race':
+        ideal = ['race', 'recovery'];
+        minimumViable = ['race'];
+        explanation = 'Race week -- the race itself is the only essential session; everything else is optional recovery.';
+        break;
+      default:
+        ideal = ['easy_volume', 'long_endurance', 'recovery'];
+        minimumViable = ['recovery'];
+        explanation = 'General training priorities: preserve consistency and recovery above any single session.';
+    }
+    if (level === 'beginner' && phase !== 'race') {
+      ideal = ideal.filter(function (j) { return j !== 'quality_stimulus'; });
+      minimumViable = minimumViable.filter(function (j) { return j !== 'quality_stimulus'; });
+      if (ideal.indexOf('consistency') === -1) ideal = ['consistency'].concat(ideal);
+    }
+    return {
+      idealJobs: ideal, minimumViableJobs: minimumViable, explanation: explanation,
+      idealLabels: ideal.map(function (j) { return WEEKLY_JOB_LABEL[j] || j; }),
+      minimumViableLabels: minimumViable.map(function (j) { return WEEKLY_JOB_LABEL[j] || j; })
+    };
+  }
+
   function isRaceDay(day) { return !!day && day.type === 'race'; }
   function isKeyWorkoutType(type) { return KEY_WORKOUT_TYPES.indexOf(type) !== -1; }
 
@@ -2554,6 +2615,7 @@
     isKeyWorkoutType: isKeyWorkoutType,
     normalizeKnownWorkoutPhrase: normalizeKnownWorkoutPhrase,
     buildPlannedActivityWorkout: buildPlannedActivityWorkout,
+    weeklyJobPriorityBrief: weeklyJobPriorityBrief,
     validateRescheduleDays: validateRescheduleDays
   };
 });

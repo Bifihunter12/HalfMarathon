@@ -3901,7 +3901,7 @@
     // that a proposal already vetted server-side is still safe to apply by
     // the time the runner actually taps Confirm (the schedule could have
     // changed underneath it). Applies every change or none; saves once.
-    function applyRescheduleDays(changes) {
+    function applyRescheduleDays(changes, scope) {
       var result = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, changes, { units: state.units }) : { ok: false };
       if (!result.ok) return false;
       changes.forEach(function (c) {
@@ -3910,6 +3910,30 @@
           activityType: c.workout.activityType, terrainDifficulty: c.workout.terrainDifficulty, purpose: c.workout.purpose, loadClass: c.workout.loadClass,
           source: 'coach'
         });
+        // docs section 7.4/10 -- "this week only" vs. a lasting preference.
+        // A named real activity (activityType set) kept as `scope:
+        // 'recurring'` also becomes a real recurring-workout record, so
+        // future weeks incorporate it too -- not just this one. Only
+        // meaningful for a real named activity; a bare rest/type swap has
+        // nothing sensible to recur (there's no "activity" to remember).
+        if (scope === 'recurring' && c.workout.activityType) {
+          var day = daysByKey[c.key];
+          var weekdayMon0 = (day.date.getDay() + 6) % 7;
+          // fixed:true -- the runner named a SPECIFIC day for this trade
+          // (the day being changed), so the commitment must stay pinned to
+          // that real calendar weekday going forward. A movable (fixed:
+          // false) recurring workout is placed onto whichever cross-slot
+          // the generator picks each week, which is never what "every
+          // Saturday" means -- found live: without this, a Tuesday hike
+          // request landed on a different day the very next week.
+          addRecurringWorkout({
+            id: 'rw_' + Date.now() + '_' + Math.round(Math.random() * 1e6),
+            activityType: c.workout.activityType, customName: null, day: weekdayMon0,
+            durationMinutes: c.workout.durationMinutes, intensity: c.workout.terrainDifficulty === 'hard' ? 'high' : c.workout.terrainDifficulty === 'moderate' ? 'moderate' : 'low',
+            fixed: true, recurrence: 'weekly', replaces: 'none', environment: null, timeWindow: null,
+            terrainDifficulty: c.workout.terrainDifficulty || 'easy', elevationGainFt: 0
+          });
+        }
       });
       saveState(state);
       coachPendingIntent = null;
@@ -3978,7 +4002,10 @@
           var dow = DOW_FULL[daysByKey[c.key].date.getDay()];
           return c.workout.type === 'rest' ? 'make ' + dow + ' a recovery day' : 'update ' + dow + ' to ' + escapeHtml(c.workout.label);
         }).join(' and ');
-        return { text: summary.charAt(0).toUpperCase() + summary.slice(1) + '?', confirmable: true };
+        // "This week only" vs. "remember it for future weeks" is a single,
+        // visible part of the one confirmation -- never a separate prompt.
+        var scopeNote = action.scope === 'recurring' ? ' (every week going forward)' : '';
+        return { text: summary.charAt(0).toUpperCase() + summary.slice(1) + scopeNote + '?', confirmable: true };
       }
       if (action.type === 'mark_rest') {
         return { text: 'Mark ' + DOW_FULL[day.date.getDay()] + ' as rest' + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
@@ -4075,7 +4102,7 @@
         else if (turn.action.type === 'log_unplanned_activity') applyLogUnplanned(turn.action.key, turn.action.note);
         else if (turn.action.type === 'reduce_intensity') ok = applyReduceIntensity(turn.action.key, turn.action.factor);
         else if (turn.action.type === 'substitute_side_quest') ok = applySideQuestChat(turn.action.key, turn.action.sideQuestId);
-        else if (turn.action.type === 'reschedule_days') ok = applyRescheduleDays(turn.action.changes);
+        else if (turn.action.type === 'reschedule_days') ok = applyRescheduleDays(turn.action.changes, turn.action.scope);
         turn.resolved = ok ? 'confirmed' : 'failed';
         renderCoachChatScreen();
       });
@@ -4117,12 +4144,20 @@
           today: dateToISO(today),
           days: daysPayload,
           plan: (function () {
+            var currentPhase = weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : null;
             var p = {
               event: state.raceGoal.event, goal: state.raceGoal.goal, experienceLevel: state.planMeta.level,
-              phase: weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : null,
+              phase: currentPhase,
               currentWeek: currentWeek, totalWeeks: planLengthWeeks,
               injuryStatus: state.profile.injuryStatus || null
             };
+            // docs section 7.2 -- what this specific week is actually FOR,
+            // so "I only have 3 days" or "add a hike" gets grounded in real
+            // priorities instead of the model guessing. Deterministic, same
+            // brief every time for the same phase/level.
+            if (CoachingRulesDomain.weeklyJobPriorityBrief) {
+              p.weeklyJobPriorities = CoachingRulesDomain.weeklyJobPriorityBrief(currentPhase, state.planMeta.level);
+            }
             // Real pace data, only when the runner actually supplied a recent race
             // result -- coach.js is instructed to use this instead of guessing at
             // a pace, and to stay RPE-only when it's absent (roadmap §10).

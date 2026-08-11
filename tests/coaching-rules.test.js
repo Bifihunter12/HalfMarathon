@@ -340,6 +340,49 @@ test('validateRescheduleDays: an invalid terrainDifficulty is rejected', functio
   assert.equal(result.reason, 'invalid_workout');
 });
 
+// ── Weekly-job priorities / ideal vs. minimum-viable week (task 7.2) ─────
+test('weeklyJobPriorityBrief: base phase prioritizes consistency and easy volume over quality', function () {
+  var brief = rules.weeklyJobPriorityBrief('base', 'intermediate');
+  assert.ok(brief.idealJobs.indexOf('quality_stimulus') === -1 || brief.idealJobs.indexOf('easy_volume') < brief.idealJobs.indexOf('quality_stimulus'));
+  assert.ok(brief.minimumViableJobs.indexOf('long_endurance') !== -1);
+  assert.ok(brief.minimumViableJobs.indexOf('recovery') !== -1);
+});
+
+test('weeklyJobPriorityBrief: build phase minimum-viable week preserves both the long run and quality stimulus', function () {
+  var brief = rules.weeklyJobPriorityBrief('build', 'intermediate');
+  assert.ok(brief.minimumViableJobs.indexOf('long_endurance') !== -1);
+  assert.ok(brief.minimumViableJobs.indexOf('quality_stimulus') !== -1);
+});
+
+test('weeklyJobPriorityBrief: taper never includes chasing missed volume -- minimum viable week is recovery-first', function () {
+  var brief = rules.weeklyJobPriorityBrief('taper', 'intermediate');
+  assert.equal(brief.minimumViableJobs[0], 'recovery');
+  assert.equal(brief.minimumViableJobs.indexOf('long_endurance'), -1);
+});
+
+test('weeklyJobPriorityBrief: race week minimum viable week is just the race itself', function () {
+  var brief = rules.weeklyJobPriorityBrief('race', 'intermediate');
+  assert.deepEqual(brief.minimumViableJobs, ['race']);
+});
+
+test('weeklyJobPriorityBrief: a beginner in build phase never gets quality_stimulus as a priority (matches run-walk generation never assigning true quality work)', function () {
+  var brief = rules.weeklyJobPriorityBrief('build', 'beginner');
+  assert.equal(brief.idealJobs.indexOf('quality_stimulus'), -1);
+  assert.equal(brief.minimumViableJobs.indexOf('quality_stimulus'), -1);
+  assert.ok(brief.idealJobs.indexOf('consistency') !== -1);
+});
+
+test('weeklyJobPriorityBrief: an intermediate runner in build phase DOES get quality_stimulus (beginner rule is level-specific, not universal)', function () {
+  var brief = rules.weeklyJobPriorityBrief('build', 'intermediate');
+  assert.ok(brief.idealJobs.indexOf('quality_stimulus') !== -1);
+});
+
+test('weeklyJobPriorityBrief: labels are always provided alongside the raw job ids', function () {
+  var brief = rules.weeklyJobPriorityBrief('build', 'intermediate');
+  assert.equal(brief.idealLabels.length, brief.idealJobs.length);
+  assert.ok(brief.idealLabels.every(function (l) { return typeof l === 'string' && l.length > 0; }));
+});
+
 test('validateRescheduleDays: a hike swapped onto an easy-run day (recovery untouched) is accepted end to end', function () {
   var changes = [{ key: '1-1', workout: { type: 'easy', label: 'placeholder', activityType: 'hiking', durationMinutes: 90, terrainDifficulty: 'moderate' } }];
   var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);

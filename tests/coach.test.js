@@ -354,6 +354,48 @@ test('reschedule_days: a hike named with activityType/terrainDifficulty gets its
   assert.notEqual(change.workout.label, 'a hike I guess');
 });
 
+test('reschedule_days: scope defaults to "once" when the model omits it', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'replace_with_cross_training', avoidToday: [], redFlags: [],
+    action: { type: 'reschedule_days', changes: [{ key: '1-1', workout: { type: 'easy', label: 'X', activityType: 'hiking', durationMinutes: 60 } }], note: '' }
+  });
+  var result = await callHandler({ request: 'hike Saturday', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action.scope, 'once');
+});
+
+test('reschedule_days: scope "recurring" is passed through when the model explicitly sets it', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'replace_with_cross_training', avoidToday: [], redFlags: [],
+    action: { type: 'reschedule_days', changes: [{ key: '1-1', workout: { type: 'easy', label: 'X', activityType: 'hiking', durationMinutes: 60 } }], scope: 'recurring', note: '' }
+  });
+  var result = await callHandler({ request: 'I hike every Saturday', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action.scope, 'recurring');
+});
+
+test('reschedule_days: an arbitrary invalid scope value is coerced to "once", never passed through raw', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'replace_with_cross_training', avoidToday: [], redFlags: [],
+    action: { type: 'reschedule_days', changes: [{ key: '1-1', workout: { type: 'easy', label: 'X', activityType: 'hiking', durationMinutes: 60 } }], scope: 'forever-and-ever', note: '' }
+  });
+  var result = await callHandler({ request: 'hike Saturday', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action.scope, 'once');
+});
+
+test('weeklyJobPriorities: a well-formed brief in the request is forwarded into the prompt', async function () {
+  var sentBody = null;
+  global.fetch = async function (url, opts) {
+    sentBody = JSON.parse(opts.body);
+    return okResponse(JSON.stringify({ message: 'ok', riskLevel: 'green', decision: 'keep_plan', avoidToday: [], redFlags: [], action: null }));
+  };
+  await callHandler({
+    request: 'only have 3 days this week', days: RESCHEDULE_DAYS,
+    plan: { weeklyJobPriorities: { idealLabels: ['Long aerobic endurance', 'Recovery'], minimumViableLabels: ['Recovery'], explanation: 'Base phase prioritizes consistency.' } }
+  });
+  var userMsg = sentBody.messages[sentBody.messages.length - 1].content;
+  assert.ok(userMsg.indexOf('Long aerobic endurance') !== -1);
+  assert.ok(userMsg.indexOf('weeklyJobPriorities') !== -1);
+});
+
 test('reschedule_days: an unknown activityType is rejected server-side even if everything else about the change is valid', async function () {
   mockOpenAI({
     message: 'ok', riskLevel: 'green', decision: 'replace_with_cross_training', avoidToday: [], redFlags: [],
