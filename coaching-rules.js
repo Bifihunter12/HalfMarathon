@@ -1211,6 +1211,13 @@
     if (currentWeekIdx <= 1) return null;
 
     var samples = [];
+    // docs section 18: "never add intensity when the runner reports pain."
+    // Scanned over the exact same 2-week window the effort samples come
+    // from -- same threshold already used elsewhere for a meaningful pain
+    // signal (evaluateGoalCheckpoint). A recent pain flag can only ever
+    // suppress the volume-INCREASE branch below, never the easing-back
+    // branch -- a protective reduction must always still be allowed to fire.
+    var recentPainFlag = false;
     for (var w = Math.max(1, currentWeekIdx - 2); w < currentWeekIdx; w++) {
       var wk = weeks[w - 1];
       if (!wk) continue;
@@ -1219,13 +1226,14 @@
         var entry = logs[wk.weekNum + '-' + di];
         if (typeof entry === 'string') entry = { time: entry };
         if (entry && entry.effort) samples.push(entry.effort);
+        if (entry && entry.pain && (entry.pain.severity >= 4 || entry.pain.recurrent)) recentPainFlag = true;
       });
     }
     if (samples.length < 3) return null;
     var avg = samples.reduce(function (a, b) { return a + b; }, 0) / samples.length;
 
     var factor = null, note = null;
-    if (avg <= RPE_TARGET.easy[0] - 1) {
+    if (avg <= RPE_TARGET.easy[0] - 1 && !recentPainFlag) {
       factor = 1.05;
       note = 'Your easy running has felt too easy lately, so upcoming volume was nudged up about 5%.';
     } else if (avg >= RPE_TARGET.easy[1] + 3) {

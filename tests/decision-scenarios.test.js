@@ -154,6 +154,27 @@ test('Context: easy/long RPE has averaged <=2 across the last two weeks (feels t
   assert.equal(weeks[3].days[6].miles, 6.5, 'week 4\'s long run nudges up ~5% (6mi -> 6.5mi after round5)');
 });
 
+test('Context: easy/long RPE has averaged <=2 (feels too easy) but a recent logged entry also flags real pain (severity >=4). Approved outcome: never add intensity when the runner reports pain -- the volume-up nudge is suppressed even though the RPE evidence alone would otherwise trigger it.', function () {
+  var weeks = sixWeekPlan();
+  var logs = {
+    '1-0': { effort: 1 }, '1-2': { effort: 2 }, '1-6': { effort: 1, pain: { severity: 5, location: 'shin' } },
+    '2-0': { effort: 2 }
+  };
+  var note = rules.applyDifficultyAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.equal(note, null, 'a recent meaningful pain report must suppress the volume-increase branch entirely');
+  assert.equal(weeks[3].days[0].miles, 4, 'forbidden outcome: volume is not nudged up while pain was recently reported');
+});
+
+test('Context: easy/long RPE has averaged <=2 but a recent pain report is mild and non-recurrent (severity <4, not recurrent). Approved outcome: the volume-up nudge still applies -- only a meaningful pain signal suppresses it, not any pain mention at all.', function () {
+  var weeks = sixWeekPlan();
+  var logs = {
+    '1-0': { effort: 1 }, '1-2': { effort: 2 }, '1-6': { effort: 1, pain: { severity: 1, location: 'shin', recurrent: false } },
+    '2-0': { effort: 2 }
+  };
+  var note = rules.applyDifficultyAdjustment(weeks, RACE_GOAL, PLAN_META, logs, TODAY, null, UNITS);
+  assert.match(note, /nudged up about 5%/);
+});
+
 test('Context: fewer than 3 logged RPE samples exist in the lookback window. Approved outcome: never guess -- no adjustment at all (insufficient evidence).', function () {
   var weeks = sixWeekPlan();
   var logs = { '1-0': { effort: 8 }, '2-0': { effort: 8 } }; // only 2 samples
