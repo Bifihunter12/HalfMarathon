@@ -943,6 +943,11 @@
     // the most recent 200 entries on every write (see recordCoachingCue)
     // so it can never grow unbounded across a runner's lifetime of workouts.
     if (!s.coachingHistory) s.coachingHistory = []; // [{ cueId, category, topic, deliveredAt, workoutId }]
+    // docs section 14 -- in-workout runner feedback (too easy/too hard/
+    // pain). Append-only, capped, same shape/lifetime pattern as
+    // coachingHistory above -- a record of what the runner reported and
+    // what deterministic action (if any) was taken, never a diagnosis.
+    if (!s.inWorkoutFeedback) s.inWorkoutFeedback = []; // [{ workoutId, segmentIndex, segmentKind, type, actionTaken, at }]
     if (!s.notifications) s.notifications = { enabled: false }; // opt-in, never on by default
     if (!s.sideQuestLog) s.sideQuestLog = []; // [{ id, key, date, category }]
     if (s.activeQuestTrack === undefined) s.activeQuestTrack = null; // { trackId, difficulty, startedDate, completedSessions }
@@ -4487,6 +4492,20 @@
     return { rpe: rpe, paceMinSecPerMi: paceMin, paceMaxSecPerMi: paceMax, hrZone: null }; // hrZone always null -- no HR prescription model exists anywhere in this app
   }
 
+  // docs section 14.2 -- every in-workout adjustment logged with reason,
+  // before/after structure, and source. `actionTaken` is a plain string
+  // describing what deterministic code actually did (or 'logged_only' when
+  // nothing was mutated) -- never a free-text AI explanation.
+  function logWorkoutFeedback(type, actionTaken) {
+    state.inWorkoutFeedback.push({
+      workoutId: _activeCoachingSessionId, segmentIndex: _activeMachine ? _activeMachine.state.segmentIndex : null,
+      segmentKind: _activeMachine ? (_activeMachine.segAt(_activeMachine.state.segmentIndex) || {}).kind : null,
+      type: type, actionTaken: actionTaken, at: Date.now()
+    });
+    if (state.inWorkoutFeedback.length > 200) state.inWorkoutFeedback = state.inWorkoutFeedback.slice(-200);
+    saveState(state);
+  }
+
   function recordCoachingCue(selected) {
     state.coachingHistory.push({ cueId: selected.cueId, category: selected.category, topic: selected.topic, deliveredAt: Date.now(), workoutId: _activeCoachingSessionId });
     // Capped so a runner's cue history can never grow unbounded across a
@@ -4747,6 +4766,84 @@
       machine.skip();
       persistActiveSession(normalized);
       tick();
+    });
+
+    // ── In-workout feedback (docs section 14) -- large, reachable controls
+    // for the three things worth reacting to mid-session. Every adjustment
+    // is bounded and deterministic (reuses the SAME machine.skip()/pause()
+    // the manual Skip/Pause buttons already use -- no new state-machine
+    // mutation logic, so this can never desync from the timer's own
+    // correctness). The AI is never involved in this decision.
+    var feedbackWrap = el('<div class="runner-feedback-controls" role="group" aria-label="How is this workout going?"></div>');
+    wrap.querySelector('.runner-controls').insertAdjacentElement('afterend', feedbackWrap);
+    var tooEasyBtn = el('<button type="button" class="ob-btn ob-btn-secondary" id="runnerTooEasyBtn">Too easy</button>');
+    var tooHardBtn = el('<button type="button" class="ob-btn ob-btn-secondary" id="runnerTooHardBtn">Too hard</button>');
+    var painBtn = el('<button type="button" class="ob-btn ob-btn-secondary danger-btn" id="runnerPainBtn">Pain</button>');
+    feedbackWrap.appendChild(tooEasyBtn); feedbackWrap.appendChild(tooHardBtn); feedbackWrap.appendChild(painBtn);
+    var feedbackStatusEl = el('<p class="ob-hint runner-feedback-status" id="runnerFeedbackStatus" aria-live="polite" style="display:none"></p>');
+    feedbackWrap.insertAdjacentElement('afterend', feedbackStatusEl);
+    function showFeedbackAck(text) { feedbackStatusEl.textContent = text; feedbackStatusEl.style.display = ''; }
+
+    // "Too easy" -- never escalates mid-session (docs: "avoid aggressive
+    // mid-session escalation... use the result as evidence within
+    // progression rules" -- that's a POST-workout/plan-level decision, not
+    // an in-workout one). Logged only, so future planning has real signal.
+    tooEasyBtn.addEventListener('click', function () {
+      logWorkoutFeedback('too_easy', 'logged_only');
+      showFeedbackAck("Got it -- logged. We'll keep it as-is for today.");
+    });
+
+    // "Too hard" -- a bounded, deterministic reduction: during an actual
+    // work/manual_rep interval, ends just that interval early (identical
+    // mechanism to the existing manual Skip button, just labeled/logged
+    // with why), preserving the workout's overall structure instead of
+    // demanding the original volume. Outside a work interval (e.g. a
+    // continuous/open run, warmup, cooldown) there is no safe "remaining
+    // volume" to bound -- logged only, with a pointer to the controls that
+    // already end things early (Skip/End workout).
+    tooHardBtn.addEventListener('click', function () {
+      var seg = currentSeg();
+      if (seg && (seg.kind === 'work' || seg.kind === 'manual_rep') && machine.state.phase !== 'paused') {
+        machine.skip();
+        persistActiveSession(normalized);
+        logWorkoutFeedback('too_hard', 'skipped_current_interval');
+        showFeedbackAck('Cutting that interval short -- moving you on.');
+        tick();
+      } else {
+        logWorkoutFeedback('too_hard', 'logged_only');
+        showFeedbackAck('Got it -- logged. Use Skip or End workout if you need to stop this part now.');
+      }
+    });
+
+    // "Pain" -- immediately suspends performance/motivational pressure by
+    // pausing (docs 18: "stop performance cues... do not diagnose... do
+    // not encourage pushing through"). Offers the two safe choices without
+    // pretending to triage severity/location here -- the app's existing
+    // pain-report flow (workout detail screen / AI coach) is where real
+    // triage happens; this is the immediate in-the-moment safety stop.
+    painBtn.addEventListener('click', function () {
+      if (machine.state.phase !== 'paused') machine.pause();
+      persistActiveSession(normalized);
+      logWorkoutFeedback('pain', 'paused');
+      tick();
+      var painCard = el(
+        '<div class="coach-action" id="runnerPainCard" role="alert">' +
+          '<div style="margin-bottom:8px">Workout paused. If this is sharp, worsening, or changes how you move, stop and consider medical evaluation -- see the Safety panel. Otherwise, ease back in only if it stays mild.</div>' +
+          '<button type="button" class="ob-btn ob-btn-secondary danger-btn" id="runnerPainStopBtn" style="margin-bottom:6px">Stop workout</button>' +
+          '<button type="button" class="ob-btn" id="runnerPainContinueBtn">Continue carefully</button>' +
+        '</div>'
+      );
+      feedbackStatusEl.insertAdjacentElement('afterend', painCard);
+      document.getElementById('runnerPainStopBtn').addEventListener('click', function () {
+        painCard.remove();
+        document.getElementById('runnerEndBtn').click();
+      });
+      document.getElementById('runnerPainContinueBtn').addEventListener('click', function () {
+        painCard.remove();
+        machine.resume();
+        persistActiveSession(normalized);
+        tick();
+      });
     });
 
     // Ending is a real, destructive action (discards remaining structure) --
