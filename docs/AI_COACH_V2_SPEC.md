@@ -97,16 +97,23 @@ These two functions apply **automatically** (not via a propose/confirm step) —
 
 All in the existing `node --test tests/` suite, zero network calls, deterministic stubs for the model:
 - `tests/coaching-rules.test.js` — `buildPlannedActivityWorkout`, `weeklyJobPriorityBrief`, activityType/terrainDifficulty validation branches.
-- `tests/coach.test.js` — hiking classification end-to-end through the handler, `scope` sanitization, `weeklyJobPriorities` prompt forwarding.
+- `tests/coach.test.js` — hiking classification end-to-end through the handler, `scope` sanitization, `weeklyJobPriorities` prompt forwarding, `update_sessions` split/combine/double-hard-warning.
 - `tests/decision-scenarios.test.js` — pain suppressing the auto volume-increase.
-- `tests/coaching-cues.test.js` — completion/halfway phrase rotation.
+- `tests/coaching-cues.test.js` — completion/halfway phrase rotation, `final_third` milestone selection.
+- `tests/workout-runner.test.js` — `final_third` fires once, deduped, distinct from halfway.
+- `tests/merge-state.test.js` — `chatSessions` merge/tombstone/legacy-load.
 
-527/527 passing as of the last commit on this branch. UI-only wiring (undo, in-workout buttons, confirm-screen rendering) has no DOM test harness in this repo's existing convention — verified live via the Claude Browser tool instead, documented in each commit message.
+549/549 passing as of the last commit on this branch. UI-only wiring (undo, in-workout buttons, confirm-screen rendering, the split/combine flow, the adjustment acknowledge-gate) has no DOM test harness in this repo's existing convention — verified live via the Claude Browser tool instead, documented in each commit message.
 
-## 11. Not built (honest gap list)
+## 11. Built in a second pass (previously listed as gaps)
 
-- Full session-level data model migration (`day.sessions[]` split/combine as first-class chat operations) — the pre-existing `day.sessions[]` infrastructure (found during audit, predates this branch) supports rendering/logging multiple sessions per day, but chat can't yet propose a split/combine.
-- Deeper motivational-audio milestones beyond what already existed (first successful rep, final-third framing, "hardest block complete") — only phrase *variety* was added to existing milestones (halfway, completion), not new milestone types.
-- Confirm-before-applying flow for the pre-existing automatic weekly adjustments (see §7 — deliberately not changed, treated as the doc's own allowed "safe auto-adjust mode" exception).
+- **Multi-session split/combine via chat** — new `update_sessions` action (`split` adds a chat-defined secondary session via the same deterministic `buildPlannedActivityWorkout` classification; `combine` removes it), a new `state.chatSessions[key]` dict merged additively into `effectiveWorkoutForDay`'s `.sessions`, and a two-a-day accidental-double-hard warning (reusing `RUN_SESSION_META` load classification) that flags, never blocks. Scoped deliberately to chat-added sessions only — never touches a recurring-workout-driven secondary session.
+- **A "final third" motivational milestone** — a second real-elapsed-time trigger (2/3 of the workout, same grace-window pattern as halfway) with its own cue and haptic pattern. Found and fixed a real selection bug in the process: `progress_halfway`/`progress_final_third` shared a category with no per-cue `triggerEvents` restriction, so either could win on the wrong trigger.
+- **Acknowledge-gate for automatic weekly adjustments** — a dismissible "Plan adjusted" card (new `state.autoAdjustMode`, default `'confirm'`) in front of the existing passive info banner, with a Settings opt-out (`'auto'`) restoring the original silent behavior. Deliberately "surfaced + must acknowledge" rather than "blocked with a reversible unadjusted preview" — see the commit message for why full reversibility would mean hand-duplicating `generatePlan`'s internal pipeline, a real risk to an already-tested, currently-relied-on feature.
+
+## 12. Still not built (honest gap list)
+
 - Real-device QA for any of this — everything above is unit-tested and browser-verified against a local static server, never a real phone.
 - Full accessibility audit beyond spot-checking the new controls (which already meet the bar: visible text labels, `role="group"`/`role="alert"`, `aria-live` status).
+- Sensor-dependent features (Tier 2/3 pace/HR coaching) — remain permanently inert, no sensor integration exists in this PWA.
+- A true block-until-approved (not just acknowledge-gated) flow for automatic weekly adjustments, with a real reversible unadjusted-plan preview — see §11's tradeoff note.
