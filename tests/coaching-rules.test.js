@@ -388,3 +388,60 @@ test('validateRescheduleDays: a hike swapped onto an easy-run day (recovery unto
   var result = rules.validateRescheduleDays(SAMPLE_WEEK, changes);
   assert.equal(result.ok, true, 'a hike replacing an easy run must not trip any check on its own -- ' + result.reason);
 });
+
+// ── Multiple sessions per day via chat -- split/combine (task 9/10) ──────
+test('validateUpdateSessions: split adds a deterministically classified session, ignoring the model\'s own label/duration', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-1', operation: 'split', addSession: { activityType: 'yoga', label: 'some yoga thing', durationMinutes: 5 } });
+  assert.equal(result.ok, true);
+  assert.equal(result.addedSession.type, 'cross');
+  assert.notEqual(result.addedSession.label, 'some yoga thing');
+  assert.equal(result.addedSession.activityType, 'yoga');
+});
+
+test('validateUpdateSessions: split is rejected on a race day', function () {
+  var week = SAMPLE_WEEK.concat([{ key: '1-7', type: 'race', label: '10K Race' }]);
+  var result = rules.validateUpdateSessions(week, { key: '1-7', operation: 'split', addSession: { activityType: 'yoga', durationMinutes: 30 } });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'race_day_protected');
+});
+
+test('validateUpdateSessions: split with an unknown activityType is rejected', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-1', operation: 'split', addSession: { activityType: 'trapeze', durationMinutes: 30 } });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateUpdateSessions: split with a missing addSession is rejected', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-1', operation: 'split' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_workout');
+});
+
+test('validateUpdateSessions: an invalid operation value is rejected', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-1', operation: 'merge' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'invalid_operation');
+});
+
+test('validateUpdateSessions: combine on an unknown key is rejected', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '9-9', operation: 'combine' });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'unknown_key');
+});
+
+test('validateUpdateSessions: combine on a real day succeeds with nothing further to validate', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-1', operation: 'combine' });
+  assert.equal(result.ok, true);
+});
+
+test('validateUpdateSessions: warns (never blocks) an accidental double-hard pairing -- a hard hike split onto the quality day', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-3', operation: 'split', addSession: { activityType: 'hiking', durationMinutes: 180, terrainDifficulty: 'hard' } });
+  assert.equal(result.ok, true, 'never blocked, only flagged');
+  assert.equal(result.accidentalDoubleHard, true);
+});
+
+test('validateUpdateSessions: a compatible easy addition to an easy day is never flagged as double-hard', function () {
+  var result = rules.validateUpdateSessions(SAMPLE_WEEK, { key: '1-1', operation: 'split', addSession: { activityType: 'yoga', durationMinutes: 30, terrainDifficulty: 'easy' } });
+  assert.equal(result.ok, true);
+  assert.equal(result.accidentalDoubleHard, false);
+});

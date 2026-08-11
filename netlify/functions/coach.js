@@ -25,7 +25,8 @@ var CoachingRules = require(path.join(__dirname, '..', '..', 'coaching-rules.js'
 var OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 var MODEL = 'gpt-4o-mini';
 var VALID_TYPES = ['easy', 'long', 'quality', 'cross', 'rest'];
-var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity', 'substitute_side_quest', 'reschedule_days'];
+var VALID_ACTIONS = ['mark_rest', 'substitute_workout', 'log_unplanned_activity', 'reduce_intensity', 'substitute_side_quest', 'reschedule_days', 'update_sessions'];
+var VALID_SESSION_OPERATIONS = ['split', 'combine'];
 var VALID_RISK = ['green', 'yellow', 'red'];
 var VALID_DECISION = ['keep_plan', 'modify_workout', 'replace_with_cross_training', 'rest', 'seek_medical_evaluation'];
 var REDUCE_MIN = 0.5, REDUCE_MAX = 0.9;
@@ -116,6 +117,7 @@ var SYSTEM_PROMPT = [
   'WEEKLY PRIORITIES: when present, "weeklyJobPriorities" in the runner\'s plan context names this specific week\'s ideal set of training jobs and its minimum viable (bare-minimum-but-still-effective) set, already computed correctly for the current phase and level -- use it to decide what to trim first when the week is crowded (e.g. only 3 available days), and never invent a different priority order yourself. If it is absent, fall back to the general priority order already given above.',
   'ONE-TIME VS. RECURRING: when proposing a reschedule_days action for a runner-named activity (not a same-week rest-day swap), set "scope" to "once" by default -- this only applies to the current week. Only set "scope" to "recurring" when the runner clearly says the activity repeats (e.g. "every Saturday", "I always hike on weekends", "this is a weekly thing") -- never infer a lasting recurring commitment from one unusual week. If it is genuinely ambiguous and would materially affect future weeks, ask plainly: "Should I use this just this week, or remember it for future weeks too?" -- as one part of the same message, not a second follow-up round.',
   'PLANNED-ACTIVITY DISCOVERY: at the start of a fresh conversation about this week\'s schedule, or whenever the runner mentions doing something outside the generated plan (a hike, a class, a ride, a race, travel, an event), treat it as a real commitment to incorporate, not an interruption. Ask at most one focused follow-up only when it would materially change placement or load (typically: how long, and how demanding/steep/hard) -- do not ask when the activity is clearly light (e.g. "yoga Sunday" needs no follow-up). Once you know enough, propose incorporating it via reschedule_days (using activityType/terrainDifficulty as above) rather than just acknowledging it verbally and doing nothing. If the runner\'s week does not have enough recovery left after adding it, negotiate which day gives up its lower-value session the same way you would for a rest-day swap -- never silently drop the long run or quality session to make room.',
+  '"update_sessions" {key, operation, addSession, note}: a SINGLE day, changing how many sessions it has -- use this instead of reschedule_days when the runner wants to ADD an activity alongside what is already planned that day (a genuine two-a-day, e.g. "add an evening yoga session after today\'s run"), or REMOVE a previously chat-added extra session ("just do it all in the morning" / "never mind the extra session"). "operation" is "split" (add) or "combine" (remove). For "split", "addSession" is {activityType, durationMinutes, terrainDifficulty} -- same fields and same rule as reschedule_days\'s activityType: the app deterministically classifies it, never trust your own label/duration for it. Only use "combine" to remove a session this conversation itself could plausibly have added earlier -- never to remove a fixed recurring commitment or a day\'s own generated primary workout (use reschedule_days or mark_rest for those). Two hard sessions the same day are allowed but should be called out plainly in "message" if you have any reason to think the pairing is genuinely demanding -- the app will also flag it in the confirmation.',
   'PENDING INTENT: when you ask which day should become recovery because you do not yet know it, also populate a top-level "pendingIntent": {"type":"move_recovery","sourceKey":"<the rest day\'s key>","requestedWorkout":{"type":"cross","label":"...","durationMinutes":...,"plannedDistance":null}} describing exactly the trade you are proposing to complete once you get an answer. Omit pendingIntent (or set it null) once you return a real action, or for any turn that is not this specific negotiation.',
   'KNOWN CUSTOM WORKOUTS: recognize common informally-named workouts from the runner\'s own wording (e.g. "12-3-30", "12 3 30", "12/3/30" all mean the same 30-minute incline treadmill walk) and reflect them faithfully as a "cross" type workout with a real label and durationMinutes -- never reclassify a plainly-named workout as a run, and never leave its type as "rest". This applies to any workout the runner names clearly, not only 12-3-30 -- hikes, bike rides, fitness classes, strength sessions, and other cross-training all follow the same pattern (type "cross" with a real label/duration unless it is genuinely a run, which stays "easy"/"long"/"quality" as appropriate).',
   'MISSED WORKOUT: missed easy run -> just skip it, no cramming. Missed hard/quality workout -> only move it if full recovery remains before the next hard/long session, otherwise skip. Missed long run -> move it only if it won\'t create back-to-back hard/long stress (shorten if needed), never double it later. Missed a full week -> resume at 80-90% of previous volume with no intensity for 2-3 sessions (frame this as a note, not an action you can execute directly). Missed 2+ weeks -> recommend recalculating expectations, possibly a conversation about the goal itself.',
@@ -132,6 +134,7 @@ var SYSTEM_PROMPT = [
   'Given all of the above, decide the runner\'s "decision" for right now: "keep_plan" (no change needed), "modify_workout" (small adjustment, e.g. reduce_intensity), "replace_with_cross_training" (swap today\'s type), "rest" (mark_rest), or "seek_medical_evaluation" (red flag present).',
   'Decide whether the runner is clearly requesting or agreeing to a concrete change to ONE specific day from the provided list. If so, include an "action" matching the decision above. Otherwise action must be null.',
   'Allowed action types. Every type except reschedule_days requires a real "key" from the provided day list -- never invent one. reschedule_days instead requires a "changes" array whose every entry\'s "key" is a real key from the provided day list (see its own description below):',
+  '(Reminder: reschedule_days changes an existing day\'s own type/label -- use it for a rest-day swap or replacing what a day already is. update_sessions ADDS or REMOVES an extra session alongside a day\'s existing one -- use it for a real two-a-day. Do not use reschedule_days to bolt a second activity onto a day that should keep its existing session too.)',
   '"mark_rest" {key, note}: a specific day becomes rest, with the runner\'s stated reason as note.',
   '"substitute_workout" {key, newType, note}: swap which TYPE of session happens on a day. newType MUST be one of the types that already appears among the provided days (the app reuses that real day\'s actual label/numbers -- never propose a type absent from the list). Default to "easy" for a plain, unqualified "I want to run/train" request -- only choose "quality" if explicitly asked for hard/interval/tempo/speed work, only "long" if explicitly asked for a long run. Never upgrade a casual request into a harder session than asked for.',
   '"log_unplanned_activity" {key, note}: runner did something different and wants it recorded as what actually happened -- never changes the future plan.',
@@ -145,7 +148,7 @@ var SYSTEM_PROMPT = [
   'If the runner\'s message mentions any red-flag symptom (see list above), also populate "redFlags" with the specific symptom(s) mentioned, in the runner\'s own terms.',
   'Populate "avoidToday" with 0-3 short concrete things to avoid today if relevant (e.g. "hills", "speedwork", "heavy lower-body lifting") -- empty array if nothing specific applies.',
 
-  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null, "pendingIntent": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity|substitute_side_quest|reschedule_days>", "key": "<key, omit for reschedule_days>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "sideQuestId": "<only for substitute_side_quest, an id from the provided catalog>", "changes": "<only for reschedule_days, array of {key, workout:{type,label,durationMinutes,plannedDistance,activityType,terrainDifficulty}}>", "scope": "<only for reschedule_days, once|recurring, defaults to once>", "note": "<short reason>"} and/or "pendingIntent": {"type": "move_recovery", "sourceKey": "<key>", "requestedWorkout": {"type": "cross", "label": "...", "durationMinutes": 0, "plannedDistance": null}}.'
+  'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null, "pendingIntent": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity|substitute_side_quest|reschedule_days|update_sessions>", "key": "<key, omit for reschedule_days>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "sideQuestId": "<only for substitute_side_quest, an id from the provided catalog>", "changes": "<only for reschedule_days, array of {key, workout:{type,label,durationMinutes,plannedDistance,activityType,terrainDifficulty}}>", "scope": "<only for reschedule_days, once|recurring, defaults to once>", "operation": "<only for update_sessions, split|combine>", "addSession": "<only for update_sessions split, {activityType,durationMinutes,terrainDifficulty}>", "note": "<short reason>"} and/or "pendingIntent": {"type": "move_recovery", "sourceKey": "<key>", "requestedWorkout": {"type": "cross", "label": "...", "durationMinutes": 0, "plannedDistance": null}}.'
 ].join(' ');
 
 exports.handler = async function (event) {
@@ -459,6 +462,36 @@ exports.handler = async function (event) {
       }
     }
 
+    // update_sessions: single-day split/combine. Sanitize shape/types the
+    // same bounded way as everything else, then hand off to the exact same
+    // deterministic validator the client re-checks before applying --
+    // never trust the model's own addSession wording, and never let it
+    // silently degrade into a different action type.
+    var sanitizedAddSession = null;
+    var accidentalDoubleHardWarning = false;
+    if (validAction && action.type === 'update_sessions') {
+      if (VALID_SESSION_OPERATIONS.indexOf(action.operation) === -1) {
+        validAction = false;
+      } else if (action.operation === 'split') {
+        var rawAdd = action.addSession;
+        if (!rawAdd || typeof rawAdd !== 'object' || typeof rawAdd.activityType !== 'string') {
+          validAction = false;
+        } else {
+          sanitizedAddSession = {
+            activityType: rawAdd.activityType.slice(0, 40),
+            durationMinutes: typeof rawAdd.durationMinutes === 'number' ? rawAdd.durationMinutes : null,
+            terrainDifficulty: typeof rawAdd.terrainDifficulty === 'string' ? rawAdd.terrainDifficulty.slice(0, 20) : null
+          };
+          var sessionCheck = CoachingRules.validateUpdateSessions(weekDaysForValidation, { key: action.key, operation: 'split', addSession: sanitizedAddSession });
+          if (!sessionCheck.ok) validAction = false;
+          else accidentalDoubleHardWarning = !!sessionCheck.accidentalDoubleHard;
+        }
+      } else {
+        var combineCheck = CoachingRules.validateUpdateSessions(weekDaysForValidation, { key: action.key, operation: 'combine' });
+        if (!combineCheck.ok) validAction = false;
+      }
+    }
+
     if (!validAction) {
       return {
         statusCode: 200, headers: { 'Content-Type': 'application/json' },
@@ -483,6 +516,16 @@ exports.handler = async function (event) {
           // unusual week, only set to 'recurring' when the model says the
           // runner clearly asked for it to repeat.
           scope: action.scope === 'recurring' ? 'recurring' : 'once',
+          note: typeof action.note === 'string' ? action.note.slice(0, 200) : ''
+        } : action.type === 'update_sessions' ? {
+          type: 'update_sessions',
+          key: String(action.key),
+          operation: action.operation,
+          addSession: action.operation === 'split' ? sanitizedAddSession : undefined,
+          // Informational only -- the client re-derives this itself from
+          // the same validator before showing the confirmation text; never
+          // trusted as the reason to block anything server-side.
+          accidentalDoubleHardWarning: accidentalDoubleHardWarning,
           note: typeof action.note === 'string' ? action.note.slice(0, 200) : ''
         } : {
           type: action.type,

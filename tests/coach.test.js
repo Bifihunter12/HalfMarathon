@@ -405,6 +405,75 @@ test('reschedule_days: an unknown activityType is rejected server-side even if e
   assert.equal(result.body.action, null);
 });
 
+// ── update_sessions (split/combine a two-a-day via chat) ─────────────────
+test('update_sessions: split adds a deterministically classified session, ignoring the model\'s own label/duration', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'modify_workout', avoidToday: [], redFlags: [],
+    action: { type: 'update_sessions', key: '1-1', operation: 'split', addSession: { activityType: 'yoga', durationMinutes: 5 }, note: '' }
+  });
+  var result = await callHandler({ request: 'add evening yoga after today\'s run', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action.type, 'update_sessions');
+  assert.equal(result.body.action.operation, 'split');
+  assert.equal(result.body.action.addSession.activityType, 'yoga');
+});
+
+test('update_sessions: split on a race day is rejected', async function () {
+  var withRace = RESCHEDULE_DAYS.concat([{ key: '1-7', dow: 'MON', date: '2026-07-27', type: 'race', label: '10K Race' }]);
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'modify_workout', avoidToday: [], redFlags: [],
+    action: { type: 'update_sessions', key: '1-7', operation: 'split', addSession: { activityType: 'yoga', durationMinutes: 20 }, note: '' }
+  });
+  var result = await callHandler({ request: 'add yoga on race day', days: withRace });
+  assert.equal(result.body.action, null);
+});
+
+test('update_sessions: an invalid operation is rejected', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'modify_workout', avoidToday: [], redFlags: [],
+    action: { type: 'update_sessions', key: '1-1', operation: 'merge', note: '' }
+  });
+  var result = await callHandler({ request: 'combine my sessions', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action, null);
+});
+
+test('update_sessions: split with an unknown activityType is rejected', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'modify_workout', avoidToday: [], redFlags: [],
+    action: { type: 'update_sessions', key: '1-1', operation: 'split', addSession: { activityType: 'trapeze', durationMinutes: 20 }, note: '' }
+  });
+  var result = await callHandler({ request: 'add trapeze practice', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action, null);
+});
+
+test('update_sessions: combine does not require an addSession', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'modify_workout', avoidToday: [], redFlags: [],
+    action: { type: 'update_sessions', key: '1-1', operation: 'combine', note: '' }
+  });
+  var result = await callHandler({ request: 'never mind the extra session', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action.type, 'update_sessions');
+  assert.equal(result.body.action.operation, 'combine');
+});
+
+test('update_sessions: an accidental double-hard pairing is flagged in the response, never blocked', async function () {
+  mockOpenAI({
+    message: 'ok', riskLevel: 'green', decision: 'modify_workout', avoidToday: [], redFlags: [],
+    action: { type: 'update_sessions', key: '1-2', operation: 'split', addSession: { activityType: 'hiking', durationMinutes: 180, terrainDifficulty: 'hard' }, note: '' }
+  });
+  var result = await callHandler({ request: 'add a hard hike to my tempo day', days: RESCHEDULE_DAYS });
+  assert.notEqual(result.body.action, null);
+  assert.equal(result.body.action.accidentalDoubleHardWarning, true);
+});
+
+test('update_sessions: existing safety net still applies -- a red-flag response nulls it too', async function () {
+  mockOpenAI({
+    message: 'Please stop and see a doctor.', riskLevel: 'red', decision: 'seek_medical_evaluation', avoidToday: [], redFlags: ['chest pain'],
+    action: { type: 'update_sessions', key: '1-1', operation: 'split', addSession: { activityType: 'yoga', durationMinutes: 20 }, note: '' }
+  });
+  var result = await callHandler({ request: 'add yoga, chest pain though', days: RESCHEDULE_DAYS });
+  assert.equal(result.body.action, null);
+});
+
 test('isRepeatedMessage: true when a real (>=8-word) sentence exactly matches a recent assistant sentence, modulo case/punctuation', function () {
   var prior = ["We need to stick with the rest day to protect your recovery this week."];
   var candidate = "We need to stick with the rest day to protect your recovery this week!";

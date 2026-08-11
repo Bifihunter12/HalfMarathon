@@ -293,7 +293,7 @@ test('legacy states missing deletedKeys entirely still merge logs correctly (no 
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.logs['1-1'].distance, 5);
   assert.deepEqual(merged.deletedKeys, {
-    logs: {}, overrides: {}, workoutOverrides: {}, crossType: {}, sessionLogs: {}, sessionOverrides: {},
+    logs: {}, overrides: {}, workoutOverrides: {}, chatSessions: {}, crossType: {}, sessionLogs: {}, sessionOverrides: {},
     dayAdjustments: {}, scheduleChoices: {}, sideQuestCalendar: {},
     recurringWorkouts: {}, travelPeriods: {}
   });
@@ -509,5 +509,29 @@ test('legacy label-only overrides and new typed workoutOverrides merge independe
   const merged = mergeState.mergeRunnerState(local, remote);
   assert.equal(merged.overrides['1-1'], 'Easy 3 mi (feeling great)');
   assert.deepEqual(merged.workoutOverrides['1-0'], { type: 'cross', label: '12-3-30 Incline Walk', durationMinutes: 30, plannedDistance: null, source: 'coach' });
+});
+
+// ── Chat-added secondary sessions (split/combine) -- same mergeMapT-by-
+// day-key pattern as workoutOverrides above.
+test('chatSessions added on different devices for different days both survive the merge', function () {
+  const local = baseState({ lastModified: 2000, chatSessions: { '1-1': [{ id: 'sess_chat_1-1_1', role: 'secondary', label: 'Yoga' }] } });
+  const remote = baseState({ lastModified: 1000, chatSessions: { '2-3': [{ id: 'sess_chat_2-3_1', role: 'secondary', label: 'Hike — 90 min' }] } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.chatSessions['1-1'][0].label, 'Yoga');
+  assert.equal(merged.chatSessions['2-3'][0].label, 'Hike — 90 min');
+});
+
+test('a chatSessions entry combined (deleted) on the newer device stays deleted rather than resurrected by a stale remote copy', function () {
+  const local = baseState({ lastModified: 2000, chatSessions: {}, deletedKeys: { chatSessions: { '1-1': true } } });
+  const remote = baseState({ lastModified: 1000, chatSessions: { '1-1': [{ id: 'sess_chat_1-1_1', role: 'secondary', label: 'Yoga' }] } });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.chatSessions['1-1'], undefined);
+});
+
+test('legacy states missing chatSessions entirely still merge to a safe empty object', function () {
+  const local = { lastModified: 2000, units: 'mi' };
+  const remote = { lastModified: 1000, units: 'mi' };
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.chatSessions, {});
 });
 

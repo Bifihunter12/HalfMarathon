@@ -882,10 +882,19 @@
     // "deleted on this device" apart from "never synced here" and stop a
     // stale device's copy from winning the key back (merge-state.js mergeMapT).
     if (!s.deletedKeys) s.deletedKeys = {};
-    ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments', 'scheduleChoices', 'sideQuestCalendar', 'recurringWorkouts', 'travelPeriods', 'workoutOverrides'].forEach(function (f) {
+    ['logs', 'overrides', 'crossType', 'sessionLogs', 'sessionOverrides', 'dayAdjustments', 'scheduleChoices', 'sideQuestCalendar', 'recurringWorkouts', 'travelPeriods', 'workoutOverrides', 'chatSessions'].forEach(function (f) {
       if (!s.deletedKeys[f]) s.deletedKeys[f] = {};
     });
     if (!s.overrides) s.overrides = {};
+    // docs section 9/10 -- extra sessions a coach conversation added to a
+    // day via the "split" operation (never a recurring-workout-driven
+    // secondary session, which already has its own real place in the
+    // generated plan -- this is purely chat-added extras). Keyed by day
+    // key, one array of session objects per day (almost always length 1 in
+    // practice, but not enforced as a hard cap). Merged in by
+    // effectiveWorkoutForDay below, additive to whatever the generated day
+    // already carries.
+    if (!s.chatSessions) s.chatSessions = {};
     // Typed schedule overrides (coach-negotiated day trades -- "I want to do
     // 12-3-30 today instead of resting"). Distinct from the legacy
     // state.overrides label-only string above: a typed entry replaces the
@@ -1067,6 +1076,16 @@
     if (state.overrides[key] !== undefined) clearOverride(key);
   }
   function clearWorkoutOverride(key) { delete state.workoutOverrides[key]; state.deletedKeys.workoutOverrides[key] = true; }
+  // Chat-added secondary session(s) for a day (docs section 9/10 "split
+  // one session into two compatible sessions"). setChatSession REPLACES the
+  // whole array for that key (split only ever adds one at a time in
+  // practice, but this stays correct if that changes); clearChatSession
+  // implements "combine" -- removing every chat-added session for that day.
+  function setChatSession(key, session) {
+    state.chatSessions[key] = (state.chatSessions[key] || []).concat([session]);
+    delete state.deletedKeys.chatSessions[key];
+  }
+  function clearChatSession(key) { delete state.chatSessions[key]; state.deletedKeys.chatSessions[key] = true; }
 
   // ── Single source of truth for "what actually happens on this day" ──────
   // Resolution order: typed override (real type/label/duration/distance) >
@@ -1079,10 +1098,19 @@
   // was the whole bug this exists to fix. Returns a day-shaped object
   // (normalizeWorkout/WORKOUT_DETAIL-compatible): { type, label, miles,
   // durationMinutes, sessions, runWalk, overridden, overrideSource }.
+  // Chat-added secondary sessions (state.chatSessions[key]) merged onto
+  // whatever `.sessions` the caller already has -- additive in every
+  // branch below, never replacing a recurring-workout-driven secondary
+  // session that might already be there.
+  function withChatSessions(day, key) {
+    var extra = state.chatSessions && state.chatSessions[key];
+    if (!extra || !extra.length) return day;
+    return Object.assign({}, day, { sessions: (day.sessions || []).concat(extra) });
+  }
   function effectiveWorkoutForDay(baseDay, key) {
     var typed = state.workoutOverrides && state.workoutOverrides[key];
     if (typed) {
-      return {
+      return withChatSessions({
         type: typed.type, label: typed.label,
         miles: typed.plannedDistance != null ? typed.plannedDistance : null,
         durationMinutes: typed.durationMinutes != null ? typed.durationMinutes : null,
@@ -1091,13 +1119,13 @@
         activityType: typed.activityType || null, terrainDifficulty: typed.terrainDifficulty || null,
         purpose: typed.purpose || null, loadClass: typed.loadClass || null,
         overridden: true, overrideSource: 'typed'
-      };
+      }, key);
     }
     var legacyLabel = state.overrides && state.overrides[key];
     if (legacyLabel) {
-      return Object.assign({}, baseDay, { label: legacyLabel, overridden: true, overrideSource: 'legacy' });
+      return withChatSessions(Object.assign({}, baseDay, { label: legacyLabel, overridden: true, overrideSource: 'legacy' }), key);
     }
-    return Object.assign({}, baseDay, { overridden: false, overrideSource: null });
+    return withChatSessions(Object.assign({}, baseDay, { overridden: false, overrideSource: null }), key);
   }
   function setCrossType(key, value) { state.crossType[key] = value; delete state.deletedKeys.crossType[key]; }
   function clearCrossType(key) { delete state.crossType[key]; state.deletedKeys.crossType[key] = true; }
@@ -3993,6 +4021,26 @@
       lastRescheduleUndo = null;
       return true;
     }
+    // docs section 9/10 -- "split one session into two compatible
+    // sessions" / "combine compatible sessions". Re-validates with the
+    // same deterministic function the server already checked, exactly
+    // like applyRescheduleDays does. 'split' assigns a stable session id
+    // once, at creation time, so later logging/skipping that specific
+    // session survives future renders correctly.
+    function applyUpdateSessions(key, operation, addSession) {
+      if (state.lastModified !== scheduleRevisionAtRender) return false;
+      var result = CoachingRulesDomain.validateUpdateSessions
+        ? CoachingRulesDomain.validateUpdateSessions(weekDaysForValidation, { key: key, operation: operation, addSession: addSession }, { units: state.units })
+        : { ok: false };
+      if (!result.ok) return false;
+      if (operation === 'split') {
+        setChatSession(key, Object.assign({ id: 'sess_chat_' + key + '_' + Date.now(), role: 'secondary', source: 'chat' }, result.addedSession));
+      } else {
+        clearChatSession(key);
+      }
+      saveState(state);
+      return true;
+    }
     function applyLogUnplanned(key, note) {
       setLog(key, { notes: note || null });
     }
@@ -4060,6 +4108,27 @@
         // visible part of the one confirmation -- never a separate prompt.
         var scopeNote = action.scope === 'recurring' ? ' (every week going forward)' : '';
         return { text: summary.charAt(0).toUpperCase() + summary.slice(1) + scopeNote + '?', confirmable: true };
+      }
+      if (action.type === 'update_sessions') {
+        var usPreview = CoachingRulesDomain.validateUpdateSessions
+          ? CoachingRulesDomain.validateUpdateSessions(weekDaysForValidation, { key: action.key, operation: action.operation, addSession: action.addSession }, { units: state.units })
+          : { ok: false, reason: 'invalid_workout' };
+        if (!usPreview.ok) {
+          var usReasonText = {
+            race_day_protected: "That would touch race day, which never changes here.",
+            unknown_key: "That refers to a day that isn't on your schedule -- ask your coach again.",
+            invalid_operation: "That's not something I can do to a single day -- ask your coach again.",
+            invalid_workout: "I don't have enough to add that session -- ask your coach for the activity and roughly how long."
+          }[usPreview.reason] || "That isn't valid right now -- ask your coach again.";
+          return { text: usReasonText, confirmable: false };
+        }
+        var usDow = DOW_FULL[day.date.getDay()];
+        if (action.operation === 'combine') {
+          return { text: 'Combine ' + usDow + ' back into one session?', confirmable: true };
+        }
+        var doubleHardNote = usPreview.accidentalDoubleHard
+          ? ' Heads up -- ' + usDow + ' already has a hard session, so this stacks two demanding efforts the same day.' : '';
+        return { text: 'Add ' + escapeHtml(usPreview.addedSession.label) + ' to ' + usDow + ' alongside what\'s already planned?' + doubleHardNote, confirmable: true };
       }
       if (action.type === 'mark_rest') {
         return { text: 'Mark ' + DOW_FULL[day.date.getDay()] + ' as rest' + (action.note ? ' — ' + escapeHtml(action.note) : '') + '?', confirmable: true };
@@ -4163,6 +4232,7 @@
         else if (turn.action.type === 'reduce_intensity') ok = applyReduceIntensity(turn.action.key, turn.action.factor);
         else if (turn.action.type === 'substitute_side_quest') ok = applySideQuestChat(turn.action.key, turn.action.sideQuestId);
         else if (turn.action.type === 'reschedule_days') ok = applyRescheduleDays(turn.action.changes, turn.action.scope);
+        else if (turn.action.type === 'update_sessions') ok = applyUpdateSessions(turn.action.key, turn.action.operation, turn.action.addSession);
         turn.resolved = ok ? 'confirmed' : 'failed';
         if (ok && turn.action.type === 'reschedule_days' && lastRescheduleUndo) {
           lastRescheduleUndo.turnIdx = parseInt(btn.getAttribute('data-confirm-idx'), 10);
@@ -5673,7 +5743,10 @@
     var raceDate = parseDate(state.raceGoal.raceDate);
     var planLengthWeeks = state.planMeta.planLengthWeeks;
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
+    var sessionKey = weekNum + '-' + dayIdx;
     var dayData = result.weeks[weekNum - 1].days[dayIdx];
+    var chatExtra = state.chatSessions && state.chatSessions[sessionKey];
+    if (chatExtra && chatExtra.length) dayData = Object.assign({}, dayData, { sessions: (dayData.sessions || []).concat(chatExtra) });
     var sess = (dayData.sessions || []).filter(function (s) { return s.id === sessionId; })[0];
     var d = dateForSlot(raceDate, planLengthWeeks, weekNum, dayIdx);
     if (!sess) { renderMain(); return; } // plan changed under us (e.g. a schedule choice was just made) -- nothing stale to show

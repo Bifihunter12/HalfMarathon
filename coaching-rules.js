@@ -2542,6 +2542,55 @@
     return { ok: true, resultingWeek: resultingWeek };
   }
 
+  // ── Multiple sessions per day via chat (task 9/10: "split one session
+  // into two compatible sessions" / "combine compatible sessions") ────────
+  // A single day, one operation, applied to `state.chatSessions[key]` by
+  // the caller (app.js) -- NOT a change to the day's own primary
+  // type/label the way reschedule_days is. 'split' deterministically
+  // classifies the added session the exact same way a planned-activity
+  // reschedule_days change does (buildPlannedActivityWorkout -- the AI's
+  // own label/duration for it is never trusted); 'combine' just removes
+  // whatever chat-added session(s) already exist for that day. Never
+  // touches a recurring-workout-driven secondary session (out of scope --
+  // that's an existing commitment, not something this chat action owns).
+  function validateUpdateSessions(weekDays, change, options) {
+    options = options || {};
+    if (!change || change.key == null || (change.operation !== 'split' && change.operation !== 'combine')) {
+      return { ok: false, reason: 'invalid_operation' };
+    }
+    var byKey = {};
+    (weekDays || []).forEach(function (d) { if (d && d.key != null) byKey[d.key] = d; });
+    var currentDay = byKey[change.key];
+    if (!currentDay) return { ok: false, reason: 'unknown_key' };
+    if (isRaceDay(currentDay)) return { ok: false, reason: 'race_day_protected' };
+
+    if (change.operation === 'combine') return { ok: true };
+
+    var addSession = change.addSession;
+    if (!addSession || typeof addSession !== 'object' || typeof addSession.activityType !== 'string' || !RECURRING_ACTIVITY_LABEL[addSession.activityType]) {
+      return { ok: false, reason: 'invalid_workout' };
+    }
+    if (addSession.terrainDifficulty != null && VALID_TERRAIN_DIFFICULTY.indexOf(addSession.terrainDifficulty) === -1) {
+      return { ok: false, reason: 'invalid_workout' };
+    }
+    var built = buildPlannedActivityWorkout(addSession.activityType, addSession.durationMinutes, addSession.terrainDifficulty, options.units);
+    // Two-a-day compatibility (task 9.2): warn on an accidental double-hard
+    // pairing, never silently block it -- "not every two-a-day is unsafe."
+    // The day's own load is inferred from its type via the same
+    // classification the generated primary-session builder already uses,
+    // since weekDays here only ever carries {key, type, label}.
+    var existingLoad = (RUN_SESSION_META[currentDay.type] && RUN_SESSION_META[currentDay.type].loadClass) || (currentDay.type === 'cross' ? 'low' : 'none');
+    var accidentalDoubleHard = existingLoad === 'high' && built.loadClass === 'high';
+    return {
+      ok: true, accidentalDoubleHard: accidentalDoubleHard,
+      addedSession: {
+        type: 'cross', label: built.label, durationMinutes: built.durationMinutes, plannedDistance: null,
+        activityType: addSession.activityType, terrainDifficulty: addSession.terrainDifficulty || null,
+        purpose: built.purpose, loadClass: built.loadClass
+      }
+    };
+  }
+
   return {
     LEVELS: LEVELS,
     EVENT_TABLE: EVENT_TABLE,
@@ -2624,6 +2673,7 @@
     normalizeKnownWorkoutPhrase: normalizeKnownWorkoutPhrase,
     buildPlannedActivityWorkout: buildPlannedActivityWorkout,
     weeklyJobPriorityBrief: weeklyJobPriorityBrief,
+    validateUpdateSessions: validateUpdateSessions,
     validateRescheduleDays: validateRescheduleDays
   };
 });

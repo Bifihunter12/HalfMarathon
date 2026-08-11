@@ -177,6 +177,10 @@
     // a coach-negotiated trade made on one device would either vanish or
     // (worse) resurrect after syncing from a stale device that never saw it.
     var workoutOverridesMerged = mergeMapT(local.workoutOverrides, remote.workoutOverrides, localDK.workoutOverrides, remoteDK.workoutOverrides);
+    // Chat-added secondary sessions (app.js setChatSession/clearChatSession,
+    // "split"/"combine") -- same dict/day-key shape and tombstone reasoning
+    // as workoutOverrides immediately above.
+    var chatSessionsMerged = mergeMapT(local.chatSessions, remote.chatSessions, localDK.chatSessions, remoteDK.chatSessions);
     var crossTypeMerged = mergeMapT(local.crossType, remote.crossType, localDK.crossType, remoteDK.crossType);
     var sessionLogsMerged = mergeMapT(local.sessionLogs, remote.sessionLogs, localDK.sessionLogs, remoteDK.sessionLogs);
     var sessionOverridesMerged = mergeMapT(local.sessionOverrides, remote.sessionOverrides, localDK.sessionOverrides, remoteDK.sessionOverrides);
@@ -231,6 +235,7 @@
       logs: logsMerged.value,
       overrides: overridesMerged.value,
       workoutOverrides: workoutOverridesMerged.value,
+      chatSessions: chatSessionsMerged.value,
       crossType: crossTypeMerged.value,
       // docs/COACHING_SPEC.md "Session-level architecture" -- a secondary
       // same-day session's log/override, keyed by its own stable session id
@@ -258,6 +263,7 @@
         logs: logsMerged.deleted,
         overrides: overridesMerged.deleted,
         workoutOverrides: workoutOverridesMerged.deleted,
+        chatSessions: chatSessionsMerged.deleted,
         crossType: crossTypeMerged.deleted,
         sessionLogs: sessionLogsMerged.deleted,
         sessionOverrides: sessionOverridesMerged.deleted,
