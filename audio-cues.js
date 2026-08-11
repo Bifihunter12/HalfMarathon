@@ -299,6 +299,7 @@
     segment_start: [80],
     warning_10s: [40, 40, 40],
     halfway: [60],
+    final_third: [60, 60],
     final_interval: [60, 40, 60],
     paused: [30],
     resumed: [30, 30, 30],

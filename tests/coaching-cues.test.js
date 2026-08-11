@@ -418,6 +418,22 @@ test('completion_full: the interval-count note is preserved across every rotated
   assert.match(result.text, /You completed all 6 running intervals\.$/);
 });
 
+test('final_third: selected on a final_third trigger event, once per workout', function () {
+  const cue = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'final_third', cueHistory: SAFETY_ALREADY_DELIVERED }));
+  assert.ok(cue);
+  assert.equal(cue.cueId, 'progress_final_third');
+  assert.equal(cue.category, 'progress');
+
+  const alreadyDelivered = SAFETY_ALREADY_DELIVERED.concat([{ cueId: 'progress_final_third', category: 'progress', deliveredAt: 1 }]);
+  const second = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'final_third', cueHistory: alreadyDelivered }));
+  assert.ok(!second || second.cueId !== 'progress_final_third', 'final_third must not fire twice in the same workout');
+});
+
+test('final_third: never selected outside a final_third trigger event (event-gated, like halfway)', function () {
+  const cue = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'segment_start', segment: { kind: 'work', intervalNumber: 1, totalIntervals: 1 }, cueHistory: SAFETY_ALREADY_DELIVERED }));
+  assert.ok(!cue || cue.cueId !== 'progress_final_third');
+});
+
 test('progress_halfway: rotates through multiple real variants, not a single fixed sentence', function () {
   const cue = CoachingCues.CUE_CATALOG.filter(function (c) { return c.id === 'progress_halfway'; })[0];
   assert.ok(cue.textVariants.length >= 3, 'the most-heard progress cue should have real variety to rotate through');

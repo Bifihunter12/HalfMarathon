@@ -322,12 +322,22 @@
         pushCue(seg.index, 'warning_10s', 'Ten seconds');
       }
       if (normalized.totalPrescribedSec != null) {
-        var halfwayMs = normalized.totalPrescribedSec * 500;
         var activeMs = elapsedActiveMs();
+        var halfwayMs = normalized.totalPrescribedSec * 500;
         var halfwayKey = cueKey(-1, 'workout_halfway');
         if (!s.playedCues[halfwayKey] && activeMs >= halfwayMs) {
           if (activeMs - halfwayMs <= 15000) pushCue(-1, 'halfway', 'Workout halfway', 'workout_halfway');
           else s.playedCues[halfwayKey] = true;
+        }
+        // docs section 15.3 -- "final third" milestone, same real-elapsed-
+        // time/grace-window/never-replayed-late pattern as halfway above,
+        // just at 2/3 instead of 1/2. A separate trigger event/dedup key so
+        // it can never collide with or double-fire alongside halfway.
+        var finalThirdMs = normalized.totalPrescribedSec * 1000 * (2 / 3);
+        var finalThirdKey = cueKey(-1, 'workout_final_third');
+        if (!s.playedCues[finalThirdKey] && activeMs >= finalThirdMs) {
+          if (activeMs - finalThirdMs <= 15000) pushCue(-1, 'final_third', 'Workout final third', 'workout_final_third');
+          else s.playedCues[finalThirdKey] = true;
         }
       }
     }

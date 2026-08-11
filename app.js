@@ -4598,7 +4598,7 @@
   // opportunity to offer optional coaching. At most one processCoachingTick
   // call (and therefore at most one spoken cue) per tick, matching "never
   // speak two full cues simultaneously."
-  var TRIGGER_EVENT_PRIORITY = ['complete', 'paused', 'resumed', 'final_interval', 'segment_start', 'warning_10s', 'halfway'];
+  var TRIGGER_EVENT_PRIORITY = ['complete', 'paused', 'resumed', 'final_interval', 'segment_start', 'warning_10s', 'halfway', 'final_third'];
   function playDueCues(dayData, normalized, workoutType, terrainHint) {
     if (!_activeMachine) return;
     var drained = _activeMachine.drainCues();

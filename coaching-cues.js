@@ -339,6 +339,7 @@
     // ── Progress (priority 5) ──
     {
       id: 'progress_halfway', category: 'progress', applicableWorkoutTypes: null, applicableSegmentTypes: null,
+      triggerEvents: ['halfway'],
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
       // docs section 15.2 -- "one cue is better than five instructions" but
@@ -352,6 +353,17 @@
         'You\'re halfway. Stay relaxed — this should still feel sustainable.',
         'Halfway there. Keep building, nice and controlled.',
         'That\'s the halfway point. You\'re doing exactly what today asks for.'
+      ]
+    },
+    {
+      id: 'progress_final_third', category: 'progress', applicableWorkoutTypes: null, applicableSegmentTypes: null,
+      triggerEvents: ['final_third'],
+      experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
+      textVariants: [
+        'You\'re into the final third. Stay smooth and finish this the way you started.',
+        'Final stretch now. Keep the effort honest, not heroic.',
+        'You\'re in the closing third — hold the same effort, don\'t chase the finish.'
       ]
     },
 
@@ -543,6 +555,7 @@
     final_interval: ['transition'], // folds into the transition cue's text via context.isFinalInterval, not a separate cue
     warning_10s: ['transition_warning'],
     halfway: ['progress'],
+    final_third: ['progress'],
     paused: ['transition'],
     resumed: ['transition'],
     complete: ['completion']

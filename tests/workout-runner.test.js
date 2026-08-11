@@ -260,6 +260,23 @@ test('halfway means halfway through the whole prescribed workout, not halfway th
   assert.equal(halfwayCues.length, 1, 'halfway cue must be deduped across repeated reconcile calls');
 });
 
+test('final_third fires exactly once at 2/3 of the whole prescribed workout, independent of and never confused with halfway', function () {
+  // structuredWorkout() totals 240s active -- final third starts at 160s.
+  var clock = fakeClock();
+  var m = Runner.createRunnerStateMachine(structuredWorkout(), { now: clock.now });
+  m.start();
+  clock.advance(121000); // just past halfway (120s), nowhere near final third (160s)
+  for (var i = 0; i < 5; i++) m.reconcile();
+  var cuesAtHalfway = m.drainCues();
+  assert.ok(cuesAtHalfway.some(function (c) { return c.type === 'halfway'; }));
+  assert.ok(!cuesAtHalfway.some(function (c) { return c.type === 'final_third'; }), 'final_third must not fire early alongside halfway');
+
+  clock.advance(40000); // now 161s active -- just past the final-third threshold
+  for (var j = 0; j < 10; j++) m.reconcile();
+  var finalThirdCues = m.drainCues().filter(function (c) { return c.type === 'final_third'; });
+  assert.equal(finalThirdCues.length, 1, 'final_third cue must be deduped across repeated reconcile calls');
+});
+
 test('pause and resume expose stable event types (never the dedup-only timestamp suffix) while remaining repeatable', function () {
   var clock = fakeClock();
   var m = Runner.createRunnerStateMachine(structuredWorkout(), { now: clock.now, workoutId: 'w' });
