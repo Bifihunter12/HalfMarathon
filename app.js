@@ -3856,6 +3856,15 @@
       });
     });
 
+    // docs section 12/20 -- "a stale pending proposal cannot apply to a
+    // newer plan revision." Captured once per render of this screen; if
+    // state changes underneath it before the runner taps Confirm (e.g. a
+    // cloud-sync pull completing while the chat is still open), applying
+    // the trade is refused rather than silently overwriting whatever
+    // changed. Every other mutation on this screen already re-renders
+    // (recomputing this fresh), so this only ever trips for a change that
+    // happened OUTSIDE this screen's own actions.
+    var scheduleRevisionAtRender = state.lastModified;
     var daysByKey = {};
     var daysPayload = [];
     var weekDaysForValidation = []; // {key, type, label} across the visible window -- validateRescheduleDays' own input shape
@@ -3915,6 +3924,9 @@
     // the time the runner actually taps Confirm (the schedule could have
     // changed underneath it). Applies every change or none; saves once.
     function applyRescheduleDays(changes, scope) {
+      // Refuse a stale proposal outright rather than risk overwriting a
+      // change that happened elsewhere since this screen was rendered.
+      if (state.lastModified !== scheduleRevisionAtRender) return false;
       var result = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, changes, { units: state.units }) : { ok: false };
       if (!result.ok) return false;
       // Snapshot every key this trade is about to touch, BEFORE any change
