@@ -383,3 +383,43 @@ test('a completely empty/default context does not throw and returns null or a va
   const result = CoachingCues.selectCoachingCue(CoachingContext.buildCoachingContext({}));
   assert.ok(result === null || (result && typeof result.text === 'string'));
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Anti-repetition variety for the highest-frequency motivational cues
+// (docs section 15.2: "vary wording naturally" / "do not repeat the same
+// phrase until it becomes annoying") -- completion_full fires at the end of
+// literally every workout, so it's the single most-repeated line in the
+// app if it never varies.
+// ═══════════════════════════════════════════════════════════════════════
+
+test('completion_full: rotates through genuinely different openers across workouts instead of always saying the identical sentence', function () {
+  // Each call simulates a DIFFERENT workout (distinct workoutId) -- within
+  // the same workout, maxPerWorkout:1 correctly limits completion_full to
+  // once; the rotation this test checks is ACROSS separate workouts, which
+  // is what fullCueHistory (used inside the cue's own buildText, not
+  // subject to per-workout scoping) rotates on.
+  function safetyDeliveredFor(workoutId) { return SAFETY_ALREADY_DELIVERED.map(function (h) { return Object.assign({}, h, { workoutId: workoutId }); }); }
+
+  const first = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', workoutId: 'w1', cueHistory: safetyDeliveredFor('w1') }));
+  assert.equal(first.text, 'Mission complete.');
+
+  const priorCompletions = [{ cueId: 'completion_full', category: 'completion', deliveredAt: 1, workoutId: 'w1' }];
+  const second = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', workoutId: 'w2', cueHistory: safetyDeliveredFor('w2').concat(priorCompletions) }));
+  assert.notEqual(second.text, first.text, 'the second workout\'s completion line must differ from the first');
+
+  const twoPrior = priorCompletions.concat([{ cueId: 'completion_full', category: 'completion', deliveredAt: 2, workoutId: 'w2' }]);
+  const third = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', workoutId: 'w3', cueHistory: safetyDeliveredFor('w3').concat(twoPrior) }));
+  assert.notEqual(third.text, first.text);
+  assert.notEqual(third.text, second.text);
+});
+
+test('completion_full: the interval-count note is preserved across every rotated variant', function () {
+  const result = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', cueHistory: SAFETY_ALREADY_DELIVERED, completedIntervalCount: 6 }));
+  assert.match(result.text, /You completed all 6 running intervals\.$/);
+});
+
+test('progress_halfway: rotates through multiple real variants, not a single fixed sentence', function () {
+  const cue = CoachingCues.CUE_CATALOG.filter(function (c) { return c.id === 'progress_halfway'; })[0];
+  assert.ok(cue.textVariants.length >= 3, 'the most-heard progress cue should have real variety to rotate through');
+  assert.equal(new Set(cue.textVariants).size, cue.textVariants.length, 'no duplicate variants');
+});

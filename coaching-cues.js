@@ -341,7 +341,18 @@
       id: 'progress_halfway', category: 'progress', applicableWorkoutTypes: null, applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      textVariants: ['You\'re halfway. Stay relaxed — this should still feel sustainable.']
+      // docs section 15.2 -- "one cue is better than five instructions" but
+      // also "vary wording naturally": this fires on essentially every
+      // workout with a real duration, so a single fixed sentence would be
+      // the single most-repeated line in the whole app. pickVariant already
+      // rotates deterministically by how many times this exact cueId
+      // appears in the runner's full cue history -- these three just give
+      // it real variety to rotate through.
+      textVariants: [
+        'You\'re halfway. Stay relaxed — this should still feel sustainable.',
+        'Halfway there. Keep building, nice and controlled.',
+        'That\'s the halfway point. You\'re doing exactly what today asks for.'
+      ]
     },
 
     // ── Completion (once, terminal) ──
@@ -349,9 +360,19 @@
       id: 'completion_full', category: 'completion', applicableWorkoutTypes: null, applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
+      // buildText bypasses pickVariant's automatic rotation entirely (see
+      // resolveText), so this cue -- heard at the end of literally every
+      // workout -- picks its own opener the same deterministic way
+      // pickVariant does (rotate by how many times this exact cueId
+      // already appears in the runner's full history), so "Mission
+      // complete." isn't the identical sentence hundreds of workouts in a
+      // row (docs 15.2's own explicit anti-repetition requirement).
       buildText: function (ctx) {
+        var openers = ['Mission complete.', 'Workout complete. You showed up and did the work.', 'That\'s a wrap — nice work out there.'];
+        var timesUsed = (ctx.fullCueHistory || []).filter(function (h) { return h.cueId === 'completion_full'; }).length;
+        var opener = openers[timesUsed % openers.length];
         var intervalNote = ctx.completedIntervalCount ? ' You completed all ' + ctx.completedIntervalCount + ' running intervals.' : '';
-        return 'Mission complete.' + intervalNote;
+        return opener + intervalNote;
       }
     },
 
@@ -498,7 +519,11 @@
       id: 'encourage_beginner_permission', category: 'encouragement', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery', 'manual_rep'],
       experienceLevels: ['beginner'], minimumSegmentDurationSec: 30, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      textVariants: ['Controlled effort like this is successful training.']
+      textVariants: [
+        'Controlled effort like this is successful training.',
+        'This is exactly what building a running habit looks like.',
+        'Walking here is the plan working, not you falling behind it.'
+      ]
     }
   ];
 
