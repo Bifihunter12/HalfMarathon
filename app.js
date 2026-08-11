@@ -895,6 +895,18 @@
     // effectiveWorkoutForDay below, additive to whatever the generated day
     // already carries.
     if (!s.chatSessions) s.chatSessions = {};
+    // docs section 13.3 -- "Require confirmation for multi-day changes
+    // unless the user explicitly enabled a narrowly defined safe
+    // auto-adjust mode." applyMissedAdjustment/applyDifficultyAdjustment
+    // (coaching-rules.js) are pure functions recomputed fresh on every
+    // render from real logged data -- there is no separate "unadjusted"
+    // snapshot to preview/revert to once applied, so this is a visible,
+    // must-acknowledge surface rather than a block-until-approved modal
+    // (see docs/AI_COACH_V2_SPEC.md for the full design tradeoff). Default
+    // 'confirm' matches the doc's own stated default; 'auto' (Settings
+    // opt-in) restores the original always-silent behavior.
+    if (!s.autoAdjustMode) s.autoAdjustMode = 'confirm'; // 'confirm' | 'auto'
+    if (!s.acknowledgedAdjustmentNotes) s.acknowledgedAdjustmentNotes = [];
     // Typed schedule overrides (coach-negotiated day trades -- "I want to do
     // 12-3-30 today instead of resting"). Distinct from the legacy
     // state.overrides label-only string above: a typed entry replaces the
@@ -3470,7 +3482,15 @@
     if (state.planMeta.warnings && state.planMeta.warnings.length) {
       warningsHtml += state.planMeta.warnings.map(function (w) { return '<div class="warn-banner"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(w) + '</span></div>'; }).join('');
     }
-    if (result.note) {
+    // docs section 13.3 -- an automatic weekly adjustment (coaching-rules.js
+    // applyMissedAdjustment/applyDifficultyAdjustment) must be explicitly
+    // acknowledged before it folds into the ordinary passive info banner,
+    // unless autoAdjustMode is 'auto' (Settings opt-in, restores the
+    // original always-silent behavior). Once acknowledged, it reads
+    // identically to how this banner always worked -- the gate is one-time,
+    // not a permanent extra step every render.
+    var adjustmentNeedsAck = !!result.note && state.autoAdjustMode !== 'auto' && state.acknowledgedAdjustmentNotes.indexOf(result.note) === -1;
+    if (result.note && !adjustmentNeedsAck) {
       warningsHtml += '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>' + escapeHtml(result.note) + '</span></div>';
     }
 
@@ -3514,6 +3534,23 @@
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
     wireHeaderIcons();
+
+    if (adjustmentNeedsAck) {
+      var adjustCard = el(
+        '<div class="today-card">' +
+          '<div class="today-eyebrow">PLAN ADJUSTED</div>' +
+          '<p class="progress-insight">' + escapeHtml(result.note) + '</p>' +
+          '<button type="button" class="ob-btn" id="adjustAckBtn" style="margin-top:10px">Got it</button>' +
+        '</div>'
+      );
+      app.appendChild(adjustCard);
+      document.getElementById('adjustAckBtn').addEventListener('click', function () {
+        state.acknowledgedAdjustmentNotes.push(result.note);
+        if (state.acknowledgedAdjustmentNotes.length > 20) state.acknowledgedAdjustmentNotes = state.acknowledgedAdjustmentNotes.slice(-20);
+        saveState(state);
+        renderMain();
+      });
+    }
 
     // docs/COACHING_SPEC.md "Goal decision checkpoints" -- shown once the
     // checkpoint date passes, until the runner explicitly confirms either
@@ -6093,6 +6130,9 @@
         '<div class="chip-grid" id="set_coachTechnique">' + chipsHtml('coachTechnique', ['on', 'off'], { on: 'On', off: 'Off' }, state.coachingPreferences.technique ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:14px">Encouragement</div>' +
         '<div class="chip-grid" id="set_coachEncouragement">' + chipsHtml('coachEncouragement', ['on', 'off'], { on: 'On', off: 'Off' }, state.coachingPreferences.encouragement ? 'on' : 'off', false) + '</div>' +
+        '<div class="ob-label" style="margin-top:14px">Automatic weekly adjustments</div>' +
+        '<p class="recap-empty">When a missed week or an easy-run RPE trend changes your upcoming volume, ask before it applies -- or apply it automatically and just show a note.</p>' +
+        '<div class="chip-grid" id="set_autoAdjustMode">' + chipsHtml('autoAdjustMode', ['confirm', 'auto'], { confirm: 'Ask', auto: 'Auto' }, state.autoAdjustMode, false) + '</div>' +
         '<div class="ob-label" style="margin-top:14px">Audio cues</div>' +
         '<div class="chip-grid" id="set_workoutAudio">' + chipsHtml('workoutAudioEnabled', ['on', 'off'], { on: 'On', off: 'Off' }, state.workoutAudio.enabled ? 'on' : 'off', false) + '</div>' +
         '<div class="ob-label" style="margin-top:14px">Coach voice</div>' +
@@ -6180,6 +6220,15 @@
         saveState(state);
         wrap.querySelectorAll('#set_coachEncouragement .chip').forEach(function (c) {
           c.classList.toggle('selected', c.getAttribute('data-value') === (state.coachingPreferences.encouragement ? 'on' : 'off')); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === (state.coachingPreferences.encouragement ? 'on' : 'off'))));
+        });
+      });
+    });
+    wrap.querySelectorAll('#set_autoAdjustMode .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        state.autoAdjustMode = chip.getAttribute('data-value');
+        saveState(state);
+        wrap.querySelectorAll('#set_autoAdjustMode .chip').forEach(function (c) {
+          c.classList.toggle('selected', c.getAttribute('data-value') === state.autoAdjustMode); c.setAttribute('aria-pressed', String(!!(c.getAttribute('data-value') === state.autoAdjustMode)));
         });
       });
     });
