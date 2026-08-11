@@ -2024,6 +2024,14 @@
   // explicitly cancelled, or its sourceKey no longer exists in the current
   // schedule (see renderCoachChatScreen).
   var coachPendingIntent = null;
+  // One-step undo for the most recently confirmed reschedule_days trade
+  // (docs section 10.3: "store the pre-change snapshot... undo must
+  // restore the whole revision... must not delete logs created after the
+  // revision"). Single-level and in-memory/session-scoped only -- a fresh
+  // page load has nothing to undo, matching how coachHistory itself is
+  // already in-memory-only. { turnIdx, prevOverrides: {key: prevValue|null},
+  // addedRecurringWorkoutIds: [id, ...] } or null.
+  var lastRescheduleUndo = null;
 
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
@@ -3904,6 +3912,13 @@
     function applyRescheduleDays(changes, scope) {
       var result = CoachingRulesDomain.validateRescheduleDays ? CoachingRulesDomain.validateRescheduleDays(weekDaysForValidation, changes, { units: state.units }) : { ok: false };
       if (!result.ok) return false;
+      // Snapshot every key this trade is about to touch, BEFORE any change
+      // is applied, so a later Undo can restore each one exactly (docs
+      // 10.3). Logs are never part of workoutOverrides, so nothing here can
+      // ever touch/erase a log created after this revision.
+      var prevOverrides = {};
+      changes.forEach(function (c) { prevOverrides[c.key] = state.workoutOverrides[c.key] ? Object.assign({}, state.workoutOverrides[c.key]) : null; });
+      var addedRecurringWorkoutIds = [];
       changes.forEach(function (c) {
         setWorkoutOverride(c.key, {
           type: c.workout.type, label: c.workout.label, durationMinutes: c.workout.durationMinutes, plannedDistance: c.workout.plannedDistance,
@@ -3926,17 +3941,39 @@
           // the generator picks each week, which is never what "every
           // Saturday" means -- found live: without this, a Tuesday hike
           // request landed on a different day the very next week.
+          var newId = 'rw_' + Date.now() + '_' + Math.round(Math.random() * 1e6);
           addRecurringWorkout({
-            id: 'rw_' + Date.now() + '_' + Math.round(Math.random() * 1e6),
+            id: newId,
             activityType: c.workout.activityType, customName: null, day: weekdayMon0,
             durationMinutes: c.workout.durationMinutes, intensity: c.workout.terrainDifficulty === 'hard' ? 'high' : c.workout.terrainDifficulty === 'moderate' ? 'moderate' : 'low',
             fixed: true, recurrence: 'weekly', replaces: 'none', environment: null, timeWindow: null,
             terrainDifficulty: c.workout.terrainDifficulty || 'easy', elevationGainFt: 0
           });
+          addedRecurringWorkoutIds.push(newId);
         }
       });
       saveState(state);
       coachPendingIntent = null;
+      lastRescheduleUndo = { turnIdx: null, prevOverrides: prevOverrides, addedRecurringWorkoutIds: addedRecurringWorkoutIds };
+      return true;
+    }
+    // Restores exactly the pre-trade state captured by applyRescheduleDays
+    // above -- every touched key's typed override (or its absence) and any
+    // recurring-workout record this trade created. Never touches state.logs,
+    // so a log entered after the revision is never erased (docs 10.3).
+    function undoLastReschedule() {
+      if (!lastRescheduleUndo) return false;
+      var snapshot = lastRescheduleUndo;
+      Object.keys(snapshot.prevOverrides).forEach(function (key) {
+        var prev = snapshot.prevOverrides[key];
+        if (prev) setWorkoutOverride(key, prev); else clearWorkoutOverride(key);
+      });
+      (snapshot.addedRecurringWorkoutIds || []).forEach(function (id) {
+        var idx = state.recurringWorkouts.findIndex(function (w) { return w.id === id; });
+        if (idx !== -1) removeRecurringWorkoutAt(idx);
+      });
+      saveState(state);
+      lastRescheduleUndo = null;
       return true;
     }
     function applyLogUnplanned(key, note) {
@@ -4064,7 +4101,13 @@
         // 'failed' (validation rejected it at the moment of confirming --
         // e.g. the schedule changed underneath a stale proposal) must never
         // read as "Done" or as a plain user-initiated "Cancelled".
-        actionHtml = '<div class="coach-action-status">' + (turn.resolved === 'confirmed' ? '✓ Done' : (turn.resolved === 'failed' ? "Couldn't apply that -- the schedule may have changed. Ask your coach again." : 'Cancelled')) + '</div>';
+        var doneText = turn.resolved === 'confirmed' ? '✓ Done' : (turn.resolved === 'failed' ? "Couldn't apply that -- the schedule may have changed. Ask your coach again." : (turn.resolved === 'undone' ? 'Undone' : 'Cancelled'));
+        // One-step undo, offered only right after confirming, and only for
+        // the single most recent reschedule_days revision (docs 10.3/19.3:
+        // "offer one-step undo" -- never a deeper history than that).
+        var undoBtn = (turn.resolved === 'confirmed' && lastRescheduleUndo && lastRescheduleUndo.turnIdx === idx)
+          ? '<button type="button" class="ob-cancel" data-undo-idx="' + idx + '" style="margin-top:6px">Undo</button>' : '';
+        actionHtml = '<div class="coach-action-status">' + doneText + '</div>' + undoBtn;
       }
       var redFlagHtml = (turn.redFlags && turn.redFlags.length) || turn.riskLevel === 'red'
         ? '<div class="coach-redflag">⚠ Please stop training and see a doctor' + (turn.redFlags && turn.redFlags.length ? ' — mentioned: ' + turn.redFlags.map(escapeHtml).join(', ') : '') + '. This isn’t something a training app should manage.</div>'
@@ -4104,6 +4147,9 @@
         else if (turn.action.type === 'substitute_side_quest') ok = applySideQuestChat(turn.action.key, turn.action.sideQuestId);
         else if (turn.action.type === 'reschedule_days') ok = applyRescheduleDays(turn.action.changes, turn.action.scope);
         turn.resolved = ok ? 'confirmed' : 'failed';
+        if (ok && turn.action.type === 'reschedule_days' && lastRescheduleUndo) {
+          lastRescheduleUndo.turnIdx = parseInt(btn.getAttribute('data-confirm-idx'), 10);
+        }
         renderCoachChatScreen();
       });
     });
@@ -4115,6 +4161,13 @@
         // context lying around for an unrelated future message to
         // accidentally resolve against -- neither day is changed either way.
         coachPendingIntent = null;
+        renderCoachChatScreen();
+      });
+    });
+    wrap.querySelectorAll('[data-undo-idx]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.getAttribute('data-undo-idx'), 10);
+        if (undoLastReschedule()) coachHistory[idx].resolved = 'undone';
         renderCoachChatScreen();
       });
     });
