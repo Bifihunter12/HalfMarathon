@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.10.2';
+  var APP_VERSION = '2026.08.11.1';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -907,6 +907,9 @@
     // opt-in) restores the original always-silent behavior.
     if (!s.autoAdjustMode) s.autoAdjustMode = 'confirm'; // 'confirm' | 'auto'
     if (!s.acknowledgedAdjustmentNotes) s.acknowledgedAdjustmentNotes = [];
+    // Same acknowledge-once gate as acknowledgedAdjustmentNotes above, applied
+    // to state.planMeta.warnings (timeline-safety / injury-status warnings).
+    if (!s.acknowledgedPlanWarnings) s.acknowledgedPlanWarnings = [];
     // Typed schedule overrides (coach-negotiated day trades -- "I want to do
     // 12-3-30 today instead of resting"). Distinct from the legacy
     // state.overrides label-only string above: a typed entry replaces the
@@ -3479,8 +3482,19 @@
     // injury-status warning (docs/COACHING_SPEC.md "Runner classification")
     // shares this same array and isn't about timeline safety, so it never
     // rendered under the old condition. Show whatever's actually in the array.
-    if (state.planMeta.warnings && state.planMeta.warnings.length) {
-      warningsHtml += state.planMeta.warnings.map(function (w) { return '<div class="warn-banner"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(w) + '</span></div>'; }).join('');
+    // Each warning needs a one-time "Got it" acknowledgement (same gate as
+    // the auto-adjustment note below) before it folds into this passive
+    // banner list -- otherwise it re-shows on every render, which is the
+    // exact complaint that prompted this gate.
+    var planWarningsList = state.planMeta.warnings || [];
+    var unackedPlanWarnings = planWarningsList.filter(function (w) {
+      return state.acknowledgedPlanWarnings.indexOf(w) === -1;
+    });
+    var ackedPlanWarnings = planWarningsList.filter(function (w) {
+      return state.acknowledgedPlanWarnings.indexOf(w) !== -1;
+    });
+    if (ackedPlanWarnings.length) {
+      warningsHtml += ackedPlanWarnings.map(function (w) { return '<div class="warn-banner"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(w) + '</span></div>'; }).join('');
     }
     // docs section 13.3 -- an automatic weekly adjustment (coaching-rules.js
     // applyMissedAdjustment/applyDifficultyAdjustment) must be explicitly
@@ -3534,6 +3548,24 @@
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
     wireHeaderIcons();
+
+    unackedPlanWarnings.forEach(function (w, warnIdx) {
+      var warnBtnId = 'planWarnAckBtn' + warnIdx;
+      var warnCard = el(
+        '<div class="today-card">' +
+          '<div class="today-eyebrow">PLAN WARNING</div>' +
+          '<p class="progress-insight">' + escapeHtml(w) + '</p>' +
+          '<button type="button" class="ob-btn" id="' + warnBtnId + '" style="margin-top:10px">Got it</button>' +
+        '</div>'
+      );
+      app.appendChild(warnCard);
+      document.getElementById(warnBtnId).addEventListener('click', function () {
+        state.acknowledgedPlanWarnings.push(w);
+        if (state.acknowledgedPlanWarnings.length > 20) state.acknowledgedPlanWarnings = state.acknowledgedPlanWarnings.slice(-20);
+        saveState(state);
+        renderMain();
+      });
+    });
 
     if (adjustmentNeedsAck) {
       var adjustCard = el(
