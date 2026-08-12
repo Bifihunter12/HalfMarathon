@@ -24,7 +24,7 @@ function sampleWeeks() {
   });
 }
 
-test('Main Quest remains the only primary quest on the Path', function () {
+test('Plan remains the only primary track in Progress', function () {
   const pathModel = pathSystem.generatePath({ mainQuestActive: true, planLengthWeeks: 12, weeks: sampleWeeks(), logs: {}, sideMissionLog: [] });
   assert.equal(pathModel.nodes.filter((n) => n.required).every((n) => n.nodeType !== 'side_mission_achievement'), true);
   assert.equal(pathModel.nodes.filter((n) => n.nodeType === 'side_mission_achievement').every((n) => n.optional), true);
@@ -38,7 +38,7 @@ test('running milestones render chronologically and race remains final required 
   assert.equal(required.at(-2).id, 'race_day');
 });
 
-test('optional Side Mission nodes do not block Main Quest progress', function () {
+test('optional Support nodes do not block Plan progress', function () {
   const logs = { '1-1': { done: true } };
   const pathModel = pathSystem.generatePath({ mainQuestActive: true, planLengthWeeks: 12, weeks: sampleWeeks(), logs, sideMissionLog: [] });
   assert.notEqual(pathModel.currentNodeId, 'first_strength_mission');
@@ -57,7 +57,7 @@ test('locked future nodes cannot be falsely completed', function () {
   assert.equal(race.progressCurrent, 0);
 });
 
-test('Side Mission completion updates the Path and earns a badge', function () {
+test('Support completion updates Progress and earns a badge', function () {
   const pathModel = pathSystem.generatePath({
     mainQuestActive: true,
     planLengthWeeks: 12,
@@ -69,7 +69,7 @@ test('Side Mission completion updates the Path and earns a badge', function () {
   assert.ok(pathModel.earnedBadges.includes('badge_core_armor'));
 });
 
-test('Main Mission completion updates the Path', function () {
+test('Plan workout completion updates Progress', function () {
   const pathModel = pathSystem.generatePath({ mainQuestActive: true, planLengthWeeks: 12, weeks: sampleWeeks(), logs: { '1-1': { done: true } }, sideMissionLog: [] });
   assert.equal(pathModel.nodes.find((n) => n.id === 'first_main_mission').status, 'completed');
   assert.ok(pathModel.earnedBadges.includes('badge_first_mile'));
@@ -89,9 +89,9 @@ test('completed badges remain after plan changes and future nodes recalculate', 
   assert.ok(preserved.earnedBadges.includes('badge_core_armor'));
 });
 
-test('Path accessibility labels are present', function () {
+test('Progress accessibility labels are present', function () {
   const pathModel = pathSystem.generatePath({ mainQuestActive: true, planLengthWeeks: 12, weeks: sampleWeeks(), logs: {}, sideMissionLog: [] });
   const label = pathSystem.accessibilityLabel(pathModel.nodes[0], 12);
-  assert.match(label, /Main Quest milestone/);
+  assert.match(label, /Plan milestone/);
   assert.match(label, /Week 1 of 12/);
 });

@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.12.3';
+  var APP_VERSION = '2026.08.12.4';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -364,7 +364,7 @@
     var domainTrack = SideQuestDomain.questTrackById && SideQuestDomain.questTrackById(trackId);
     var gate = SideQuestDomain.canStartSideQuest ? SideQuestDomain.canStartSideQuest(state, trackId) : { ok: true };
     if (!gate.ok) {
-      showToast('Finish or stop your active Mission Track before starting another track.');
+      showToast('Finish or stop your active Support Track before starting another track.');
       return false;
     }
     clearScheduledQuestTrackCalendar();
@@ -389,7 +389,7 @@
     saveState(state);
   }
   // Reuses the same sideQuestLog ledger the single-session quests use, so
-  // the Progress panel's existing "Side quests completed" count picks up
+  // the Progress panel's existing "Support completed" count picks up
   // quest-track sessions automatically -- no separate ledger to keep in sync.
   function completeQuestTrackSession(key) {
     var active = state.activeQuestTrack;
@@ -406,7 +406,7 @@
         key: null,
         date: dateToISO(new Date()),
         category: mission ? mission.category : domainTrack.category,
-        relationship: mission ? mission.relationshipLabel : 'Supports your Main Quest'
+        relationship: mission ? mission.relationshipLabel : 'Supports your Plan'
       });
       if (key && state.sideQuestCalendar[key] === missionId) clearSideQuestCalendarEntry(key);
       if (active.completedSessions >= domainTotal) {
@@ -454,7 +454,7 @@
     saveState(state);
     refreshPathProgress();
     logTelemetryEvent('side_mission_completed', mission.id);
-    showToast('Side Mission complete: ' + mission.name + '.' + (newBadge ? ' Badge earned: ' + humanizeSlug(mission.badgeId) + '.' : ''));
+    showToast('Support complete: ' + mission.name + '.' + (newBadge ? ' Badge earned: ' + humanizeSlug(mission.badgeId) + '.' : ''));
     return true;
   }
 
@@ -565,7 +565,7 @@
   // never stored separately -- it can't drift out of sync.
   var WEEKLY_CHALLENGES = [
     { id: 'weekly_strength_3', name: '3 Strength Sessions', description: 'Complete 3 strength-category sessions this week.', target: 3, matchCategories: ['strength'] },
-    { id: 'weekly_quests_5', name: '5 Side Missions This Week', description: 'Complete any 5 Side Missions this week.', target: 5, matchCategories: null },
+    { id: 'weekly_quests_5', name: '5 Support Sessions This Week', description: 'Complete any 5 support sessions this week.', target: 5, matchCategories: null },
     { id: 'weekly_hike_2', name: '2 Hikes This Week', description: 'Log 2 hikes this week.', target: 2, matchCategories: ['hike'] },
     { id: 'weekly_core_3', name: '3 Core/Mobility Sessions', description: 'Complete 3 core or mobility sessions this week.', target: 3, matchCategories: ['core', 'mobility'] }
   ];
@@ -1405,7 +1405,7 @@
   // ── Achievements (docs/COACHING_SPEC.md "Achievements") -- real,
   // verifiable running milestones, replacing the removed XP/generic-level
   // system. Two kinds: (1) one-time badges (state.badges, same award-once
-  // pattern already used for Side Mission/challenge/quest-track badges
+  // pattern already used for Support/challenge/quest-track badges
   // elsewhere in this file), and (2) recurring personal-record celebrations
   // (checkForMilestone above, plus checkForWeeklyMileageMilestone below) --
   // a new longest run or a new highest week happens again and again, so
@@ -1426,7 +1426,7 @@
     return BADGE_LABEL[id] || humanizeSlug(id);
   }
 
-  // Called right after a Main Quest day is logged (same call site
+  // Called right after a Plan day is logged (same call site
   // checkForMilestone already uses). Only ever fires each badge once --
   // state.badges already contains it on every subsequent bigger run, so a
   // new longest run later never re-triggers an earlier distance threshold.
@@ -2052,7 +2052,7 @@
       // itself, same as the other notifications above).
       var thisMonday = dateToISO(mondayOfWeek(today));
       if (varietyWeekSuggested() && log.lastVarietyWeekNotifiedWeek !== thisMonday) {
-        showAppNotification('Consider a Variety Week', "You've mentioned feeling bored of running two weeks running – check Side Missions for a change of pace.", 'variety-week');
+        showAppNotification('Consider a Variety Week', "You've mentioned feeling bored of running two weeks running - check Support for a change of pace.", 'variety-week');
         log.lastVarietyWeekNotifiedWeek = thisMonday;
         changed = true;
       }
@@ -2871,9 +2871,9 @@
   // header icon row above; Coach stays reached via the Today card button.
   function bottomTabsHtml(active) {
     var items = [
-      ['main', 'Main Quest', 'ti-flag'],
-      ['side', 'Side Missions', 'ti-trophy'],
-      ['path', 'Path', 'ti-route']
+      ['main', 'Plan', 'ti-flag'],
+      ['side', 'Support', 'ti-trophy'],
+      ['path', 'Progress', 'ti-route']
     ];
     // Already real <button> elements with visible text -- keyboard/screen-
     // reader accessible by default. aria-current names which tab is active
@@ -2937,14 +2937,14 @@
       app.innerHTML = '';
       app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
       wireHeaderIcons();
-      var titles = ['Strength experience', 'Available equipment', 'Mission duration', 'Primary interest', 'Limitations'];
+      var titles = ['Strength experience', 'Available equipment', 'Support duration', 'Primary interest', 'Limitations'];
       var body = '';
       if (step === 0) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqExperience', Object.keys(SQ_EXPERIENCE_LABEL), SQ_EXPERIENCE_LABEL, draft.strengthExperience, false) + '</div>';
       if (step === 1) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqEquipment', Object.keys(SQ_EQUIPMENT_LABEL), SQ_EQUIPMENT_LABEL, draft.equipment, true) + '</div>';
       if (step === 2) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqDuration', Object.keys(SQ_DURATION_LABEL), SQ_DURATION_LABEL, draft.preferredDuration, false) + '</div>';
       if (step === 3) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqInterest', Object.keys(SQ_INTEREST_LABEL), SQ_INTEREST_LABEL, draft.interest, false) + '</div>';
       if (step === 4) body = '<div class="chip-grid" id="sqPick">' + chipsHtml('sqLimitations', Object.keys(SQ_LIMITATION_LABEL), SQ_LIMITATION_LABEL, draft.limitations, true) + '</div>';
-      var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Missions</div><div class="ob-title">' + titles[step] + '</div><p class="intro-body">Every body can strength train. Every exercise can be scaled.</p>' + body + '<div class="step-nav">' + (step ? '<button type="button" class="ob-btn ob-btn-secondary" id="sqBack">Back</button>' : '') + '<button type="button" class="ob-btn" id="sqNext">' + (step === 4 ? 'Finish' : 'Next') + '</button></div></div>');
+      var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Support</div><div class="ob-title">' + titles[step] + '</div><p class="intro-body">Every body can strength train. Every exercise can be scaled.</p>' + body + '<div class="step-nav">' + (step ? '<button type="button" class="ob-btn ob-btn-secondary" id="sqBack">Back</button>' : '') + '<button type="button" class="ob-btn" id="sqNext">' + (step === 4 ? 'Finish' : 'Next') + '</button></div></div>');
       app.appendChild(wrap);
       wrap.querySelectorAll('.chip').forEach(function (chip) {
         chip.addEventListener('click', function () {
@@ -2995,7 +2995,7 @@
 
   // Bodyweight Challenge card -- distinct from renderMissionCard: shows
   // accumulated progress toward the challenge's current level, reusing the
-  // same .progress-track/.progress-fill pattern as the active Mission Track
+  // same .progress-track/.progress-fill pattern as the active Support Track
   // and Weekly Challenge cards above.
   function renderChallengeCard(challenge) {
     var progress = bodyweightChallengeProgress(challenge.id);
@@ -3026,9 +3026,9 @@
       var total = SideQuestDomain.questTrackTotalMissions(activeTrack);
       var weekNum = Math.min(activeTrack.durationWeeks, Math.floor(active.completedSessions / activeTrack.missionsPerWeek) + 1);
       var nextMission = missionById(activeTrack.missionIds[Math.min(active.completedSessions, activeTrack.missionIds.length - 1)]);
-      activeHtml = '<div class="quest-card active-quest-card"><div class="quest-name">' + escapeHtml(activeTrack.name) + '</div><div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.durationWeeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' missions complete</div><div class="progress-track"><div class="progress-fill" style="width:' + (total ? Math.round(100 * active.completedSessions / total) : 0) + '%"></div></div><div class="quest-desc">' + (nextMission ? 'Next: ' + escapeHtml(nextMission.name) + ' &middot; ' + durationText(nextMission) : 'Quest Complete') + '</div>' + (nextMission ? '<button type="button" class="ob-btn quest-btn" id="resumeTrackBtn">Resume</button>' : '') + '<button type="button" class="ob-cancel" id="stopQuestBtn">Stop this quest</button></div>';
+      activeHtml = '<div class="quest-card active-quest-card"><div class="quest-name">' + escapeHtml(activeTrack.name) + '</div><div class="quest-meta">Week ' + weekNum + ' of ' + activeTrack.durationWeeks + ' &middot; ' + active.completedSessions + ' of ' + total + ' sessions complete</div><div class="progress-track"><div class="progress-fill" style="width:' + (total ? Math.round(100 * active.completedSessions / total) : 0) + '%"></div></div><div class="quest-desc">' + (nextMission ? 'Next: ' + escapeHtml(nextMission.name) + ' &middot; ' + durationText(nextMission) : 'Track complete') + '</div>' + (nextMission ? '<button type="button" class="ob-btn quest-btn" id="resumeTrackBtn">Resume</button>' : '') + '<button type="button" class="ob-cancel" id="stopQuestBtn">Stop this track</button></div>';
     } else {
-      activeHtml = '<div class="quest-card"><div class="quest-name">No active Mission Track</div><div class="quest-desc">Start one progressive Side Mission track. Your Main Quest keeps scheduling priority.</div></div>';
+      activeHtml = '<div class="quest-card"><div class="quest-name">No active Support Track</div><div class="quest-desc">Start one progressive support track. Your Plan keeps scheduling priority.</div></div>';
     }
 
     // Weekly challenge (docs/Zaera_SideQuest_Spec.md §2B) -- restored here
@@ -3057,7 +3057,9 @@
     }
 
     var recommendations = SideQuestDomain.recommendMissions ? SideQuestDomain.recommendMissions({ onboarding: state.sideQuestOnboarding, feeling: currentWeekFeelingEntry() && currentWeekFeelingEntry().feeling }) : [];
-    var recommendedHtml = recommendations.map(function (m) { return renderMissionCard(m, 'Preview', 'data-mission-id'); }).join('');
+    var recommendedHtml = recommendations.length
+      ? recommendations.map(function (m) { return renderMissionCard(m, 'Preview', 'data-mission-id'); }).join('')
+      : '<p class="recap-empty">No specific support recommendation right now. Protect the Plan first.</p>';
     var tracksHtml = (SideQuestDomain.QUEST_TRACKS || []).map(function (track) {
       return '<div class="quest-card"><div class="quest-name">' + escapeHtml(track.name) + '</div><div class="quest-desc">' + escapeHtml(track.goal) + '</div><div class="quest-meta">' + track.durationWeeks + ' weeks &middot; ' + track.missionsPerWeek + 'x/week &middot; ' + track.estimatedMinutesPerMission.min + '-' + track.estimatedMinutesPerMission.max + ' min &middot; ' + escapeHtml(track.runningInterference) + ' interference</div><button type="button" class="ob-btn ob-btn-secondary quest-btn" data-start-track="' + track.id + '">Start track</button></div>';
     }).join('');
@@ -3066,9 +3068,17 @@
       return '<div class="ob-sub" style="margin-top:20px">' + escapeHtml(section.name) + '</div>' + cards;
     }).join('');
     var challengesHtml = (SideQuestDomain.CHALLENGE_CATALOG || []).map(renderChallengeCard).join('');
-    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>Side Missions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(function (b) { return escapeHtml(humanizeSlug(b)); }).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed Side Missions, badges, personal records, and lifetime totals will appear here.</p>';
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Missions</div><div class="ob-title">Side Missions</div><p class="intro-body">Your run is the Main Quest. Side Missions make the journey stronger, broader, and more enjoyable.</p><div class="ob-sub">Active Mission Track</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + '<div class="ob-sub" style="margin-top:20px">Recommended for you</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Mission Tracks</div>' + tracksHtml + '<div class="ob-sub" style="margin-top:20px">Challenges</div>' + challengesHtml + sectionsHtml + '<div class="ob-sub" style="margin-top:20px">Completed Side Missions</div>' + completedHtml + '</div>');
+    var completedHtml = state.completedQuestTracks.length || state.sideQuestLog.length ? '<dl class="wd-info"><dt>Support sessions</dt><dd>' + state.sideQuestLog.length + '</dd><dt>Badges</dt><dd>' + (state.badges.length ? state.badges.map(function (b) { return escapeHtml(humanizeSlug(b)); }).join(', ') : 'None yet') + '</dd></dl>' : '<p class="recap-empty">Completed support sessions, badges, personal records, and lifetime totals will appear here.</p>';
+    var browseHtml =
+      '<details class="support-browse">' +
+        '<summary>Browse Support</summary>' +
+        '<div class="ob-sub" style="margin-top:16px">Support Tracks</div>' + tracksHtml +
+        '<div class="ob-sub" style="margin-top:20px">Challenges</div>' + challengesHtml +
+        sectionsHtml +
+      '</details>';
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Support</div><div class="ob-title">Support Work</div><p class="intro-body">Your Plan is the priority. Support work adds strength, mobility, variety, and durability around it.</p><button type="button" class="ob-btn ob-btn-secondary" id="sideBackToMainBtn">Back to Plan</button><div class="ob-sub" style="margin-top:20px">Recommended today</div>' + recommendedHtml + '<div class="ob-sub" style="margin-top:20px">Active Support Track</div>' + activeHtml + '<div class="ob-sub" style="margin-top:20px">Weekly challenge</div>' + weeklyChallengeHtml + browseHtml + '<div class="ob-sub" style="margin-top:20px">Completed Support</div>' + completedHtml + '</div>');
     app.appendChild(wrap);
+    document.getElementById('sideBackToMainBtn').addEventListener('click', renderMain);
     var resume = document.getElementById('resumeTrackBtn');
     if (resume && activeTrack) resume.addEventListener('click', function () { renderMissionDetail(activeTrack.missionIds[Math.min(active.completedSessions, activeTrack.missionIds.length - 1)], null); });
     var stop = document.getElementById('stopQuestBtn');
@@ -3130,14 +3140,14 @@
       scheduleOptions = options.length ? '<div class="ob-sub" style="margin-top:18px">Add to Calendar</div>' + options.join('') : '';
     }
     var safetyText = (mission.avoidBeforeWorkoutTypes.length ? 'Avoid before ' + mission.avoidBeforeWorkoutTypes.join(' or ') + '. ' : '') + 'Stop for sharp, worsening, or unusual pain.';
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Side Mission</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Mission</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<button type="button" class="ob-cancel" id="missionBackBtn">Back to Side Missions</button></div>');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Support</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><p class="intro-body">' + escapeHtml(mission.description) + '</p><div class="mission-tags"><span>' + durationText(mission) + '</span><span>' + escapeHtml(mission.relationshipLabel) + '</span></div><dl class="wd-info"><dt>Training effect</dt><dd>' + escapeHtml(mission.trainingPurpose.map(humanizeSlug).join(', ')) + '</dd><dt>Running interference</dt><dd>' + escapeHtml(mission.runningInterference) + '</dd><dt>Progression</dt><dd>' + escapeHtml(mission.progression) + '</dd><dt>Safety notes</dt><dd>' + escapeHtml(safetyText) + '</dd></dl><div class="ob-sub">Workout</div>' + exercisesHtml + '<button type="button" class="ob-btn" id="startMissionBtn">Start Support</button>' + (key ? '' : '<button type="button" class="ob-btn ob-btn-secondary" id="completeNowBtn">Complete now</button>') + scheduleOptions + '<button type="button" class="ob-cancel" id="missionBackBtn">Back to Support</button></div>');
     app.appendChild(wrap);
     document.getElementById('startMissionBtn').addEventListener('click', function () { renderMissionPlayer(mission.id, key); });
     guardOnce(document.getElementById('completeNowBtn'), function () { completeMission(mission.id, key, { difficulty: 'about_right', pain: 'no' }); renderQuestsHome(); });
     wrap.querySelectorAll('[data-add-key]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var res = addMissionToCalendar(mission.id, btn.getAttribute('data-add-key'));
-        showToast(res.ok ? 'Added to calendar.' : 'That conflicts with a protected Main Mission.');
+        showToast(res.ok ? 'Added to calendar.' : 'That conflicts with a protected Plan workout.');
         renderMain();
       });
     });
@@ -3172,7 +3182,7 @@
         '<div class="quest-meta">' + progress.accumulated + ' of ' + progress.levelTarget + ' ' + escapeHtml(challenge.unit) + '</div>' +
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
         logHtml +
-        '<button type="button" class="ob-cancel" id="challengeBackBtn">Back to Side Missions</button>' +
+        '<button type="button" class="ob-cancel" id="challengeBackBtn">Back to Support</button>' +
       '</div>'
     );
     app.appendChild(wrap);
@@ -3210,7 +3220,7 @@
       var name = ex.fixed || (SideQuestDomain.resolveExercise ? SideQuestDomain.resolveExercise(ex, 'base') : '');
       return '<label class="mission-step"><input type="checkbox" data-step="' + i + '"><span><strong>' + escapeHtml(name) + '</strong><br>' + escapeHtml((ex.sets || '') + ' sets, ' + (ex.reps || '') + ', rest ' + (ex.restSeconds || 0) + ' sec') + '</span></label>';
     }).join('');
-    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Mission Player</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><div class="ob-sub">Warm-up</div><ul class="recap-list">' + (mission.warmup || []).map(function (w) { return '<li>' + escapeHtml(w) + '</li>'; }).join('') + '</ul><div class="ob-sub" style="margin-top:18px">Exercises</div>' + exerciseRows + '<div class="ob-sub" style="margin-top:18px">How difficult was this?</div><div class="chip-grid" id="missionDifficulty">' + chipsHtml('missionDifficulty', ['too_easy', 'about_right', 'hard', 'too_hard'], { too_easy: 'Too easy', about_right: 'About right', hard: 'Hard', too_hard: 'Too hard' }, 'about_right', false) + '</div><div class="ob-sub" style="margin-top:18px">Any pain or unusual discomfort?</div><div class="chip-grid" id="missionPain">' + chipsHtml('missionPain', ['no', 'yes'], { no: 'No', yes: 'Yes' }, 'no', false) + '</div><button type="button" class="ob-btn" id="finishMissionBtn">Complete Mission</button><button type="button" class="ob-btn ob-btn-secondary danger-btn" id="stopPainBtn">Stop because of pain</button></div>');
+    var wrap = el('<div class="ob sidequest-screen"><div class="brand-mark">Support</div><div class="ob-title">' + escapeHtml(mission.name) + '</div><div class="ob-sub">Warm-up</div><ul class="recap-list">' + (mission.warmup || []).map(function (w) { return '<li>' + escapeHtml(w) + '</li>'; }).join('') + '</ul><div class="ob-sub" style="margin-top:18px">Exercises</div>' + exerciseRows + '<div class="ob-sub" style="margin-top:18px">How difficult was this?</div><div class="chip-grid" id="missionDifficulty">' + chipsHtml('missionDifficulty', ['too_easy', 'about_right', 'hard', 'too_hard'], { too_easy: 'Too easy', about_right: 'About right', hard: 'Hard', too_hard: 'Too hard' }, 'about_right', false) + '</div><div class="ob-sub" style="margin-top:18px">Any pain or unusual discomfort?</div><div class="chip-grid" id="missionPain">' + chipsHtml('missionPain', ['no', 'yes'], { no: 'No', yes: 'Yes' }, 'no', false) + '</div><button type="button" class="ob-btn" id="finishMissionBtn">Complete Support</button><button type="button" class="ob-btn ob-btn-secondary danger-btn" id="stopPainBtn">Stop because of pain</button></div>');
     app.appendChild(wrap);
     var difficulty = 'about_right';
     var pain = 'no';
@@ -3236,7 +3246,7 @@
     guardOnce(document.getElementById('stopPainBtn'), function () {
       state.sideQuestLog.push({ id: mission.id, key: key || null, date: dateToISO(new Date()), category: mission.category, stopped: true, reason: 'pain' });
       saveState(state);
-      showToast('Mission stopped. Do not train through sharp or worsening pain.');
+      showToast('Support stopped. Do not train through sharp or worsening pain.');
       renderQuestsHome();
     });
   }
@@ -3309,7 +3319,7 @@
     var weeks = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today).weeks;
     var pathModel = generateCurrentPath(weeks);
     if (!pathModel) {
-      app.appendChild(el('<div class="ob"><div class="ob-title">Path</div><p class="intro-body">Path is unavailable because the Path engine did not load.</p></div>'));
+      app.appendChild(el('<div class="ob"><div class="ob-title">Progress</div><p class="intro-body">Progress is unavailable because the Progress engine did not load.</p></div>'));
       return;
     }
     app.appendChild(el('<div class="subnav">' + headerIconsHtml(null) + '</div>'));
@@ -3326,7 +3336,7 @@
       '<div class="quest-name">' + escapeHtml(selected.title) + '</div>' +
       '<div class="quest-desc">' + escapeHtml(selected.description) + '</div>' +
       '<dl class="wd-info">' +
-        '<dt>Status</dt><dd>' + escapeHtml(pathStatusText(selected.status)) + (selected.optional ? ' Side Mission achievement' : ' Main Quest milestone') + '</dd>' +
+        '<dt>Status</dt><dd>' + escapeHtml(pathStatusText(selected.status)) + (selected.optional ? ' Support achievement' : ' Plan milestone') + '</dd>' +
         '<dt>Why it matters</dt><dd>' + escapeHtml(selected.whyItMatters || 'This marks meaningful progress along your running journey.') + '</dd>' +
         '<dt>Requirement</dt><dd>' + escapeHtml(selected.requirements) + '</dd>' +
         '<dt>Progress</dt><dd>' + selected.progressCurrent + ' of ' + selected.progressTarget + '</dd>' +
@@ -3338,7 +3348,7 @@
       return '<button type="button" class="path-node path-node--' + node.status + ' path-node--' + node.nodeType + '" data-node-id="' + node.id + '" aria-label="' + escapeHtml(sr) + '">' +
         '<span class="path-node-marker"><i class="ti ' + pathNodeIcon(node) + '"></i></span>' +
         '<span class="path-node-card">' +
-          '<span class="path-node-kicker">' + (node.optional ? 'Optional Side Mission' : (node.nodeType === 'race' ? 'Final Main Mission' : 'Main Quest')) + ' · Week ' + node.week + '</span>' +
+          '<span class="path-node-kicker">' + (node.optional ? 'Optional Support' : (node.nodeType === 'race' ? 'Final Plan workout' : 'Plan')) + ' · Week ' + node.week + '</span>' +
           '<span class="path-node-title">' + escapeHtml(node.title) + '</span>' +
           '<span class="path-node-desc">' + escapeHtml(node.description) + '</span>' +
           '<span class="path-node-status">' + escapeHtml(pathStatusText(node.status)) + (node.badgeId && node.status === 'completed' ? ' · Badge earned' : '') + '</span>' +
@@ -3347,12 +3357,12 @@
     }).join('');
     var wrap = el(
       '<div class="ob path-screen">' +
-        '<div class="brand-mark">Path</div>' +
-        '<div class="ob-title">Your Path</div>' +
-        '<p class="intro-body">Your run is the Main Quest. Side Missions make the journey stronger, broader, and more enjoyable. The Path shows how far you have come.</p>' +
+        '<div class="brand-mark">Progress</div>' +
+        '<div class="ob-title">Progress</div>' +
+        '<p class="intro-body">Your Plan is the priority. Support work adds strength and variety around it. Progress shows how far you have come.</p>' +
         '<dl class="wd-info path-summary">' +
-          '<dt>Main Quest</dt><dd>' + escapeHtml(EVENT_LABEL[state.raceGoal.event]) + ' · Week ' + (findCurrentWeekIdx(raceDate, state.planMeta.planLengthWeeks, today) + 1) + ' of ' + state.planMeta.planLengthWeeks + '</dd>' +
-          '<dt>Main Quest milestones</dt><dd>' + completeRequired + ' of ' + totalRequired + '</dd>' +
+          '<dt>Plan</dt><dd>' + escapeHtml(EVENT_LABEL[state.raceGoal.event]) + ' · Week ' + (findCurrentWeekIdx(raceDate, state.planMeta.planLengthWeeks, today) + 1) + ' of ' + state.planMeta.planLengthWeeks + '</dd>' +
+          '<dt>Plan milestones</dt><dd>' + completeRequired + ' of ' + totalRequired + '</dd>' +
           '<dt>Badges</dt><dd>' + (state.badges.length ? state.badges.length + ' earned' : 'None yet') + '</dd>' +
         '</dl>' +
         selectedHtml +
@@ -3500,6 +3510,42 @@
       currentMonthKey: dashCurrentMonthKey,
       unitLabel: unitLabel()
     });
+    var coachReadText = '';
+    if (todayDayIdx !== -1) {
+      var todayKeyForRead = currentWeek + '-' + todayDayIdx;
+      var todayForRead = effectiveWorkoutForDay(weeks[currentWeek - 1].days[todayDayIdx], todayKeyForRead);
+      if (todayForRead.type === 'rest') {
+        coachReadText = 'Today is recovery. Let the plan work by keeping it easy.';
+      } else if (todayForRead.type === 'long') {
+        coachReadText = 'Today is the endurance anchor. Keep it controlled and finish with something left.';
+      } else if (todayForRead.type === 'quality') {
+        coachReadText = 'Today is the key stimulus. Warm up patiently and keep the first hard effort controlled.';
+      } else if (todayForRead.type === 'cross') {
+        coachReadText = 'Today supports the plan without adding running impact. Keep the effort honest, not heroic.';
+      } else if (todayForRead.type === 'race') {
+        coachReadText = 'Race day. Trust the work, start controlled, and use the plan you practiced.';
+      } else {
+        coachReadText = 'Today builds consistency. Keep it conversational and repeatable.';
+      }
+    } else {
+      coachReadText = remaining < 0 ? 'The race is complete. Review what you built and decide what comes next.' : 'Your next scheduled week is coming up. Keep the plan simple and sustainable.';
+    }
+    var weekCompletionPct = totalLoggable ? Math.round(100 * totalLogged / totalLoggable) : 0;
+    var weeklyBrief = (weeks[currentWeek - 1] && CoachingRulesDomain.weeklyJobPriorityBrief)
+      ? CoachingRulesDomain.weeklyJobPriorityBrief(weeks[currentWeek - 1].phase, state.planMeta.level)
+      : null;
+    var weeklyFocusText = weeklyBrief && weeklyBrief.idealLabels && weeklyBrief.idealLabels.length
+      ? weeklyBrief.idealLabels.slice(0, 2).join(', ')
+      : (weeks[currentWeek - 1] ? weeks[currentWeek - 1].phase : 'consistency');
+    var coachSummaryHtml =
+      '<div class="today-card coach-summary-card">' +
+        '<div class="today-eyebrow">COACH READ</div>' +
+        '<p class="progress-insight">' + escapeHtml(coachReadText) + '</p>' +
+        '<dl class="wd-info">' +
+          '<dt>This week</dt><dd>' + weekCompletionPct + '% logged</dd>' +
+          '<dt>Focus</dt><dd>' + escapeHtml(weeklyFocusText) + '</dd>' +
+        '</dl>' +
+      '</div>';
 
     // docs/COACHING_SPEC.md "Goal decision checkpoints" -- deterministic,
     // evidence-based, and never applied automatically -- the runner always
@@ -3579,6 +3625,7 @@
     app.appendChild(header);
     document.getElementById('progressFill').style.width = (totalLoggable ? (100 * totalLogged / totalLoggable) : 0) + '%';
     wireHeaderIcons();
+    app.appendChild(el(coachSummaryHtml));
 
     unackedPlanWarnings.forEach(function (w, warnIdx) {
       var warnBtnId = 'planWarnAckBtn' + warnIdx;
@@ -3704,10 +3751,10 @@
       var todayCard = el(
         '<div class="today-card' + (!todayLoggable ? ' is-rest' : '') + '">' +
           '<div class="today-eyebrow">TODAY</div>' +
-          '<div class="mission-label">Main Mission</div>' +
+          '<div class="mission-label">Today&rsquo;s Workout</div>' +
           '<div class="today-plan">' + escapeHtml(todayLabel) + '</div>' +
           todayStatusHtml +
-          (todayMission ? '<div class="today-side"><div class="mission-label">Side Mission</div><button type="button" class="side-mission-link" id="todaySideMissionBtn">' + escapeHtml(todayMission.name) + ' &middot; ' + todayMission.durationMinutesMin + '-' + todayMission.durationMinutesMax + ' min</button></div>' : '') +
+          (todayMission ? '<div class="today-side"><div class="mission-label">Support</div><button type="button" class="side-mission-link" id="todaySideMissionBtn">' + escapeHtml(todayMission.name) + ' &middot; ' + todayMission.durationMinutesMin + '-' + todayMission.durationMinutesMax + ' min</button></div>' : '') +
           (todayLoggable ? '<button class="ob-btn today-btn" id="todayDetailBtn">' + (todayLogged ? 'View / Edit' : 'Log it') + '</button>' : '') +
           '<div class="ai-coach">' +
             '<button type="button" class="pain-toggle" id="aiCoachOpenBtn">Ask your coach</button>' +
@@ -3834,7 +3881,7 @@
               '<button type="button" class="day-plan" aria-label="Edit: ' + escapeHtml(label) + '">' + escapeHtml(label) + '</button>' +
               (calendarHint(label) ? '<div class="day-hint">' + escapeHtml(calendarHint(label)) + '</div>' : '') +
               (loggable ? targetSummaryHtml(dayData, label) + completedSummaryHtml(entry) : '') +
-              (scheduledMission ? '<button type="button" class="calendar-side-mission" data-mission-id="' + scheduledMission.id + '">Side Mission: ' + escapeHtml(scheduledMission.name) + '</button>' : '') +
+              (scheduledMission ? '<button type="button" class="calendar-side-mission" data-mission-id="' + scheduledMission.id + '">Support: ' + escapeHtml(scheduledMission.name) + '</button>' : '') +
               (cross ? '<select class="cross-select' + (crossValue ? ' chosen' : '') + '" aria-label="Cross-training activity for ' + escapeHtml(DOW_FULL[d.getDay()]) + '">' + crossOptionsHtml(crossValue) + '</select>' : '') +
             '</div>' +
           '</div>'
@@ -4164,7 +4211,7 @@
       if (!day || !quest || replaces.indexOf(day.type) === -1) return false;
       if (state.workoutOverrides[key]) clearWorkoutOverride(key);
       if (quest.name === day.baseLabel) clearOverride(key); else setOverride(key, quest.name);
-      state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), relationship: quest.relationshipLabel || 'Can replace an easy Main Mission' });
+      state.sideQuestLog.push({ id: quest.id, key: key, date: dateToISO(new Date()), category: completionCategory(quest), relationship: quest.relationshipLabel || 'Can replace an easy Plan workout' });
       // Same fix as applySideQuest -- must save explicitly, not rely on
       // refreshPathProgress()'s conditional save (see that function's comment).
       saveState(state);
@@ -6239,13 +6286,13 @@
       } else if (selectedReason === 'pain') {
         body =
           '<div class="ob-title">Let&rsquo;s log that properly</div>' +
-          '<div class="ob-sub">Pain and discomfort get a real pain report, not a Side Mission swap.</div>' +
+          '<div class="ob-sub">Pain and discomfort get a real pain report, not a support swap.</div>' +
           '<button class="ob-btn" id="goToPainBtn">Report pain or discomfort</button>' +
           '<button type="button" class="ob-cancel" id="switchBackBtn">Never mind, keep today&rsquo;s run</button>';
       } else {
         var quests = questsForReason(selectedReason, dayData.type);
         body =
-          '<div class="ob-title">Choose today&rsquo;s Side Mission</div>' +
+          '<div class="ob-title">Choose today&rsquo;s Support</div>' +
           '<div class="ob-sub">Still training for your race &mdash; just a different way today.</div>' +
           (quests.length ? quests.map(function (q, i) {
             return '<div class="quest-card">' +
@@ -6948,7 +6995,7 @@
         '<button type="button" class="ob-btn ob-btn-secondary" id="saveFeelingBtn" style="margin-top:8px">Save</button>' +
       '</div>';
     var varietyBannerHtml = varietyWeekSuggested() ?
-      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week – swap an easy Main Mission for a Side Mission, add strength carefully, and keep your long run and key workout as-is. <button type="button" class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Side Missions</button></span></div>' : '';
+      '<div class="warn-banner warn-banner--info"><i class="ti ti-info-circle"></i><span>You\'ve mentioned feeling bored of running two weeks running. Consider a Variety Week – swap an easy Plan workout for a support session, add strength carefully, and keep your long run and key workout as-is. <button type="button" class="pain-toggle" id="varietyOpenQuestsBtn" style="display:inline">Open Support</button></span></div>' : '';
 
     var today = new Date(); today.setHours(0, 0, 0, 0);
     var raceDate = parseDate(state.raceGoal.raceDate);
@@ -7045,6 +7092,24 @@
       currentMonthKey: currentMonthKey,
       unitLabel: unitLabel()
     });
+    var completionRate = scheduledSoFar ? Math.round(100 * completedCount / scheduledSoFar) : 0;
+    var readinessTone = state.planMeta.unsafe
+      ? 'The plan is intentionally conservative because the timeline or starting point is tight.'
+      : (completionRate >= 80
+        ? 'Your consistency is giving the plan useful evidence.'
+        : (scheduledSoFar
+          ? 'The biggest readiness lever right now is steady completion, not adding more.'
+          : 'Readiness starts once the plan has a few logged workouts.'));
+    var readinessHtml =
+      '<div class="today-card progress-readiness-card">' +
+        '<div class="today-eyebrow">READINESS</div>' +
+        '<p class="progress-insight">' + escapeHtml(readinessTone) + '</p>' +
+        '<dl class="wd-info">' +
+          '<dt>Consistency</dt><dd>' + (scheduledSoFar ? completionRate + '% of scheduled Plan workouts logged' : 'No scheduled workouts due yet') + '</dd>' +
+          '<dt>Longest run</dt><dd>' + (longestRun ? toUnit(longestRun) + ' ' + unitLabel() : '&mdash;') + '</dd>' +
+          '<dt>This week</dt><dd>' + round1(toUnit(thisWeekStats.completedMiles)) + ' of ' + round1(toUnit(thisWeekStats.plannedMiles)) + ' ' + unitLabel() + '</dd>' +
+        '</dl>' +
+      '</div>';
 
     var lastWeek = currentWeekIdx >= 2 ? weeks[currentWeekIdx - 2] : null;
     var nextWeek = currentWeekIdx <= planLengthWeeks - 1 ? weeks[currentWeekIdx] : null;
@@ -7053,9 +7118,9 @@
       '<dl class="wd-info">' +
         '<dt>Distance so far</dt><dd>' + toUnit(round1(totalDistance)) + ' ' + unitLabel() + '</dd>' +
         '<dt>Longest run</dt><dd>' + (longestRun ? toUnit(longestRun) + ' ' + unitLabel() : '&mdash;') + '</dd>' +
-        '<dt>Main Missions completed</dt><dd>' + completedCount + ' of ' + scheduledSoFar + ' scheduled so far</dd>' +
-        '<dt>Side Missions completed</dt><dd>' + state.sideQuestLog.length + '</dd>' +
-        '<dt>Path milestones</dt><dd>' + pathCompleted + ' of ' + pathTotal + '</dd>' +
+        '<dt>Plan workouts completed</dt><dd>' + completedCount + ' of ' + scheduledSoFar + ' scheduled so far</dd>' +
+        '<dt>Support completed</dt><dd>' + state.sideQuestLog.length + '</dd>' +
+        '<dt>Progress milestones</dt><dd>' + pathCompleted + ' of ' + pathTotal + '</dd>' +
         '<dt>Badges earned</dt><dd>' + badgesEarned + '</dd>' +
       '</dl>';
 
@@ -7118,6 +7183,7 @@
     var wrap = el(
       '<div class="ob">' +
         '<div class="ob-title">Progress</div>' +
+        readinessHtml +
         varietyBannerHtml +
         feelingSummaryHtml +
         feelingFormHtml +

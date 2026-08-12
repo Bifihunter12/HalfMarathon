@@ -136,27 +136,27 @@
     var longestComplete = longest.key ? isCompletedLog(logs, longest.key) : false;
 
     var nodes = [
-      node('main_quest_started', 1, 'running_milestone', 'Main Quest Started', 'Your running goal is set and the Path begins.', true, !!input.mainQuestActive, 'badge_quest_accepted', { order: 1, whyItMatters: 'This anchors every Main Mission and every optional Side Mission.' }),
-      node('first_main_mission', 1, 'running_milestone', 'First Main Mission', 'Complete your first scheduled running workout.', true, firstMainComplete, 'badge_first_mile', { order: 2 }),
-      node('first_week_complete', 2, 'running_milestone', 'First Week Complete', 'Complete all required Main Missions in week 1.', true, firstWeekComplete, 'badge_first_week', { order: 1 }),
-      node('first_speed_mission', Math.min(3, planLength), 'running_milestone', 'First Speed Mission', 'Complete your first interval, tempo, or race-pace Main Mission.', true, firstSpeedComplete, 'badge_speed_initiate', { order: 1 }),
+      node('main_quest_started', 1, 'running_milestone', 'Plan Started', 'Your running goal is set and Progress begins.', true, !!input.mainQuestActive, 'badge_quest_accepted', { order: 1, whyItMatters: 'This anchors every Plan workout and every optional support session.' }),
+      node('first_main_mission', 1, 'running_milestone', 'First Plan Workout', 'Complete your first scheduled running workout.', true, firstMainComplete, 'badge_first_mile', { order: 2 }),
+      node('first_week_complete', 2, 'running_milestone', 'First Week Complete', 'Complete all required Plan workouts in week 1.', true, firstWeekComplete, 'badge_first_week', { order: 1 }),
+      node('first_speed_mission', Math.min(3, planLength), 'running_milestone', 'First Speed Workout', 'Complete your first interval, tempo, or race-pace Plan workout.', true, firstSpeedComplete, 'badge_speed_initiate', { order: 1 }),
       node('first_long_run', Math.min(3, planLength), 'running_milestone', 'First Long Run', 'Complete your first scheduled long run.', true, firstLongComplete, 'badge_long_run_builder', { order: 2 }),
-      node('recovery_week_complete', Math.min(4, planLength), 'running_milestone', 'Recovery Week Complete', 'Complete the required Main Missions in an early lighter week.', true, recoveryComplete, 'badge_recovery_done_right', { order: 1 }),
-      node('halfway_point', halfwayWeek, 'running_milestone', 'Halfway Point', 'Reach the middle of the Main Quest with required running progress intact.', true, firstWeekComplete && firstMainComplete, 'badge_halfway_there', { order: 1 }),
+      node('recovery_week_complete', Math.min(4, planLength), 'running_milestone', 'Recovery Week Complete', 'Complete the required Plan workouts in an early lighter week.', true, recoveryComplete, 'badge_recovery_done_right', { order: 1 }),
+      node('halfway_point', halfwayWeek, 'running_milestone', 'Halfway Point', 'Reach the middle of the Plan with required running progress intact.', true, firstWeekComplete && firstMainComplete, 'badge_halfway_there', { order: 1 }),
       node('longest_run_yet', longest.weekNum, 'running_milestone', 'Longest Run Yet', 'Complete the longest scheduled long run in the plan.', true, longestComplete, 'badge_durable_runner', { order: 1, relatedMissionId: longest.key }),
-      node('peak_week_complete', peakWeek, 'running_milestone', 'Peak Week Complete', 'Complete the key Main Missions in peak week.', true, peakComplete, 'badge_peak_week', { order: 1 }),
+      node('peak_week_complete', peakWeek, 'running_milestone', 'Peak Week Complete', 'Complete the key Plan workouts in peak week.', true, peakComplete, 'badge_peak_week', { order: 1 }),
       node('taper_begins', taperWeek, 'running_milestone', 'Taper Begins', 'Enter the final reduced-volume phase before race day.', true, taperStarted, 'badge_ready_to_race', { order: 1 }),
-      node('ready_to_race', Math.max(taperWeek, planLength - 1), 'major_badge', 'Ready to Race', 'Protect recovery and complete the final key Main Missions.', true, taperStarted, 'badge_ready_to_race', { order: 2 }),
-      node('race_day', raceWeek, 'race', 'Race Day', 'The final Main Mission.', true, raceComplete, null, { order: 1 }),
-      node('main_quest_complete', raceWeek, 'major_badge', 'Main Quest Complete', 'Finish the race or final goal event.', true, raceComplete, 'badge_race_finisher', { order: 2 })
+      node('ready_to_race', Math.max(taperWeek, planLength - 1), 'major_badge', 'Ready to Race', 'Protect recovery and complete the final key Plan workouts.', true, taperStarted, 'badge_ready_to_race', { order: 2 }),
+      node('race_day', raceWeek, 'race', 'Race Day', 'The final Plan workout.', true, raceComplete, null, { order: 1 }),
+      node('main_quest_complete', raceWeek, 'major_badge', 'Plan Complete', 'Finish the race or final goal event.', true, raceComplete, 'badge_race_finisher', { order: 2 })
     ];
 
     nodes = nodes.concat([
-      node('first_strength_mission', 1, 'side_mission_achievement', 'First Strength Mission', 'Complete any strength Side Mission.', false, sideMissionCount(sideMissionLog, 'strength') >= 1, 'badge_strength_initiate', { order: 3, progressCurrent: Math.min(sideMissionCount(sideMissionLog, 'strength'), 1) }),
-      node('core_10_completed', Math.min(3, planLength), 'side_mission_achievement', 'Core 10 Completed', 'Complete the Core 10 Side Mission.', false, sideMissionCompleted(sideMissionLog, 'core_10'), 'badge_core_armor', { order: 3 }),
-      node('trail_90_completed', Math.min(5, planLength), 'side_mission_achievement', 'Trail 90 Completed', 'Complete Trail 90 as an aerobic Side Mission.', false, sideMissionCompleted(sideMissionLog, 'trail_90'), 'badge_trail_90', { order: 3 }),
-      node('upper_body_builder_completed', halfwayWeek, 'side_mission_achievement', 'Upper Body Builder Completed', 'Complete the Upper Body Builder Mission Track.', false, sideMissionCompleted(sideMissionLog, 'upper_body_builder_track'), 'badge_upper_body_builder', { order: 3 }),
-      node('strong_runner_badge', Math.min(7, planLength), 'major_badge', 'Strong Runner Badge', 'Complete four strength Side Missions while protecting key Main Missions.', false, sideMissionCount(sideMissionLog, 'strength') >= 4, 'badge_strong_runner', { order: 3, progressCurrent: Math.min(sideMissionCount(sideMissionLog, 'strength'), 4), progressTarget: 4 })
+      node('first_strength_mission', 1, 'side_mission_achievement', 'First Strength Support', 'Complete any strength support session.', false, sideMissionCount(sideMissionLog, 'strength') >= 1, 'badge_strength_initiate', { order: 3, progressCurrent: Math.min(sideMissionCount(sideMissionLog, 'strength'), 1) }),
+      node('core_10_completed', Math.min(3, planLength), 'side_mission_achievement', 'Core 10 Completed', 'Complete the Core 10 support session.', false, sideMissionCompleted(sideMissionLog, 'core_10'), 'badge_core_armor', { order: 3 }),
+      node('trail_90_completed', Math.min(5, planLength), 'side_mission_achievement', 'Trail 90 Completed', 'Complete Trail 90 as aerobic support.', false, sideMissionCompleted(sideMissionLog, 'trail_90'), 'badge_trail_90', { order: 3 }),
+      node('upper_body_builder_completed', halfwayWeek, 'side_mission_achievement', 'Upper Body Builder Completed', 'Complete the Upper Body Builder support track.', false, sideMissionCompleted(sideMissionLog, 'upper_body_builder_track'), 'badge_upper_body_builder', { order: 3 }),
+      node('strong_runner_badge', Math.min(7, planLength), 'major_badge', 'Strong Runner Badge', 'Complete four strength support sessions while protecting key Plan workouts.', false, sideMissionCount(sideMissionLog, 'strength') >= 4, 'badge_strong_runner', { order: 3, progressCurrent: Math.min(sideMissionCount(sideMissionLog, 'strength'), 4), progressTarget: 4 })
     ]);
 
     nodes.sort(function (a, b) {
@@ -222,9 +222,9 @@
   }
 
   function accessibilityLabel(node, totalWeeks) {
-    var kind = node.nodeType === 'side_mission_achievement' ? 'Optional Side Mission achievement' :
+    var kind = node.nodeType === 'side_mission_achievement' ? 'Optional Support achievement' :
       node.nodeType === 'race' ? 'Race node' :
-      node.nodeType === 'major_badge' ? 'Major badge node' : 'Main Quest milestone';
+      node.nodeType === 'major_badge' ? 'Major badge node' : 'Plan milestone';
     return node.title + '. ' + node.status + ' ' + kind + '. Week ' + node.week + ' of ' + totalWeeks + '. ' +
       node.progressCurrent + ' of ' + node.progressTarget + ' complete.';
   }

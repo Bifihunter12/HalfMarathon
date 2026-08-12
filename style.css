@@ -143,6 +143,17 @@ body {
 .sidequest-screen { justify-content: flex-start; min-height: auto; }
 .mission-card { margin-top: 8px; }
 .active-quest-card { border-color: rgba(217, 119, 66, 0.35); }
+.support-browse {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.support-browse summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
 .mission-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .mission-tags span {
   border: 1px solid var(--border);
