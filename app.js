@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.11.2';
+  var APP_VERSION = '2026.08.12.1';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -4620,6 +4620,88 @@
     if (document.visibilityState === 'visible' && _activeMachine) _activeMachine.reconcile();
   }
 
+  // ── Background survival for an active workout ────────────────────────────
+  // Reported live: switching to a music app mid-run left the coach silent
+  // for the rest of a 2h34m session -- a backgrounded browser tab throttles
+  // setInterval hard enough that cue timing effectively stops. There is no
+  // way to force a browser to keep a hidden tab running at full speed, but
+  // an actively-playing <audio> element is the one signal most mobile
+  // browsers (reliably on Android Chrome; best-effort elsewhere) treat as a
+  // reason NOT to suspend the page, so a real, non-muted (but effectively
+  // inaudible) looping audio element is started for the duration of the
+  // workout. Also wires the Media Session API: its position state is
+  // rendered by the OS lock screen itself (a live-advancing elapsed-time
+  // display), which keeps working even on platforms where this app's own JS
+  // does get suspended -- that's the "little timer on the screen" ask.
+  // Neither trick is a guarantee (iOS in particular can still suspend page
+  // JS while continuing to play audio), but both are strict improvements
+  // over doing nothing, and neither can make timing or logging worse: the
+  // state machine's own reconcile() is always the source of truth, exactly
+  // as before.
+  var _keepAliveAudioEl = null;
+
+  function _silentLoopDataUri() {
+    // Programmatically build a short, valid, silent 8-bit PCM WAV instead of
+    // hand-typing base64 (easy to get subtly wrong and hard to review).
+    var sampleRate = 8000, seconds = 1, numSamples = sampleRate * seconds;
+    var buffer = new ArrayBuffer(44 + numSamples);
+    var view = new DataView(buffer);
+    function writeStr(offset, s) { for (var i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); }
+    writeStr(0, 'RIFF'); view.setUint32(4, 36 + numSamples, true); writeStr(8, 'WAVE');
+    writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate, true);
+    view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+    writeStr(36, 'data'); view.setUint32(40, numSamples, true);
+    for (var i = 0; i < numSamples; i++) view.setUint8(44 + i, 128); // 128 = silence for 8-bit unsigned PCM
+    var bytes = new Uint8Array(buffer), binary = '';
+    for (var j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j]);
+    return 'data:audio/wav;base64,' + btoa(binary);
+  }
+
+  function startKeepAliveAudio() {
+    if (_keepAliveAudioEl || typeof Audio === 'undefined') return;
+    try {
+      var el = new Audio(_silentLoopDataUri());
+      el.loop = true;
+      el.volume = 0.01; // real, non-zero playback -- some platforms deprioritize a fully muted/zero-volume element same as a paused one
+      var p = el.play();
+      if (p && p.catch) p.catch(function () {}); // autoplay can be blocked in rare cases; never let this break workout start
+      _keepAliveAudioEl = el;
+    } catch (e) {}
+  }
+
+  function stopKeepAliveAudio() {
+    if (_keepAliveAudioEl) { try { _keepAliveAudioEl.pause(); } catch (e) {} _keepAliveAudioEl = null; }
+    if (typeof navigator !== 'undefined' && navigator.mediaSession) {
+      try { navigator.mediaSession.playbackState = 'none'; navigator.mediaSession.metadata = null; } catch (e) {}
+    }
+  }
+
+  // Called on every tick while a workout is active -- cheap, and the OS lock
+  // screen needs a fresh position to keep its own live timer accurate.
+  function updateMediaSession(normalized, machine) {
+    if (typeof navigator === 'undefined' || !navigator.mediaSession || typeof MediaMetadata === 'undefined') return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: normalized.title, artist: 'Zaera Running Coach' });
+      navigator.mediaSession.playbackState = machine.state.phase === 'paused' ? 'paused' : 'playing';
+      if (navigator.mediaSession.setPositionState) {
+        var elapsedSec = machine.elapsedActiveMs() / 1000;
+        if (normalized.totalPrescribedSec) {
+          navigator.mediaSession.setPositionState({
+            duration: Math.max(normalized.totalPrescribedSec, elapsedSec),
+            playbackRate: 1,
+            position: Math.min(elapsedSec, Math.max(normalized.totalPrescribedSec, elapsedSec))
+          });
+        } else {
+          // continuous_open has no known duration -- report an open-ended
+          // position anyway so the lock screen still shows a live count-up
+          // instead of nothing.
+          navigator.mediaSession.setPositionState({ duration: elapsedSec, playbackRate: 1, position: elapsedSec });
+        }
+      }
+    } catch (e) {}
+  }
+
   // ── Coaching engine wiring (docs/COACHING_ENGINE_SPEC.md) ───────────────
   // app.js's ONLY job here is assembling verified inputs and forwarding the
   // engine's single decision to audio-cues.js -- all selection logic lives
@@ -4788,6 +4870,7 @@
     } else if (!_activeCoachingSessionId && _activeMachine.state.startedAt) {
       _activeCoachingSessionId = key + ':' + _activeMachine.state.startedAt;
     }
+    startKeepAliveAudio();
     var machine = _activeMachine;
 
     var app = document.getElementById('app');
@@ -4879,7 +4962,40 @@
     function tick() {
       machine.reconcile();
       playDueCues(dayData, normalized, workoutType, terrainHint);
+      var phaseBefore = machine.state.phase;
       refreshDisplay();
+      if (phaseBefore === 'completed' || phaseBefore === 'ended_early') return; // refreshDisplay already tore this screen down via onWorkoutEnded
+      updateMediaSession(normalized, machine);
+      checkOverrun();
+    }
+
+    // Reported live: a 33-min workout ran 2h34m unattended after cues went
+    // silent on a backgrounded phone. This can't detect the silence itself,
+    // but it can catch the aftermath -- shown once per workout (dismissing
+    // it doesn't re-check timing, only ending the workout does), never
+    // auto-ends anything on its own.
+    var overrunDismissed = false;
+    function checkOverrun() {
+      var phase = machine.state.phase;
+      if (overrunDismissed || phase === 'completed' || phase === 'ended_early' || phase === 'paused') return;
+      if (!WorkoutRunnerDomain.isSessionOverrun(machine.elapsedActiveMs(), normalized.totalPrescribedSec)) return;
+      if (document.getElementById('runnerOverrunCard')) return;
+      var overrunCard = el(
+        '<div class="today-card" id="runnerOverrunCard" role="alert">' +
+          '<div class="today-eyebrow">STILL GOING?</div>' +
+          '<p class="progress-insight">This workout has been running a lot longer than planned (' + fmtCountdown(machine.elapsedActiveMs()) + ' elapsed). If you forgot to end it, tap below.</p>' +
+          '<button type="button" class="ob-btn danger-btn" id="runnerOverrunEndBtn" style="margin-top:10px">End workout</button>' +
+          '<button type="button" class="ob-btn ob-btn-secondary" id="runnerOverrunDismissBtn" style="margin-top:8px">Still going, keep it running</button>' +
+        '</div>'
+      );
+      wrap.appendChild(overrunCard);
+      document.getElementById('runnerOverrunEndBtn').addEventListener('click', function () {
+        document.getElementById('runnerEndBtn').click();
+      });
+      document.getElementById('runnerOverrunDismissBtn').addEventListener('click', function () {
+        overrunDismissed = true;
+        overrunCard.remove();
+      });
     }
 
     // Not guardOnce -- this button is reused across every repetition/
@@ -5021,6 +5137,7 @@
   // refreshDisplay()'s phase check, which stops ticking immediately after).
   function onWorkoutEnded(phase) {
     stopTicking({ preserveAudio: phase === 'completed' });
+    stopKeepAliveAudio();
     var machine = _activeMachine;
     var key = _activeWorkoutKey;
     var activeMs = machine.elapsedActiveMs();

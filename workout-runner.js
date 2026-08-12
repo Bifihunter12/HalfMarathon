@@ -398,9 +398,31 @@
     return m;
   }
 
+  // A phone backgrounded to play music (or a screen that locked) can throttle
+  // this app's own timers hard enough that cues silently stop firing --
+  // reported live as "a 33-minute run/walk workout ran for 2h34m with no
+  // instructions after the intro." This can't detect that in the moment (no
+  // way to know a timer got throttled while it's throttled), but it CAN
+  // catch the aftermath: elapsed active time wildly exceeding what the
+  // workout actually prescribes. Deliberately generous (never flags a
+  // merely-slow long run) -- needs the workout to be over budget by both a
+  // relative (50%) and an absolute (20 min) margin before it's worth
+  // interrupting the runner with anything. continuous_open (no
+  // totalPrescribedSec at all -- an open-ended easy/long run) falls back to
+  // a flat absolute cap, since there's no prescribed duration to compare
+  // against.
+  function isSessionOverrun(elapsedMs, totalPrescribedSec) {
+    if (elapsedMs == null) return false;
+    if (!totalPrescribedSec) return elapsedMs > 3 * 3600 * 1000;
+    var prescribedMs = totalPrescribedSec * 1000;
+    var marginMs = Math.max(20 * 60 * 1000, prescribedMs * 0.5);
+    return elapsedMs > prescribedMs + marginMs;
+  }
+
   return {
     normalizeWorkout: normalizeWorkout,
     createRunnerStateMachine: createRunnerStateMachine,
-    restoreRunnerStateMachine: restoreRunnerStateMachine
+    restoreRunnerStateMachine: restoreRunnerStateMachine,
+    isSessionOverrun: isSessionOverrun
   };
 });

@@ -399,3 +399,31 @@ test('pause() and resume() are no-ops in states where they do not apply', functi
   m.pause(); // 'ready' is not pausable per spec (nothing running yet)
   assert.equal(m.state.phase, 'ready');
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// Overrun detection (reported live: a 33-min run/walk ran 2h34m unattended
+// after cues stopped firing on a backgrounded phone)
+// ═══════════════════════════════════════════════════════════════════════
+
+test('isSessionOverrun: never flags a workout still within its prescribed time plus the generous margin', function () {
+  var totalPrescribedSec = 30 * 60; // 30 min
+  assert.equal(Runner.isSessionOverrun(30 * 60 * 1000, totalPrescribedSec), false, 'exactly on time');
+  assert.equal(Runner.isSessionOverrun(45 * 60 * 1000, totalPrescribedSec), false, '15 min over a 30-min workout is still within the 50%/20-min margin');
+});
+
+test('isSessionOverrun: flags a workout that has blown well past both the relative and absolute margin', function () {
+  var totalPrescribedSec = 30 * 60; // margin is max(20min, 15min) = 20min -> flags past 50min
+  assert.equal(Runner.isSessionOverrun(49 * 60 * 1000, totalPrescribedSec), false);
+  assert.equal(Runner.isSessionOverrun(51 * 60 * 1000, totalPrescribedSec), true);
+});
+
+test('isSessionOverrun: a long prescribed workout uses the relative (50%) margin once it exceeds the 20-min floor', function () {
+  var totalPrescribedSec = 120 * 60; // 2h -- 50% margin (1h) exceeds the 20-min floor
+  assert.equal(Runner.isSessionOverrun(179 * 60 * 1000, totalPrescribedSec), false);
+  assert.equal(Runner.isSessionOverrun(181 * 60 * 1000, totalPrescribedSec), true);
+});
+
+test('isSessionOverrun: continuous_open workouts (no totalPrescribedSec) fall back to a flat 3-hour cap', function () {
+  assert.equal(Runner.isSessionOverrun(2.9 * 3600 * 1000, null), false);
+  assert.equal(Runner.isSessionOverrun(3.1 * 3600 * 1000, null), true);
+});
