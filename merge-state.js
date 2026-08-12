@@ -167,6 +167,26 @@
       if (!pathNodeMap[n.id] || n.status === 'completed') pathNodeMap[n.id] = n;
     });
 
+    // docs/AI_COACH_V2_SPEC.md acknowledge-gates (app.js renderMain) --
+    // append-only "already dismissed" lists (auto-adjustment notes, plan
+    // safety warnings). Missing from this merge output entirely used to mean
+    // any cloud pull silently dropped the field, so a dismissed card came
+    // back on every sync -- union + dedupe by exact text, same append-only
+    // treatment as sideQuestLog/badges above, so an ack made on either
+    // device survives merging with the other.
+    var ackAdjustmentNotesUnion = (local.acknowledgedAdjustmentNotes || []).concat(remote.acknowledgedAdjustmentNotes || [])
+      .filter(function (n, i, arr) { return arr.indexOf(n) === i; }).slice(-20);
+    var ackPlanWarningsUnion = (local.acknowledgedPlanWarnings || []).concat(remote.acknowledgedPlanWarnings || [])
+      .filter(function (n, i, arr) { return arr.indexOf(n) === i; }).slice(-20);
+    // In-workout feedback (too easy/too hard/pain) -- same append-only union
+    // treatment as coachingHistory above, keyed by the fields that make an
+    // entry unique.
+    var inWorkoutFeedbackMap = {};
+    (remote.inWorkoutFeedback || []).concat(local.inWorkoutFeedback || []).forEach(function (r) {
+      if (!r) return;
+      inWorkoutFeedbackMap[r.workoutId + '|' + r.segmentIndex + '|' + r.type + '|' + r.at] = r;
+    });
+
     var logsMerged = mergeMapT(local.logs, remote.logs, localDK.logs, remoteDK.logs);
     var overridesMerged = mergeMapT(local.overrides, remote.overrides, localDK.overrides, remoteDK.overrides);
     // Typed schedule overrides (coach-negotiated day trades -- app.js
@@ -259,6 +279,13 @@
       // changing their mind about a conflict resolution should behave).
       scheduleChoices: scheduleChoicesMerged.value,
       weightEntries: Object.keys(weightEntriesMap).map(function (k) { return weightEntriesMap[k]; }),
+      autoAdjustMode: prefer.autoAdjustMode || 'confirm',
+      acknowledgedAdjustmentNotes: ackAdjustmentNotesUnion,
+      acknowledgedPlanWarnings: ackPlanWarningsUnion,
+      goalCheckpointResolved: prefer.goalCheckpointResolved !== undefined ? prefer.goalCheckpointResolved : false,
+      inWorkoutFeedback: Object.keys(inWorkoutFeedbackMap).map(function (k) { return inWorkoutFeedbackMap[k]; })
+        .sort(function (a, b) { return (a.at || 0) - (b.at || 0); })
+        .slice(-200),
       deletedKeys: {
         logs: logsMerged.deleted,
         overrides: overridesMerged.deleted,

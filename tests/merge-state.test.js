@@ -83,6 +83,47 @@ test('coachingHistory unions by natural key (workoutId|cueId|deliveredAt) withou
   assert.deepEqual(merged.coachingHistory.map((h) => h.cueId), ['intro_easy', 'safety_general'], 'sorted chronologically by deliveredAt');
 });
 
+// Regression: acknowledgedAdjustmentNotes/acknowledgedPlanWarnings (app.js
+// renderMain "Got it" acknowledge-gates), autoAdjustMode, and
+// goalCheckpointResolved were previously absent from mergeRunnerState's
+// return object entirely -- any cloud sync pull silently dropped them back
+// to undefined, so a dismissed warning card reappeared on the very next
+// sync (reported live: clicking "Got it" appeared to do nothing because a
+// pull raced the dismissal). Union + dedupe for the ack lists, same
+// append-only treatment as badges/sideQuestLog above, so an ack made on
+// either device survives merging with the other.
+test('acknowledgedAdjustmentNotes and acknowledgedPlanWarnings survive merge, unioned without duplication', function () {
+  const local = baseState({
+    lastModified: 2000,
+    acknowledgedAdjustmentNotes: ['note-a'],
+    acknowledgedPlanWarnings: ['warning-a']
+  });
+  const remote = baseState({
+    lastModified: 1000,
+    acknowledgedAdjustmentNotes: ['note-a', 'note-b'],
+    acknowledgedPlanWarnings: ['warning-b']
+  });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.deepEqual(merged.acknowledgedAdjustmentNotes.slice().sort(), ['note-a', 'note-b'], 'an ack made on either device must survive, deduplicated');
+  assert.deepEqual(merged.acknowledgedPlanWarnings.slice().sort(), ['warning-a', 'warning-b']);
+});
+
+test('autoAdjustMode and goalCheckpointResolved survive merge via the same wholesale-prefer-newer pattern as other settings', function () {
+  const local = baseState({ lastModified: 2000, autoAdjustMode: 'auto', goalCheckpointResolved: true });
+  const remote = baseState({ lastModified: 1000, autoAdjustMode: 'confirm', goalCheckpointResolved: false });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.autoAdjustMode, 'auto', 'newer (local) device\'s setting wins');
+  assert.equal(merged.goalCheckpointResolved, true);
+});
+
+test('inWorkoutFeedback unions by natural key (workoutId|segmentIndex|type|at) without duplication', function () {
+  const local = baseState({ lastModified: 2000, inWorkoutFeedback: [{ workoutId: 'w1', segmentIndex: 2, type: 'pain', at: 200 }] });
+  const remote = baseState({ lastModified: 1000, inWorkoutFeedback: [{ workoutId: 'w1', segmentIndex: 0, type: 'too_easy', at: 100 }] });
+  const merged = mergeState.mergeRunnerState(local, remote);
+  assert.equal(merged.inWorkoutFeedback.length, 2, 'both devices\' feedback entries must survive the union');
+  assert.deepEqual(merged.inWorkoutFeedback.map((f) => f.type), ['too_easy', 'pain'], 'sorted chronologically by at');
+});
+
 test('coachingHistory is capped to the most recent 200 entries after merging', function () {
   const many = [];
   for (let i = 0; i < 150; i++) many.push({ cueId: 'x' + i, category: 'encouragement', deliveredAt: i, workoutId: 'w1' });
