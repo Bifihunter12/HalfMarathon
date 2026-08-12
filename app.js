@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.12.1';
+  var APP_VERSION = '2026.08.12.2';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -3482,20 +3482,18 @@
     // injury-status warning (docs/COACHING_SPEC.md "Runner classification")
     // shares this same array and isn't about timeline safety, so it never
     // rendered under the old condition. Show whatever's actually in the array.
-    // Each warning needs a one-time "Got it" acknowledgement (same gate as
-    // the auto-adjustment note below) before it folds into this passive
-    // banner list -- otherwise it re-shows on every render, which is the
-    // exact complaint that prompted this gate.
+    // Each warning needs a one-time "Got it" acknowledgement before it's
+    // shown at all -- reported live: an earlier version folded a dismissed
+    // warning into a permanent quiet passive banner instead of actually
+    // removing it, which read as "clicking Got it does nothing" since the
+    // warning never stopped being visible. A dismissed plan warning is gone
+    // for good now, exactly like the original complaint asked for -- it only
+    // reappears if plan editing regenerates the exact same warning text
+    // again later.
     var planWarningsList = state.planMeta.warnings || [];
     var unackedPlanWarnings = planWarningsList.filter(function (w) {
       return state.acknowledgedPlanWarnings.indexOf(w) === -1;
     });
-    var ackedPlanWarnings = planWarningsList.filter(function (w) {
-      return state.acknowledgedPlanWarnings.indexOf(w) !== -1;
-    });
-    if (ackedPlanWarnings.length) {
-      warningsHtml += ackedPlanWarnings.map(function (w) { return '<div class="warn-banner"><i class="ti ti-alert-triangle"></i><span>' + escapeHtml(w) + '</span></div>'; }).join('');
-    }
     // docs section 13.3 -- an automatic weekly adjustment (coaching-rules.js
     // applyMissedAdjustment/applyDifficultyAdjustment) must be explicitly
     // acknowledged before it folds into the ordinary passive info banner,
@@ -4658,16 +4656,27 @@
     return 'data:audio/wav;base64,' + btoa(binary);
   }
 
-  function startKeepAliveAudio() {
-    if (_keepAliveAudioEl || typeof Audio === 'undefined') return;
-    try {
-      var el = new Audio(_silentLoopDataUri());
-      el.loop = true;
-      el.volume = 0.01; // real, non-zero playback -- some platforms deprioritize a fully muted/zero-volume element same as a paused one
-      var p = el.play();
-      if (p && p.catch) p.catch(function () {}); // autoplay can be blocked in rare cases; never let this break workout start
-      _keepAliveAudioEl = el;
-    } catch (e) {}
+  function startKeepAliveAudio(normalized) {
+    if (!_keepAliveAudioEl && typeof Audio !== 'undefined') {
+      try {
+        var el = new Audio(_silentLoopDataUri());
+        el.loop = true;
+        el.volume = 0.01; // real, non-zero playback -- some platforms deprioritize a fully muted/zero-volume element same as a paused one
+        var p = el.play();
+        if (p && p.catch) p.catch(function () {}); // autoplay can be blocked in rare cases; never let this break workout start
+        _keepAliveAudioEl = el;
+      } catch (e) {}
+    }
+    // Reported live: setting mediaSession.metadata on every ~500ms tick (a
+    // brand-new MediaMetadata object each time, even with unchanged values)
+    // made some Bluetooth headsets/Android treat it as a new track every
+    // tick and re-announce the title in the system's own voice, layered
+    // over the coach's own voice -- "two different voices." Set it once,
+    // here, on entering the workout; the per-tick updateMediaSession below
+    // only touches playbackState/position, never metadata.
+    if (typeof navigator !== 'undefined' && navigator.mediaSession && typeof MediaMetadata !== 'undefined') {
+      try { navigator.mediaSession.metadata = new MediaMetadata({ title: normalized.title, artist: 'Zaera Running Coach' }); } catch (e) {}
+    }
   }
 
   function stopKeepAliveAudio() {
@@ -4679,10 +4688,10 @@
 
   // Called on every tick while a workout is active -- cheap, and the OS lock
   // screen needs a fresh position to keep its own live timer accurate.
+  // Deliberately never touches metadata (see startKeepAliveAudio above).
   function updateMediaSession(normalized, machine) {
-    if (typeof navigator === 'undefined' || !navigator.mediaSession || typeof MediaMetadata === 'undefined') return;
+    if (typeof navigator === 'undefined' || !navigator.mediaSession) return;
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: normalized.title, artist: 'Zaera Running Coach' });
       navigator.mediaSession.playbackState = machine.state.phase === 'paused' ? 'paused' : 'playing';
       if (navigator.mediaSession.setPositionState) {
         var elapsedSec = machine.elapsedActiveMs() / 1000;
@@ -4870,7 +4879,7 @@
     } else if (!_activeCoachingSessionId && _activeMachine.state.startedAt) {
       _activeCoachingSessionId = key + ':' + _activeMachine.state.startedAt;
     }
-    startKeepAliveAudio();
+    startKeepAliveAudio(normalized);
     var machine = _activeMachine;
 
     var app = document.getElementById('app');
