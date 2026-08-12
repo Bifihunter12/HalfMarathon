@@ -71,6 +71,31 @@ test('Coach mode (default): optional technique cues are reachable outside the si
   assert.ok(cue, 'a technique/posture/stride/breathing/effort cue should be selectable in Coach mode with no recent history');
 });
 
+test('startup intro includes plan-phase coaching when the training phase is known', function () {
+  const cue = CoachingCues.selectCoachingCue(ctx({
+    workoutType: 'easy',
+    trainingPhase: 'taper',
+    triggerEvent: 'workout_start',
+    cueHistory: [{ cueId: 'safety_general', category: 'safety', deliveredAt: 1 }]
+  }));
+  assert.equal(cue.cueId, 'intro_easy');
+  assert.match(cue.text, /taper work/i);
+  assert.match(cue.text, /do not test fitness/i);
+});
+
+test('long runs get a workout-purpose cue before generic form chatter', function () {
+  const cue = CoachingCues.selectCoachingCue(ctx({
+    workoutType: 'long',
+    segment: { kind: 'continuous', intervalNumber: null, totalIntervals: null },
+    segmentElapsedSec: 150,
+    segmentRemainingSec: 600,
+    focusTopic: 'talk_test_effort',
+    cueHistory: SAFETY_ALREADY_DELIVERED
+  }));
+  assert.equal(cue.cueId, 'purpose_long');
+  assert.match(cue.text, /steady time on feet/i);
+});
+
 test('Detailed mode allows a shorter minimum gap between optional cues than Coach mode', function () {
   const detailedPrefs = Object.assign({}, CoachingCues.defaultCoachingPreferences(), { frequency: 'detailed' });
   const history = [{ cueId: 'posture_relaxed', category: 'posture', deliveredAt: 1000000 - 100000 }]; // 100s ago
@@ -401,7 +426,8 @@ test('completion_full: rotates through genuinely different openers across workou
   function safetyDeliveredFor(workoutId) { return SAFETY_ALREADY_DELIVERED.map(function (h) { return Object.assign({}, h, { workoutId: workoutId }); }); }
 
   const first = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', workoutId: 'w1', cueHistory: safetyDeliveredFor('w1') }));
-  assert.equal(first.text, 'Mission complete.');
+  assert.match(first.text, /^Mission complete\./);
+  assert.match(first.text, /recovery seriously|Log how it felt|fluids and food|effort honestly/);
 
   const priorCompletions = [{ cueId: 'completion_full', category: 'completion', deliveredAt: 1, workoutId: 'w1' }];
   const second = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', workoutId: 'w2', cueHistory: safetyDeliveredFor('w2').concat(priorCompletions) }));
@@ -415,7 +441,8 @@ test('completion_full: rotates through genuinely different openers across workou
 
 test('completion_full: the interval-count note is preserved across every rotated variant', function () {
   const result = CoachingCues.selectCoachingCue(ctx({ triggerEvent: 'complete', cueHistory: SAFETY_ALREADY_DELIVERED, completedIntervalCount: 6 }));
-  assert.match(result.text, /You completed all 6 running intervals\.$/);
+  assert.match(result.text, /You completed all 6 running intervals\./);
+  assert.match(result.text, /recovery seriously|Log how it felt|fluids and food|effort honestly/);
 });
 
 test('final_third: selected on a final_third trigger event, once per workout', function () {

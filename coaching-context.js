@@ -27,7 +27,7 @@
   // "implausible-reading rejection"), same effect as no reading at all.
   var HR_PLAUSIBLE_MIN = 30, HR_PLAUSIBLE_MAX = 230;
 
-  // inputs: { workoutType, workoutGoal, phase, segment, segmentIndex,
+  // inputs: { workoutType, workoutGoal, phase, trainingPhase, segment, segmentIndex,
   // segmentCount, segmentElapsedSec, segmentRemainingSec, workoutElapsedSec,
   // workoutRemainingSec, prescription: {rpe, paceMinSecPerMi, paceMaxSecPerMi,
   // hrZone}, runnerExperience, units, indoorOutdoor, sensorSnapshot (partial,
@@ -79,6 +79,7 @@
     return {
       workoutType: inputs.workoutType || null,
       workoutGoal: inputs.workoutGoal || null,
+      trainingPhase: inputs.trainingPhase || null,
       phase: inputs.phase || null,
       segmentType: segment ? segment.kind : null,
       // Interval numbering/final-interval detection -- read straight off

@@ -1104,6 +1104,9 @@ dl.wd-info dd {
 .wd-runner-start { margin: 18px 0; }
 .wd-runner-structure { font-size: 13.5px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.5; }
 .wd-coaching-focus { font-size: 13px; color: var(--accent); margin-bottom: 10px; }
+.wd-coach-preview,
+.wd-practical-block { margin: 14px 0; }
+.wd-coach-preview .ob-btn { margin-top: 10px; }
 .wd-start-btn { width: 100%; font-size: 17px; padding: 16px; }
 
 /* Active-workout screen -- large text and touch targets throughout (usable

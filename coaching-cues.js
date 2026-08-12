@@ -204,6 +204,43 @@
     if (remainder) text += ' ' + remainder + ' second' + (remainder === 1 ? '' : 's');
     return text;
   }
+  function phaseCue(ctx) {
+    switch (ctx.trainingPhase) {
+      case 'base': return 'This is base work: patient, repeatable, and almost boring when done right.';
+      case 'build': return 'This is build work: enough stress to adapt, not so much that tomorrow falls apart.';
+      case 'peak': return 'This is peak work: protect the key stimulus and leave the extras alone.';
+      case 'taper': return 'This is taper work: stay sharp, stay fresh, and do not test fitness today.';
+      case 'race': return 'This is race-week work: calm, short, and nothing new.';
+      default: return null;
+    }
+  }
+  function workoutPurpose(ctx) {
+    switch (ctx.workoutType) {
+      case 'easy': return 'You are building the aerobic engine today. If it feels almost too easy, that is usually right.';
+      case 'long': return 'The long run is about steady time on feet. Spend energy slowly so you still own the finish.';
+      case 'tempo': return 'Tempo work should feel controlled-hard. You are practicing pressure, not strain.';
+      case 'intervals_time':
+      case 'intervals_manual': return 'Intervals teach speed and economy. The first reps should feel controlled enough to match later.';
+      case 'run_walk': return 'Run-walk is real training. Keep the run portions easy enough that the walk breaks stay calm.';
+      case 'cross': return 'Cross-training supports the running plan without adding the same impact load.';
+      default: return null;
+    }
+  }
+  function introLine(ctx, base) {
+    var phase = phaseCue(ctx);
+    return base + (phase ? ' ' + phase : '');
+  }
+  function postRunLine(ctx) {
+    switch (ctx.workoutType) {
+      case 'long': return ' Walk a few minutes, get fluids and food in, and note any hot spots before they become problems.';
+      case 'tempo':
+      case 'intervals_time':
+      case 'intervals_manual': return ' Take the recovery seriously: easy movement, fluids, carbs, and protein will help this workout land.';
+      case 'run_walk': return ' Log how it felt, especially whether the run portions stayed relaxed.';
+      case 'cross': return ' Log the effort honestly so the plan can respect the load.';
+      default: return ' Log how it felt. No need to judge it from one run.';
+    }
+  }
 
   var CUE_CATALOG = [
     // ── Safety (priority 1) -- always eligible, no data requirements ──
@@ -219,37 +256,37 @@
       id: 'intro_easy', category: 'introduction', applicableWorkoutTypes: ['easy'], applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Today\'s mission is an easy run. Keep the effort conversational.'; }
+      buildText: function (ctx) { return introLine(ctx, 'Today is an easy run. Keep it conversational; the easy feeling is the point.'); }
     },
     {
       id: 'intro_long', category: 'introduction', applicableWorkoutTypes: ['long'], applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Today\'s mission is your long run. Settle into a controlled pace — finishing strong matters more than speed.'; }
+      buildText: function (ctx) { return introLine(ctx, 'Today is your long run. Start calm; finishing steady matters more than proving speed early.'); }
     },
     {
       id: 'intro_tempo', category: 'introduction', applicableWorkoutTypes: ['tempo'], applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Today\'s mission is a tempo effort. You\'ll settle into a comfortably hard pace and hold it steady.'; }
+      buildText: function (ctx) { return introLine(ctx, 'Today is a tempo effort. Find controlled-hard, then hold it without forcing.'); }
     },
     {
       id: 'intro_intervals', category: 'introduction', applicableWorkoutTypes: ['intervals_time', 'intervals_manual'], applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Today\'s mission is ' + (ctx.segmentCount ? Math.max(1, Math.round((ctx.segmentCount - 1) / 2)) : 'several') + ' running intervals with recovery between each. Run the work efforts strong, but stay in control.'; }
+      buildText: function (ctx) { return introLine(ctx, 'Today is ' + (ctx.segmentCount ? Math.max(1, Math.round((ctx.segmentCount - 1) / 2)) : 'several') + ' intervals with recovery between. Earn the last rep by keeping the first one controlled.'); }
     },
     {
       id: 'intro_run_walk', category: 'introduction', applicableWorkoutTypes: ['run_walk'], applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Today\'s mission is a run-walk workout. Keep the running easy and controlled.'; }
+      buildText: function (ctx) { return introLine(ctx, 'Today is run-walk. The walk breaks are part of the workout, not a backup plan.'); }
     },
     {
       id: 'intro_cross', category: 'introduction', applicableWorkoutTypes: ['cross'], applicableSegmentTypes: null,
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1,
-      buildText: function (ctx) { return 'Today\'s session is purposeful cross-training. Keep the effort controlled throughout.'; }
+      buildText: function (ctx) { return introLine(ctx, 'Today is purposeful cross-training. Build fitness while giving your running legs a break.'); }
     },
 
     // ── Immediate transitions (priority 2) -- one per segment kind ──
@@ -266,7 +303,7 @@
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       buildText: function (ctx) {
-        if (ctx.isFinalInterval) return 'Final running interval. Stay smooth; there\'s no need to sprint.';
+        if (ctx.isFinalInterval) return 'Final running interval. Strong and smooth, not desperate.';
         var intervalPart = ctx.segmentTotalIntervals > 1 ? 'Interval ' + ctx.segmentIntervalNumber + ' of ' + ctx.segmentTotalIntervals + '. ' : '';
         var durationPart = ctx.segmentRemainingSec ? ' for ' + fmtDuration(ctx.segmentRemainingSec) : '';
         var effort = ctx.prescribedPaceMin != null && ctx.prescribedPaceMax != null
@@ -274,10 +311,10 @@
           : ctx.workoutType === 'tempo'
             ? ' Settle into a comfortably hard, controlled effort' + durationPart + '.'
             : (ctx.workoutType === 'intervals_time' || ctx.workoutType === 'intervals_manual')
-              ? ' Run strong but controlled' + durationPart + '. Do not sprint.'
+              ? ' Run strong but controlled' + durationPart + '. Save enough to make the last rep look like this one.'
               : ctx.workoutType === 'cross'
                 ? ' Keep this session controlled' + durationPart + '.'
-                : ' Keep an easy, conversational effort' + durationPart + '.';
+                : ' Keep an easy, conversational effort' + durationPart + '. If it feels too easy, good.';
         return 'Start running.' + (intervalPart ? ' ' + intervalPart.trim() : '') + effort;
       }
     },
@@ -287,8 +324,8 @@
       experienceLevels: null, minimumSegmentDurationSec: 0, earliestSegmentOffsetSec: 0, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
       buildText: function (ctx) {
-        if (ctx.isFinalInterval) return 'Final repetition. Run it strong, then mark it done when you finish.';
-        return 'Repetition ' + ctx.segmentIntervalNumber + ' of ' + ctx.segmentTotalIntervals + '. Run it at your effort, then mark it done when you finish.';
+        if (ctx.isFinalInterval) return 'Final repetition. Run it strong and controlled, then mark it done when you finish.';
+        return 'Repetition ' + ctx.segmentIntervalNumber + ' of ' + ctx.segmentTotalIntervals + '. Match the planned effort, then mark it done when you finish.';
       }
     },
     {
@@ -350,9 +387,9 @@
       // appears in the runner's full cue history -- these three just give
       // it real variety to rotate through.
       textVariants: [
-        'You\'re halfway. Stay relaxed — this should still feel sustainable.',
-        'Halfway there. Keep building, nice and controlled.',
-        'That\'s the halfway point. You\'re doing exactly what today asks for.'
+        'You\'re halfway. Stay relaxed; this should still feel sustainable.',
+        'Halfway there. Do not spend energy you will want later.',
+        'That is the halfway point. Keep doing exactly what today asks for.'
       ]
     },
     {
@@ -363,7 +400,7 @@
       textVariants: [
         'You\'re into the final third. Stay smooth and finish this the way you started.',
         'Final stretch now. Keep the effort honest, not heroic.',
-        'You\'re in the closing third — hold the same effort, don\'t chase the finish.'
+        'You are in the closing third. Hold the same effort; do not chase the finish.'
       ]
     },
 
@@ -384,7 +421,7 @@
         var timesUsed = (ctx.fullCueHistory || []).filter(function (h) { return h.cueId === 'completion_full'; }).length;
         var opener = openers[timesUsed % openers.length];
         var intervalNote = ctx.completedIntervalCount ? ' You completed all ' + ctx.completedIntervalCount + ' running intervals.' : '';
-        return opener + intervalNote;
+        return opener + intervalNote + postRunLine(ctx);
       }
     },
 
@@ -439,16 +476,46 @@
 
     // ── Effort coaching ──
     {
+      id: 'purpose_easy', category: 'effort', applicableWorkoutTypes: ['easy'], applicableSegmentTypes: ['work', 'continuous'],
+      experienceLevels: null, minimumSegmentDurationSec: 120, earliestSegmentOffsetSec: 90, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'talk_test_effort',
+      buildText: workoutPurpose
+    },
+    {
+      id: 'purpose_long', category: 'effort', applicableWorkoutTypes: ['long'], applicableSegmentTypes: ['work', 'continuous'],
+      experienceLevels: null, minimumSegmentDurationSec: 180, earliestSegmentOffsetSec: 120, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'talk_test_effort',
+      buildText: workoutPurpose
+    },
+    {
+      id: 'purpose_quality', category: 'effort', applicableWorkoutTypes: ['tempo', 'intervals_time', 'intervals_manual'], applicableSegmentTypes: ['work', 'continuous', 'manual_rep'],
+      experienceLevels: null, minimumSegmentDurationSec: 90, earliestSegmentOffsetSec: 45, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'pacing_first_interval',
+      buildText: workoutPurpose
+    },
+    {
+      id: 'purpose_run_walk', category: 'effort', applicableWorkoutTypes: ['run_walk'], applicableSegmentTypes: ['work', 'continuous'],
+      experienceLevels: null, minimumSegmentDurationSec: 90, earliestSegmentOffsetSec: 45, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'talk_test_effort',
+      buildText: workoutPurpose
+    },
+    {
+      id: 'purpose_cross', category: 'effort', applicableWorkoutTypes: ['cross'], applicableSegmentTypes: ['work', 'continuous'],
+      experienceLevels: null, minimumSegmentDurationSec: 120, earliestSegmentOffsetSec: 60, latestSegmentOffsetSec: null,
+      minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'controlled_breathing',
+      buildText: workoutPurpose
+    },
+    {
       id: 'effort_talk_test', category: 'effort', applicableWorkoutTypes: ['easy', 'long', 'run_walk'], applicableSegmentTypes: ['work', 'continuous'],
       experienceLevels: null, minimumSegmentDurationSec: 90, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 2, topic: 'talk_test_effort',
-      textVariants: ['You should be able to speak in complete sentences.', 'Run easy and controlled — you should feel like you could continue longer.']
+      textVariants: ['You should be able to speak in complete sentences.', 'Run easy and controlled. You should feel like you could continue longer.', 'This is not a test of toughness. Keep the effort honest and easy.']
     },
     {
       id: 'effort_rpe', category: 'effort', applicableWorkoutTypes: ['tempo', 'intervals_time', 'intervals_manual'], applicableSegmentTypes: ['work', 'continuous', 'manual_rep'],
       experienceLevels: null, minimumSegmentDurationSec: 90, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: ['prescribedRpe'], conflictsWith: [], maxPerWorkout: 2,
-      buildText: function (ctx) { return 'Aim for an effort around ' + ctx.prescribedRpe + ' out of ten.'; }
+      buildText: function (ctx) { return 'Aim for an effort around ' + ctx.prescribedRpe + ' out of ten. Work, but do not strain.'; }
     },
     {
       id: 'effort_no_sprint', category: 'effort', applicableWorkoutTypes: ['intervals_time', 'intervals_manual'], applicableSegmentTypes: ['work', 'manual_rep'],
@@ -460,7 +527,7 @@
       id: 'effort_first_interval_control', category: 'effort', applicableWorkoutTypes: ['intervals_time', 'intervals_manual'], applicableSegmentTypes: ['work', 'manual_rep'],
       experienceLevels: null, minimumSegmentDurationSec: 45, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 1, topic: 'pacing_first_interval', firstIntervalOnly: true,
-      textVariants: ['Keep this first interval controlled. The goal is to finish the last one as strongly as the first.']
+      textVariants: ['Keep this first interval controlled. Earn the last one.', 'First rep sets the ceiling. Smooth now, strong later.']
     },
 
     // ── Posture coaching ──
@@ -510,7 +577,7 @@
       id: 'recovery_breathing_only', category: 'recovery_guidance', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery'],
       experienceLevels: null, minimumSegmentDurationSec: 45, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: null,
-      textVariants: ['Keep walking until your breathing feels controlled again.']
+      textVariants: ['Keep walking until your breathing feels controlled again.', 'This recovery is part of the workout. Let it do its job.']
     },
     {
       id: 'recovery_prepare_next', category: 'recovery_guidance', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery'],
@@ -525,7 +592,7 @@
       id: 'encourage_general', category: 'encouragement', applicableWorkoutTypes: null, applicableSegmentTypes: ['work', 'continuous', 'manual_rep'],
       experienceLevels: null, minimumSegmentDurationSec: 60, earliestSegmentOffsetSec: POST_TRANSITION_SILENCE_SEC, latestSegmentOffsetSec: null,
       minimumGapSec: 0, requiresData: [], conflictsWith: [], maxPerWorkout: 2,
-      textVariants: ['Good. Keep this effort controlled.', 'Walking is part of today\'s workout.']
+      textVariants: ['Good. Keep this effort controlled.', 'That was controlled. Keep the next piece the same.', 'You are doing the job this session asked for.']
     },
     {
       id: 'encourage_beginner_permission', category: 'encouragement', applicableWorkoutTypes: null, applicableSegmentTypes: ['recovery', 'manual_rep'],

@@ -11,7 +11,7 @@
   // stale-cached, this constant is stale right along with it, which is
   // exactly the signal that matters -- an old app.js showing an old
   // version number here is the diagnostic, not a bug.
-  var APP_VERSION = '2026.08.12.2';
+  var APP_VERSION = '2026.08.12.3';
   var SideQuestDomain = window.ZaeraSideQuests || {};
   var PathDomain = window.ZaeraPath || {};
   var MergeStateDomain = window.ZaeraMergeState || {};
@@ -93,6 +93,10 @@
   var CROSS_OPTIONS = ['Bike', 'Swim', 'Elliptical', 'Row', 'Hike', 'Strength', 'Yoga', 'Other', 'None'];
   var RACE_RESULT_DISTANCES = ['none', '5k', '10k', 'half', 'marathon'];
   var RACE_RESULT_LABEL = { none: 'None', '5k': '5K', '10k': '10K', half: 'Half', marathon: 'Marathon' };
+  var RECOVERY_LABEL = { solid: 'Usually solid', mixed: 'Mixed', poor: 'Often poor' };
+  var STRENGTH_BACKGROUND_LABEL = { none: 'New to strength', some: 'Some experience', regular: 'Regular strength work' };
+  var WEATHER_CONCERN_LABEL = { none: 'No major issue', heat: 'Heat', cold: 'Cold', altitude: 'Altitude' };
+  var FUELING_STYLE_LABEL = { standard: 'No special needs', sensitive: 'Sensitive stomach', plant_based: 'Plant-based', restricted: 'Restricted diet' };
 
   var INCREASE_PCT = CoachingRulesDomain.INCREASE_PCT;
   var CUTBACK_PCT = CoachingRulesDomain.CUTBACK_PCT;
@@ -640,6 +644,9 @@
   // docs/SAFETY_POLICY.md -- moved to coaching-rules.js so this safety-critical
   // triage rubric can finally have automated test coverage.
   var painGuidance = CoachingRulesDomain.painGuidance;
+  var safetyEscalation = CoachingRulesDomain.safetyEscalation;
+  var fuelingHydrationGuidance = CoachingRulesDomain.fuelingHydrationGuidance;
+  var raceWeekChecklist = CoachingRulesDomain.raceWeekChecklist;
 
   function isRest(label) { return /^rest\b/i.test(label.trim()); }
   // docs/COACHING_SPEC.md "Optional activity logging on rest days" -- every
@@ -2239,10 +2246,15 @@
     var app = document.getElementById('app');
     app.innerHTML = '';
     var isEdit = !!prefill;
-    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null, preferRunWalkThroughRace: false, customizeWeeklyAvailability: false, weeklyAvailabilityDays: ['0', '1', '2', '3', '4', '5', '6'], weeklyAvailabilityPossibleDays: [], preferredLongRunDay: null };
+    var draft = prefill || { event: null, raceName: '', raceDate: '', startDate: dateToISO(new Date()), goal: 'finish', weeklyMileage: 10, longestRun: 4, runDaysPerWeek: 3, typicalWorkoutMinutes: 45, recoveryPattern: 'mixed', strengthBackground: 'some', weatherConcern: 'none', fuelingStyle: 'standard', experienceLevel: 'novice', injuryStatus: 'resolved', canRunContinuously: true, availableDays: 4, terrains: ['road'], crossOptions: ['Bike'], recentRaceDistance: 'none', recentRaceTime: '', userName: state.userName, recurringWorkouts: [], hasRecurringWorkouts: false, rwDraftActivity: null, rwDraftDay: null, rwDraftIntensity: 'moderate', rwDraftRecurrence: 'weekly', rwDraftTimeWindow: null, preferRunWalkThroughRace: false, customizeWeeklyAvailability: false, weeklyAvailabilityDays: ['0', '1', '2', '3', '4', '5', '6'], weeklyAvailabilityPossibleDays: [], preferredLongRunDay: null };
     if (draft.raceName === undefined) draft.raceName = ''; // editing a plan created before this field existed
     if (!draft.injuryStatus) draft.injuryStatus = draft.recentInjury ? 'mild_discomfort' : 'resolved'; // migrate the legacy boolean for an existing plan being edited
     if (draft.canRunContinuously === undefined) draft.canRunContinuously = true; // pre-existing plans never asked this -- default preserves their current continuous-mileage behavior exactly
+    if (draft.typicalWorkoutMinutes == null) draft.typicalWorkoutMinutes = 45;
+    if (!draft.recoveryPattern) draft.recoveryPattern = 'mixed';
+    if (!draft.strengthBackground) draft.strengthBackground = 'some';
+    if (!draft.weatherConcern) draft.weatherConcern = 'none';
+    if (!draft.fuelingStyle) draft.fuelingStyle = 'standard';
     if (!draft.recurringWorkouts) draft.recurringWorkouts = [];
     var step = 0;
     // docs/COACHING_SPEC.md "Recurring workouts" -- the "Existing workouts"
@@ -2345,6 +2357,12 @@
           '<div class="ob-sub">' + stepLabel + '</div>' +
           '<div class="ob-label">Days per week you can train</div>' +
           '<input class="ob-input" type="number" min="3" max="7" step="1" id="f_availableDays" value="' + draft.availableDays + '">' +
+          '<div class="ob-label" style="margin-top:14px">Usual time available for a normal workout</div>' +
+          '<input class="ob-input" type="number" min="15" max="240" step="5" id="f_typicalWorkoutMinutes" value="' + draft.typicalWorkoutMinutes + '">' +
+          '<div class="ob-label" style="margin-top:14px">Sleep and recovery lately</div>' +
+          '<div class="chip-grid">' + chipsHtml('recoveryPattern', ['solid', 'mixed', 'poor'], RECOVERY_LABEL, draft.recoveryPattern, false) + '</div>' +
+          '<div class="ob-label" style="margin-top:14px">Strength-training background</div>' +
+          '<div class="chip-grid">' + chipsHtml('strengthBackground', ['none', 'some', 'regular'], STRENGTH_BACKGROUND_LABEL, draft.strengthBackground, false) + '</div>' +
           '<div class="ob-label" style="margin-top:14px">Do specific weekdays work better for running than others?</div>' +
           '<div class="chip-grid">' + chipsHtml('customizeWeeklyAvailability', ['no', 'yes'], { no: 'No, any day works', yes: 'Yes, let me pick' }, draft.customizeWeeklyAvailability ? 'yes' : 'no', false) + '</div>' +
           (draft.customizeWeeklyAvailability ?
@@ -2371,6 +2389,10 @@
             : '') +
           '<div class="ob-label" style="margin-top:14px">Terrain</div>' +
           '<div class="chip-grid">' + chipsHtml('terrains', TERRAINS, TERRAIN_LABEL, draft.terrains, true) + '</div>' +
+          '<div class="ob-label">Main condition you train around</div>' +
+          '<div class="chip-grid">' + chipsHtml('weatherConcern', ['none', 'heat', 'cold', 'altitude'], WEATHER_CONCERN_LABEL, draft.weatherConcern, false) + '</div>' +
+          '<div class="ob-label">Fueling notes</div>' +
+          '<div class="chip-grid">' + chipsHtml('fuelingStyle', ['standard', 'sensitive', 'plant_based', 'restricted'], FUELING_STYLE_LABEL, draft.fuelingStyle, false) + '</div>' +
           '<div class="ob-label">Cross-training available</div>' +
           '<div class="chip-grid">' + chipsHtml('crossOptions', CROSS_OPTIONS, null, draft.crossOptions, true) + '</div>' +
           '<div class="ob-label">How\'s your running-related injury or pain situation right now?</div>' +
@@ -2404,6 +2426,8 @@
         if (rdpw) draft.runDaysPerWeek = parseInt(rdpw.value, 10) || 0;
         var ad = document.getElementById('f_availableDays');
         if (ad) draft.availableDays = parseInt(ad.value, 10) || 4;
+        var twm = document.getElementById('f_typicalWorkoutMinutes');
+        if (twm) draft.typicalWorkoutMinutes = parseInt(twm.value, 10) || 45;
         var un = document.getElementById('f_userName');
         if (un) draft.userName = un.value;
         var rrt = document.getElementById('f_recentRaceTime');
@@ -2606,7 +2630,9 @@
     var oldGoal = state.raceGoal, oldMeta = state.planMeta;
     var previewProfile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
-      experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays
+      experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously, availableDays: draft.availableDays,
+      typicalWorkoutMinutes: draft.typicalWorkoutMinutes, recoveryPattern: draft.recoveryPattern, strengthBackground: draft.strengthBackground,
+      weatherConcern: draft.weatherConcern, fuelingStyle: draft.fuelingStyle
     };
     var level = classifyUser(previewProfile);
     var weeksAvailable = weeksBetween(parseDate(draft.startDate), parseDate(draft.raceDate));
@@ -2647,6 +2673,8 @@
     var raceResultValid = draft.recentRaceDistance && draft.recentRaceDistance !== 'none' && parseRaceTimeToMinutes(draft.recentRaceTime);
     var profile = {
       weeklyMileage: draft.weeklyMileage, longestRun: draft.longestRun, runDaysPerWeek: draft.runDaysPerWeek,
+      typicalWorkoutMinutes: draft.typicalWorkoutMinutes, recoveryPattern: draft.recoveryPattern, strengthBackground: draft.strengthBackground,
+      weatherConcern: draft.weatherConcern, fuelingStyle: draft.fuelingStyle,
       experienceLevel: draft.experienceLevel, injuryStatus: draft.injuryStatus, canRunContinuously: draft.canRunContinuously,
       preferRunWalkThroughRace: !!draft.preferRunWalkThroughRace, availableDays: draft.availableDays,
       terrains: draft.terrains && draft.terrains.length ? draft.terrains : ['road'], crossOptions: draft.crossOptions.length ? draft.crossOptions : ['None'],
@@ -2796,6 +2824,11 @@
     return {
       event: state.raceGoal.event, raceName: state.raceGoal.raceName || '', raceDate: state.raceGoal.raceDate, startDate: state.raceGoal.startDate || dateToISO(new Date()), goal: state.raceGoal.goal,
       weeklyMileage: state.profile.weeklyMileage, longestRun: state.profile.longestRun, runDaysPerWeek: state.profile.runDaysPerWeek,
+      typicalWorkoutMinutes: state.profile.typicalWorkoutMinutes || 45,
+      recoveryPattern: state.profile.recoveryPattern || 'mixed',
+      strengthBackground: state.profile.strengthBackground || 'some',
+      weatherConcern: state.profile.weatherConcern || 'none',
+      fuelingStyle: state.profile.fuelingStyle || 'standard',
       experienceLevel: state.profile.experienceLevel, injuryStatus: state.profile.injuryStatus, recentInjury: state.profile.recentInjury, canRunContinuously: state.profile.canRunContinuously, availableDays: state.profile.availableDays,
       preferRunWalkThroughRace: !!state.profile.preferRunWalkThroughRace,
       terrains: (state.profile.terrains || ['road']).slice(), crossOptions: state.profile.crossOptions.slice(),
@@ -4431,10 +4464,17 @@
     app.innerHTML = '';
     app.appendChild(el('<div class="subnav">' + headerIconsHtml('safetyBtn') + '</div>'));
     wireHeaderIcons();
+    var red = safetyEscalation ? safetyEscalation({ chestPain: true }) : null;
+    var yellow = safetyEscalation ? safetyEscalation({ sharpFocalBonePain: true }) : null;
+    var green = safetyEscalation ? safetyEscalation({}) : null;
     var wrap = el(
       '<div class="ob">' +
         '<div class="ob-title">When to stop and see a doctor</div>' +
-        '<div class="ob-sub">Seek medical evaluation if you experience any of these</div>' +
+        '<div class="ob-sub">Coach decision ladder</div>' +
+        (red ? '<div class="pain-guidance pain-guidance--urgent"><strong>' + escapeHtml(red.title) + '.</strong> ' + escapeHtml(red.text) + '</div>' : '') +
+        (yellow ? '<div class="pain-guidance pain-guidance--caution"><strong>' + escapeHtml(yellow.title) + '.</strong> ' + escapeHtml(yellow.text) + '</div>' : '') +
+        (green ? '<div class="pain-guidance pain-guidance--mild"><strong>' + escapeHtml(green.title) + '.</strong> ' + escapeHtml(green.text) + '</div>' : '') +
+        '<div class="ob-sub" style="margin-top:18px">Seek medical evaluation if you experience any of these</div>' +
         '<ul class="red-flag-list">' +
           RED_FLAGS.map(function (f) { return '<li>' + escapeHtml(f) + '</li>'; }).join('') +
         '</ul>' +
@@ -4760,7 +4800,7 @@
   // this to know whether it's worth trying again for a second, different
   // essential cue at the very start of a workout (see
   // fireStartupCoachingSequence below).
-  function processCoachingTick(dayData, normalized, workoutType, terrainHint, triggerEvent, extra) {
+  function processCoachingTick(dayData, normalized, workoutType, terrainHint, trainingPhase, triggerEvent, extra) {
     if (!_activeMachine || !CoachingContextDomain.buildCoachingContext || !CoachingCuesDomain.selectCoachingCue) return false;
     var seg = _activeMachine.segAt(_activeMachine.state.segmentIndex);
     var now = Date.now();
@@ -4772,6 +4812,7 @@
     var context = CoachingContextDomain.buildCoachingContext(Object.assign({
       currentTime: now,
       workoutType: workoutType,
+      trainingPhase: trainingPhase,
       phase: _activeMachine.state.phase,
       segment: seg,
       segmentIndex: _activeMachine.state.segmentIndex,
@@ -4815,9 +4856,9 @@
   // right after machine.start(), before the ordinary per-tick flow begins.
   // Capped at 2 attempts: exactly enough for safety-then-intro, never an
   // open-ended loop.
-  function fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint) {
+  function fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint, trainingPhase) {
     for (var i = 0; i < 2; i++) {
-      if (!processCoachingTick(dayData, normalized, workoutType, terrainHint, 'workout_start')) break;
+      if (!processCoachingTick(dayData, normalized, workoutType, terrainHint, trainingPhase, 'workout_start')) break;
     }
   }
 
@@ -4829,13 +4870,13 @@
   // call (and therefore at most one spoken cue) per tick, matching "never
   // speak two full cues simultaneously."
   var TRIGGER_EVENT_PRIORITY = ['complete', 'paused', 'resumed', 'final_interval', 'segment_start', 'warning_10s', 'halfway', 'final_third'];
-  function playDueCues(dayData, normalized, workoutType, terrainHint) {
+  function playDueCues(dayData, normalized, workoutType, terrainHint, trainingPhase) {
     if (!_activeMachine) return;
     var drained = _activeMachine.drainCues();
     var chosen = null;
     TRIGGER_EVENT_PRIORITY.forEach(function (t) { if (!chosen && drained.some(function (c) { return c.type === t; })) chosen = t; });
     var extra = chosen === 'complete' ? { completedIntervalCount: countWorkIntervals(normalized) } : null;
-    processCoachingTick(dayData, normalized, workoutType, terrainHint, chosen, extra);
+    processCoachingTick(dayData, normalized, workoutType, terrainHint, trainingPhase, chosen, extra);
   }
 
   // Only meaningful for interval-style workouts -- the completion cue's
@@ -4860,6 +4901,7 @@
     // startable/runnable here, not just a relabeled rest day that
     // normalizeWorkout would still refuse to turn into a real session.
     var dayData = effectiveWorkoutForDay(result.weeks[weekNum - 1].days[dayIdx], key);
+    var trainingPhase = result.weeks[weekNum - 1] ? result.weeks[weekNum - 1].phase : null;
     var label = dayData.label;
     var normalized = WorkoutRunnerDomain.normalizeWorkout ? WorkoutRunnerDomain.normalizeWorkout(dayData, { label: label }) : null;
     if (!normalized) { renderWorkoutDetail(weekNum, dayIdx); return; } // not an executable workout type -- safe fallback, never a blank/broken screen
@@ -4875,7 +4917,7 @@
       _activeMachine.start();
       _activeCoachingSessionId = key + ':' + _activeMachine.state.startedAt;
       persistActiveSession(normalized);
-      fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint);
+      fireStartupCoachingSequence(dayData, normalized, workoutType, terrainHint, trainingPhase);
     } else if (!_activeCoachingSessionId && _activeMachine.state.startedAt) {
       _activeCoachingSessionId = key + ':' + _activeMachine.state.startedAt;
     }
@@ -4970,7 +5012,7 @@
 
     function tick() {
       machine.reconcile();
-      playDueCues(dayData, normalized, workoutType, terrainHint);
+      playDueCues(dayData, normalized, workoutType, terrainHint, trainingPhase);
       var phaseBefore = machine.state.phase;
       refreshDisplay();
       if (phaseBefore === 'completed' || phaseBefore === 'ended_early') return; // refreshDisplay already tore this screen down via onWorkoutEnded
@@ -5197,6 +5239,55 @@
     });
   }
 
+  function buildCoachPreviewCues(dayData, normalized, workoutType, terrainHint, trainingPhase, workoutId, label) {
+    if (!dayData || !normalized || !CoachingContextDomain.buildCoachingContext || !CoachingCuesDomain.selectCoachingCue) return [];
+    var now = Date.now();
+    var segment = normalized.segments && normalized.segments.length ? normalized.segments[0] : { kind: 'continuous' };
+    var history = [{ cueId: 'safety_general', category: 'safety', topic: null, deliveredAt: now - 60000, workoutId: workoutId }];
+    var focusTopic = CoachingCuesDomain.buildCoachingFocus
+      ? CoachingCuesDomain.buildCoachingFocus(state.coachingHistory, workoutId,
+        CoachingCuesDomain.availableTeachingTopics ? CoachingCuesDomain.availableTeachingTopics(workoutType, terrainHint) : null)
+      : null;
+    function select(triggerEvent, elapsedSec, remainingSec, extra) {
+      var ctx = CoachingContextDomain.buildCoachingContext(Object.assign({
+        currentTime: now + history.length * 240000,
+        workoutType: workoutType,
+        trainingPhase: trainingPhase,
+        phase: 'continuous',
+        segment: segment,
+        segmentIndex: 0,
+        segmentCount: normalized.segments ? normalized.segments.length : 1,
+        segmentElapsedSec: elapsedSec,
+        segmentRemainingSec: remainingSec,
+        workoutElapsedSec: elapsedSec,
+        workoutRemainingSec: normalized.totalPrescribedSec != null ? Math.max(0, normalized.totalPrescribedSec - elapsedSec) : null,
+        prescription: currentCoachingPrescription(dayData, workoutType, label || dayData.label),
+        runnerExperience: state.planMeta.level,
+        units: state.units,
+        sensorSnapshot: {},
+        cueHistory: history,
+        workoutId: workoutId,
+        coachingPreferences: Object.assign({}, state.coachingPreferences, { frequency: 'coach' }),
+        focusTopic: focusTopic,
+        terrainHint: terrainHint,
+        triggerEvent: triggerEvent
+      }, extra || {}));
+      var selected = CoachingCuesDomain.selectCoachingCue(ctx);
+      if (!selected) return null;
+      history.push({ cueId: selected.cueId, category: selected.category, topic: selected.topic, deliveredAt: ctx.currentTime, workoutId: workoutId });
+      return selected.text;
+    }
+    var totalSec = normalized.totalPrescribedSec || 1800;
+    var midSec = Math.min(180, Math.max(90, Math.floor(totalSec / 3)));
+    return [
+      select('workout_start', 0, totalSec),
+      select(null, midSec, Math.max(60, totalSec - midSec)),
+      select('complete', totalSec, 0, {
+        completedIntervalCount: normalized.segments ? normalized.segments.filter(function (s) { return s.kind === 'work' || s.kind === 'manual_rep'; }).length : null
+      })
+    ].filter(Boolean);
+  }
+
   // Writes elapsed active time into state.logs[key] via the existing
   // setLog path -- reuses the exact same schema/tombstone/save behavior
   // manual logging already has, nothing new invented. `time` is formatted
@@ -5289,6 +5380,7 @@
     var planLengthWeeks = state.planMeta.planLengthWeeks;
     var result = generateAll(state.profile, state.raceGoal, state.planMeta, state.logs, today);
     var key = weekNum + '-' + dayIdx;
+    var trainingPhase = result.weeks[weekNum - 1] ? result.weeks[weekNum - 1].phase : null;
     // effectiveWorkoutForDay resolves a coach-negotiated typed override (real
     // type/miles/duration, not just a label) ahead of the base generated day
     // -- shadowing `dayData` with it here means every existing `dayData.type`/
@@ -5433,6 +5525,8 @@
     // pick it (buildCoachingFocus over state.coachingHistory), never a
     // separate/different guess.
     var coachingFocusHtml = '';
+    var coachPreviewCues = [];
+    var coachPreviewHtml = '';
     if (runnerPreview && CoachingCuesDomain.buildCoachingFocus) {
       var previewWorkoutType = CoachingCuesDomain.classifyWorkoutForCoaching ? CoachingCuesDomain.classifyWorkoutForCoaching(dayData, runnerPreview) : null;
       var previewTerrainHint = CoachingCuesDomain.detectTerrainHint ? CoachingCuesDomain.detectTerrainHint(label) : null;
@@ -5441,10 +5535,24 @@
       var focusLabel = focusTopic && CoachingCuesDomain.TOPIC_LABEL ? CoachingCuesDomain.TOPIC_LABEL[focusTopic] : null;
       if (focusLabel) coachingFocusHtml = '<p class="wd-coaching-focus">Today’s focus: ' + escapeHtml(focusLabel) + '.</p>';
     }
+    if (runnerPreview) {
+      var cpWorkoutType = CoachingCuesDomain.classifyWorkoutForCoaching ? CoachingCuesDomain.classifyWorkoutForCoaching(dayData, runnerPreview) : null;
+      var cpTerrainHint = CoachingCuesDomain.detectTerrainHint ? CoachingCuesDomain.detectTerrainHint(label) : null;
+      coachPreviewCues = buildCoachPreviewCues(dayData, runnerPreview, cpWorkoutType, cpTerrainHint, trainingPhase, key + ':preview', label);
+      if (coachPreviewCues.length) {
+        coachPreviewHtml =
+          '<div class="wd-coach-preview">' +
+            '<div class="ob-sub">Coach preview</div>' +
+            '<ul class="recap-list">' + coachPreviewCues.map(function (cue) { return '<li>' + escapeHtml(cue) + '</li>'; }).join('') + '</ul>' +
+            '<button type="button" class="ob-btn ob-btn-secondary" id="coachPreviewBtn">Play coach preview</button>' +
+          '</div>';
+      }
+    }
     var startWorkoutHtml = runnerPreview ? (
       '<div class="wd-runner-start">' +
         '<p class="wd-runner-structure">' + escapeHtml(buildWorkoutStructureSummary(runnerPreview)) + '</p>' +
         coachingFocusHtml +
+        coachPreviewHtml +
         '<button type="button" class="ob-btn wd-start-btn" id="startWorkoutBtn">Start Workout</button>' +
       '</div>'
     ) : '';
@@ -5456,6 +5564,22 @@
     // the common single-activity case (unchanged) and only becomes an array
     // once a second segment is added -- see normalizeCrossSegments/
     // crossSegmentsToText/applyCrossOverride above.
+    var fuelingItems = fuelingHydrationGuidance ? fuelingHydrationGuidance(dayData, state.profile, state.raceGoal) : [];
+    var fuelingHtml = fuelingItems.length ? (
+      '<div class="wd-practical-block">' +
+        '<div class="ob-sub">Fuel and hydration</div>' +
+        '<ul class="recap-list">' + fuelingItems.map(function (item) { return '<li>' + escapeHtml(item) + '</li>'; }).join('') + '</ul>' +
+      '</div>'
+    ) : '';
+
+    var raceChecklistItems = (trainingPhase === 'race' && raceWeekChecklist) ? raceWeekChecklist(state.profile, state.raceGoal) : [];
+    var raceChecklistHtml = raceChecklistItems.length ? (
+      '<div class="wd-practical-block">' +
+        '<div class="ob-sub">Race-week checklist</div>' +
+        '<ul class="recap-list">' + raceChecklistItems.map(function (item) { return '<li>' + escapeHtml(item) + '</li>'; }).join('') + '</ul>' +
+      '</div>'
+    ) : '';
+
     var crossSegmentsHtml = hasCross(label) ? '<div class="ob-sub">Your session</div><div id="crossSegmentList"></div><button type="button" class="ob-btn ob-btn-secondary" id="addCrossSegmentBtn">+ Add another activity</button>' : '';
 
     var rpeChips = '';
@@ -5539,6 +5663,8 @@
         '<div class="wd-date mono">' + DOW_FULL[d.getDay()] + ' &middot; ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '</div>' +
         '<div class="ob-title wd-title' + (race ? ' is-race' : '') + '">' + escapeHtml(label) + '</div>' +
         detailHtml +
+        fuelingHtml +
+        raceChecklistHtml +
         startWorkoutHtml +
         crossSegmentsHtml +
         plannedVsActualHtml +
@@ -5556,6 +5682,13 @@
       document.getElementById('startWorkoutBtn').addEventListener('click', function () {
         renderActiveWorkout(weekNum, dayIdx);
       });
+      var coachPreviewBtn = document.getElementById('coachPreviewBtn');
+      if (coachPreviewBtn) {
+        coachPreviewBtn.addEventListener('click', function () {
+          var svc = getCueService();
+          if (svc && coachPreviewCues.length) svc.playCue(coachPreviewCues.join(' '), null);
+        });
+      }
     }
 
     if (hasCross(label)) {

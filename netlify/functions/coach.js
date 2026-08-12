@@ -16,6 +16,7 @@
 // symptom mention with no requested change are NOT actions.
 
 var path = require('path');
+var CoachIdentity = require('./coach-identity.js');
 // Deterministic recovery/schedule-trade rules -- the model proposes a
 // reschedule_days action, this module decides whether it's actually
 // allowed (race-day protection, recovery sufficiency, key-workout
@@ -98,9 +99,9 @@ async function repairRepeatedMessage(originalMessage, recentAssistantMessages, a
   }
 }
 
-var SYSTEM_PROMPT = [
-  'You are a practical, direct, honest, evidence-informed running coach chatting with a runner inside their training app. You coach 5K through 100-mile, base building, return-to-running, and post-race recovery.',
-  'Coaching style: direct, honest, supportive, practical, specific, evidence-informed. No hype, no miracle claims, no vague "just listen to your body" without concrete instructions, no copying elite training for recreational runners, no unnecessary supplements, no guilt-tripping, no fake certainty.',
+var SYSTEM_PROMPT = CoachIdentity.buildPrompt([
+  'You are chatting with a runner inside their training app. You coach 5K through 100-mile, base building, return-to-running, and post-race recovery.',
+  'Coaching style for chat: no hype, no miracle claims, no vague "just listen to your body" without concrete instructions, no copying elite training for recreational runners, no unnecessary supplements, no fake certainty.',
   'Priority order, never violate it: 1) safety 2) consistency 3) recovery 4) race-specific progression 5) performance 6) motivation. One workout is never more important than the training block. Never cram missed workouts. Never stack hard/long days back to back for beginners or injury-prone runners. Never add intensity when the runner reports pain, illness, poor sleep, or high fatigue. Never let the runner race every workout. If safety is unclear, choose the conservative option.',
 
   'NEVER diagnose a medical condition, never prescribe medication, never override medical advice, never encourage crash dieting/dehydration/unsafe fasting.',
@@ -149,7 +150,7 @@ var SYSTEM_PROMPT = [
   'Populate "avoidToday" with 0-3 short concrete things to avoid today if relevant (e.g. "hills", "speedwork", "heavy lower-body lifting") -- empty array if nothing specific applies.',
 
   'Respond ONLY with minified JSON, no other text, matching exactly: {"message": "<reply>", "riskLevel": "<green|yellow|red>", "decision": "<keep_plan|modify_workout|replace_with_cross_training|rest|seek_medical_evaluation>", "avoidToday": ["..."], "redFlags": ["..."], "action": null, "pendingIntent": null} or with "action": {"type": "<mark_rest|substitute_workout|log_unplanned_activity|reduce_intensity|substitute_side_quest|reschedule_days|update_sessions>", "key": "<key, omit for reschedule_days>", "newType": "<only for substitute_workout>", "factor": "<only for reduce_intensity, number 0.5-0.9>", "sideQuestId": "<only for substitute_side_quest, an id from the provided catalog>", "changes": "<only for reschedule_days, array of {key, workout:{type,label,durationMinutes,plannedDistance,activityType,terrainDifficulty}}>", "scope": "<only for reschedule_days, once|recurring, defaults to once>", "operation": "<only for update_sessions, split|combine>", "addSession": "<only for update_sessions split, {activityType,durationMinutes,terrainDifficulty}>", "note": "<short reason>"} and/or "pendingIntent": {"type": "move_recovery", "sourceKey": "<key>", "requestedWorkout": {"type": "cross", "label": "...", "durationMinutes": 0, "plannedDistance": null}}.'
-].join(' ');
+]);
 
 exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') {

@@ -58,6 +58,25 @@ test('runDaysForWeek holds at target immediately when startRunDays already equal
   }
 });
 
+test('fueling guidance adds race-fuel practice on long workouts', function () {
+  var items = rules.fuelingHydrationGuidance({ type: 'long', miles: 10 }, { weatherConcern: 'heat', fuelingStyle: 'sensitive' }, { event: 'half' });
+  assert.ok(items.some(function (item) { return /Practice race fueling/.test(item); }));
+  assert.ok(items.some(function (item) { return /electrolytes/.test(item); }));
+  assert.ok(items.some(function (item) { return /stomach-safe/.test(item); }));
+});
+
+test('fueling guidance stays quiet on rest days', function () {
+  assert.deepEqual(rules.fuelingHydrationGuidance({ type: 'rest' }, {}, {}), []);
+});
+
+test('race week checklist includes logistics, fuel, pacing, and recovery restraint', function () {
+  var items = rules.raceWeekChecklist({}, { raceName: 'Santa Fe Half' });
+  assert.ok(items.some(function (item) { return /Santa Fe Half/.test(item); }));
+  assert.ok(items.some(function (item) { return /Nothing new/.test(item); }));
+  assert.ok(items.some(function (item) { return /fallback/.test(item); }));
+  assert.ok(items.some(function (item) { return /protect sleep/.test(item); }));
+});
+
 test('runDaysForWeek ramps by exactly one day every rampIntervalWeeks, never exceeding target', function () {
   var start = 2, target = 5, interval = 2;
   assert.equal(rules.runDaysForWeek(1, start, target, interval), 2);

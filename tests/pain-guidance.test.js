@@ -78,3 +78,26 @@ test('missing/undefined details object does not throw', function () {
   assert.doesNotThrow(function () { rules.painGuidance(undefined); });
   assert.equal(rules.painGuidance(undefined).level, 'urgent'); // !canWalk defaults true when canWalk is undefined -- conservative by default
 });
+
+test('safety escalation treats systemic red flags as stop-and-seek-care', function () {
+  var result = rules.safetyEscalation({ chestPain: true, severeDizziness: true });
+  assert.equal(result.level, 'red');
+  assert.equal(result.stopTraining, true);
+  assert.equal(result.action, 'seek_medical_evaluation');
+  assert.deepEqual(result.flags, ['chest pain or pressure', 'severe dizziness']);
+});
+
+test('safety escalation pauses running for injury caution signs', function () {
+  var result = rules.safetyEscalation({ sharpFocalBonePain: true });
+  assert.equal(result.level, 'yellow');
+  assert.equal(result.stopTraining, true);
+  assert.equal(result.action, 'pause_or_modify_until_cleared');
+  assert.match(result.text, /Do not try to push through it/);
+});
+
+test('safety escalation stays green when no red or caution flags are reported', function () {
+  var result = rules.safetyEscalation({});
+  assert.equal(result.level, 'green');
+  assert.equal(result.stopTraining, false);
+  assert.deepEqual(result.flags, []);
+});

@@ -5,14 +5,15 @@
 
 var OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 var MODEL = 'gpt-4o-mini';
+var CoachIdentity = require('./coach-identity.js');
 
-var SYSTEM_PROMPT = [
+var SYSTEM_PROMPT = CoachIdentity.buildPrompt([
   'You are a supportive running coach. The runner just logged a genuine personal best, described in the JSON fact below.',
   'Write ONE short, warm, specific celebration -- 1-2 sentences, plain language, no exclamation-point overload.',
   'Ground every number ONLY in the given fact -- never invent or round differently than what is given.',
   'Never use guilt, pressure, or imply they need to keep beating this every time -- celebrate the moment itself.',
   'Respond ONLY with minified JSON: {"message": "<celebration>"}.'
-].join(' ');
+]);
 
 exports.handler = async function (event) {
   if (event.httpMethod !== 'POST') {

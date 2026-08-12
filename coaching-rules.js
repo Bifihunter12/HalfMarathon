@@ -335,6 +335,112 @@
     return { level: 'mild', text: 'Mild and not worsening — okay to continue cautiously, but back off if anything changes.' };
   }
 
+  function safetyEscalation(details) {
+    var d = details || {};
+    var redFlags = [
+      ['chestPain', 'chest pain or pressure'],
+      ['fainting', 'fainting or nearly fainting'],
+      ['severeBreathing', 'severe shortness of breath'],
+      ['severeDizziness', 'severe dizziness'],
+      ['neurologicalSymptoms', 'new neurological symptoms'],
+      ['confusion', 'confusion or disorientation'],
+      ['heatIllness', 'possible heat illness'],
+      ['bloodInStoolOrUrine', 'blood in stool or urine'],
+      ['unexplainedRapidHeartRate', 'unexplained racing heart rate']
+    ].filter(function (pair) { return !!d[pair[0]]; }).map(function (pair) { return pair[1]; });
+    if (redFlags.length) {
+      return {
+        level: 'red',
+        stopTraining: true,
+        action: 'seek_medical_evaluation',
+        title: 'Stop and get medical help',
+        text: 'Stop training and seek medical evaluation now. If symptoms are severe, sudden, or getting worse, use urgent or emergency care.',
+        flags: redFlags
+      };
+    }
+    var yellowFlags = [
+      ['persistentExtremeFatigue', 'persistent extreme fatigue'],
+      ['unexplainedWeightLoss', 'unexplained weight loss'],
+      ['possibleEatingDisorder', 'possible under-fueling or disordered eating'],
+      ['severeOrWorseningPain', 'severe or worsening pain'],
+      ['sharpFocalBonePain', 'sharp focal bone pain'],
+      ['painChangesForm', 'pain that changes your form'],
+      ['swellingAfterImpact', 'swelling after an impact'],
+      ['unableToBearWeight', 'unable to bear weight normally'],
+      ['majorMedicalCondition', 'medical condition that affects training safety'],
+      ['pregnancyConcern', 'pregnancy-related training concern']
+    ].filter(function (pair) { return !!d[pair[0]]; }).map(function (pair) { return pair[1]; });
+    if (yellowFlags.length) {
+      return {
+        level: 'yellow',
+        stopTraining: true,
+        action: 'pause_or_modify_until_cleared',
+        title: 'Pause the plan and get checked',
+        text: "Pause running or switch to easy cross-training until this is clearly improving or a qualified professional clears you. Do not try to push through it.",
+        flags: yellowFlags
+      };
+    }
+    return {
+      level: 'green',
+      stopTraining: false,
+      action: 'continue_with_attention',
+      title: 'No red flags reported',
+      text: 'Keep training conservatively, watch for changes, and choose the easier option when symptoms are unclear.',
+      flags: []
+    };
+  }
+
+  function estimatedWorkoutMinutes(day) {
+    if (!day) return 0;
+    if (day.runWalk && day.runWalk.totalMin) return day.runWalk.totalMin;
+    if (day.durationMinutes) return day.durationMinutes;
+    if (day.minutes) return day.minutes;
+    if (day.miles) return day.miles * 11;
+    return 0;
+  }
+
+  function fuelingHydrationGuidance(day, profile, raceGoal) {
+    var d = day || {};
+    var p = profile || {};
+    var minutes = estimatedWorkoutMinutes(d);
+    var out = [];
+    if (d.type === 'rest') return out;
+    if (d.type === 'race') {
+      out.push('Use the breakfast, fluids, and fuel you practiced in training. Nothing new on race day.');
+      out.push('Start controlled, sip early if conditions are warm, and follow your planned fueling rhythm.');
+      return out;
+    }
+    if (minutes >= 75 || d.type === 'long') {
+      out.push('Practice race fueling: take easy carbs early and repeat on a schedule before you feel depleted.');
+    } else if (minutes >= 45 || d.type === 'quality') {
+      out.push('Start hydrated and consider a small carb snack if you have not eaten recently.');
+    }
+    if (minutes >= 60 || d.type === 'long' || d.type === 'quality') {
+      out.push('Carry water or plan access to fluids, especially if the route is exposed.');
+    }
+    if (p.weatherConcern === 'heat' || p.weatherConcern === 'altitude') {
+      out.push('Because your conditions can run dehydrating, add electrolytes or extra fluids when the day calls for it.');
+    }
+    if (p.fuelingStyle === 'sensitive') {
+      out.push('Use familiar, stomach-safe options and test them on easier days before trusting them on key workouts.');
+    } else if (p.fuelingStyle === 'plant_based') {
+      out.push('Plant-based is fine here: choose simple, low-fiber carbs around the run so your stomach stays quiet.');
+    }
+    return out;
+  }
+
+  function raceWeekChecklist(profile, raceGoal) {
+    var name = raceGoal && raceGoal.raceName ? raceGoal.raceName : 'race day';
+    return [
+      'Confirm start time, bib pickup, parking or transit, and the exact plan for getting to ' + name + '.',
+      'Pick shoes, socks, outfit, anti-chafe, watch, and any layers you have already tested.',
+      'Lock in breakfast, fluids, gels or chews, and timing. Nothing new this week.',
+      'Check weather and make one pacing adjustment for heat, wind, hills, or altitude.',
+      'Set an A goal, a controlled-start plan, and a fallback finish-strong plan.',
+      'Keep easy days easy, protect sleep, and resist adding fitness now.'
+    ];
+  }
+
   function classifyUser(profile) {
     var freq = profile.runDaysPerWeek, mileage = profile.weeklyMileage;
     var computed;
@@ -2614,6 +2720,10 @@
     slotForFixedDay: slotForFixedDay,
     findCurrentWeekIdx: findCurrentWeekIdx,
     painGuidance: painGuidance,
+    safetyEscalation: safetyEscalation,
+    estimatedWorkoutMinutes: estimatedWorkoutMinutes,
+    fuelingHydrationGuidance: fuelingHydrationGuidance,
+    raceWeekChecklist: raceWeekChecklist,
     classifyUser: classifyUser,
     evaluateSafety: evaluateSafety,
     evaluateReadiness: evaluateReadiness,
